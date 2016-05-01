@@ -220,6 +220,230 @@ EOF
 }
 
 
+# Makes a HTTP HEAD request to the GitHub service to obtain pagination
+# information for pulling all /user/repos data in the minimal number of
+# service calls (that is, within the service restriction of 100 repos per
+# response "page").
+#
+# Upon success, emits on stdout the number of "pages" that need to be
+# requested.
+#
+# Recall that the first page is one, not zero.
+#
+f_get_gh_user_repos_pagination_count_or_die () {
+
+    # Pagination: 
+    #
+    # HTTP/1.1 200 OK
+    # ...
+    # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+
+    t_head_response=$( curl "${MY_CURL_OPTS[@]}" \
+                            --head               \
+                            "${MY_GITHUB_REPOS_URL}" \
+                       | tr -d '\r' )
+
+    if test $? -ne 0; then
+        # Hopefully curl printed something meaningful to stderr here...
+        printf "${PROG} (error): was unable to obtain pagination info for repos; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # From RFC 7230:
+    #
+    #     3.1.2.  Status Line
+    #
+    #        The first line of a response message is the status-line, consisting
+    #        of the protocol version, a space (SP), the status code, another
+    #        space, a possibly empty textual phrase describing the status code,
+    #        and ending with CRLF.
+    #
+    #          status-line = HTTP-version SP status-code SP reason-phrase CRLF
+    #
+    #        The status-code element is a 3-digit integer code describing the
+    #        result of the server's attempt to understand and satisfy the client's
+    #        corresponding request.  The rest of the response message is to be
+    #        interpreted in light of the semantics defined for that status code.
+    #        See Section 6 of [RFC7231] for information about the semantics of
+    #        status codes, including the classes of status code (indicated by the
+    #        first digit), the status codes defined by this specification,
+    #        considerations for the definition of new status codes, and the IANA
+    #        registry.
+    #
+    #          status-code    = 3DIGIT
+    #
+    #        The reason-phrase element exists for the sole purpose of providing a
+    #        textual description associated with the numeric status code, mostly
+    #        out of deference to earlier Internet application protocols that were
+    #        more frequently used with interactive text clients.  A client SHOULD
+    #        ignore the reason-phrase content.
+    #
+    #          reason-phrase  = *( HTAB / SP / VCHAR / obs-text )
+    #
+    # Note that we're following Postel's Prescription to an extent in being
+    # lenient about whether or not there is more than a single whitespace
+    # token between fields.
+    #
+    t_http_head_stat_and_label=$(echo "${t_head_response}" | head -n 1 | sed -n -e '/^HTTP[/]/ { s#^HTTP/[^[:space:]]\{1,\}[[:space:]]\{1,\}\([[:digit:]]\{3\}[[:space:]]\{1,\}.*\)#\1#p;q }')
+    if test -z "${t_http_head_stat_and_label}"; then
+        printf "${PROG} (error): was unable to extract HTTP status code from responses; bailing out\n    Full HTTP response headers:\n%s\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): HTTP status and label for pagination info: %s\n" "${t_http_head_stat_and_label}" 1>&2
+    fi
+
+    t_http_head_stat=$(  echo "${t_http_head_stat_and_label}" | sed -e 's#^\([[:digit:]]\{3\}\)[[:space:]]\{1,\}.*#\1#')
+    t_http_head_label=$( echo "${t_http_head_stat_and_label}" | sed -e 's#^[[:digit:]]\{3\}[[:space:]]\{1,\}\([[:space:][:alnum:][:punct:]]*\)$#\1#')
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): HTTP status for pagination info: %s\n" "${t_http_head_stat}"  1>&2
+        printf "${PROG} (debug): HTTP label for pagination info: %s\n"  "${t_http_head_label}" 1>&2
+    fi
+
+    if test -z "${t_http_head_stat}"; then
+        printf "${PROG} (error): was unable to determine HTTP status code of pagination info request for repo; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # Slice off leading zeros in bogon HTTP response code. Belt AND suspenders...
+    #
+    t_http_head_stat=$((10#$t_http_head_stat))
+
+    if test $t_http_head_stat -lt 100; then
+        # We'll include the full response line to help in troubleshooting. In
+        # the worst case scenario we will learn that we mis-parsed it somehow,
+        # which is a really a win in the long term.
+        printf "${PROG} (error): received bogon HTTP status line with response code less than 100 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
+        exit 1
+    fi
+
+    # Oh hell, if we're gonna check the lower bound, then we're boning it if
+    # we don't also check the upper bound...
+    if test $t_http_head_stat -gt 599; then
+        printf "${PROG} (error): received bogon HTTP status line with response code greater than 599 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
+        exit 1
+    fi
+
+    # So we know that the HTTP status code is somewhere between 100 and 599...
+
+    if test $t_http_head_stat -ge 100 \
+    && test $t_http_head_stat -lt 200; then
+        printf "${PROG} (error): program does not directly grok HTTP 1xx \"Informational\" status codes; bailing out\n    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 300 \
+    && test $t_http_head_stat -lt 400; then
+        printf "${PROG} (error): program does not directly grok HTTP 3xx \"Redirection\" status codes; bailing out\n"\
+"    If you encounter this error, please submit a bug report; real-world need is likely to get it fixed.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 400 \
+    && test $t_http_head_stat -lt 500; then
+        printf "${PROG} (error): program received a HTTP 4xx \"Client Error\" status codes; bailing out\n"\
+"    If you encounter this error, please submit a bug report; it suggests there is a problem with the\n"\
+"    way in which the program is formulating requests to the upstream GitHub service.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 500 \
+    && test $t_http_head_stat -lt 600; then
+        printf "${PROG} (error): program received a HTTP 5xx \"Server Error\" status codes; bailing out\n"\
+"    If you encounter this error, it suggests there is a problem with the upstream GitHub service;\n"\
+"    please wait a while and try your request later.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # Internal sanity check
+    if test $t_http_head_stat -ge 200 \
+    && test $t_http_head_stat -lt 300; then :; else
+        printf "${PROG} (bug): internal check failed. Expected that we received a 2xx \"Successful\" HTTP status code, but really have: \"%s\"; bailing out.\n"\
+"    If you encounter this error, there is a serious bug with this program; please submit a bug report.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # So we know that the HTTP status code is somewhere between 200 and 299;
+    # we're good (probably).
+
+    # FIXME: This will break if the 'Link:' header content spans multiple
+    #        lines (which is legit; see RFC 2616 section 4.2 "Message
+    #        Headers").
+
+    # Let's find the 'Link: ' header...
+    t_http_head_link=$(echo "${t_head_response}" | grep '^Link:[[:space:]]')
+    if test $? -ne 0; then
+
+        # It's not necessarily an error if the 'Link:' header is not
+        # present. That will happen for resources that do not require any
+        # pagination. So we'll examine the individual exit status codes from
+        # our pipeline; if grep exited with status 1, it means the header was
+        # not found. If it exited with 2 it indicates an error (such as a
+        # malformed regex).
+        #
+        if test "${PIPESTATUS[0]}" -eq 0 \
+        && test "${PIPESTATUS[1]}" -eq 1; then
+            # We'll emit 1 as the count of pages needed
+            printf "1\n"
+            return  # success
+        fi
+
+        # Hopefully grep emitted something helpful on stderr already if we're
+        # falling through here...
+
+        printf "${PROG} (error): was error while attempting to locate HTTP \"Link:\" header in HEAD response; no pagination data available; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # After the 'Link: ' header label, we expect the content to contain a
+    # comma-space-separated list of values in the form:
+    #
+    #     <url>; rel="foo", <url>; rel="bar"
+    #
+    # Example:
+    #
+    #     Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+    #
+    # We'll look for the rel="last" entry, which should be present even when
+    # it's URL value would be the same as the rel="next" entry. The first
+    # 'sed' invocation lifts out the URL from the rel="last" entry, and the
+    # second then extracts the number of the last page from the 'page=N'
+    # parameter.
+    #
+    t_last_page_number=$( echo "${t_http_head_link}" \
+                          | sed -n -e 's#.*\([<][^>]\{1,\}[>]\)[[:space:]]*[;][^,]*rel="last"#\1#p' \
+                          | sed -n -e 's#.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]]#\1#p' )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was error while attempting to parse last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+    if test -z "${t_last_page_number}"; then
+        printf "${PROG} (error): extracted empty value for last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    printf "%s\n" "${t_last_page_number}"
+    return  # success
+}
+
 while test $# -gt 0 ; do
 
     option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
@@ -371,6 +595,10 @@ fi
 MY_GITHUB_REPOS_URL="${gl_const_github_api_base_url}user/repos?per_page=100"
 
 
+# Common global options for use in every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify this array.
+#
 declare -a MY_CURL_OPTS=()
 
 # This disables output of curl's progress meter /and/ output of error messages...
@@ -430,151 +658,9 @@ MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 # ...
 # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
 
-MY_TOTAL_REPO_PAGES=0
+MY_TOTAL_REPO_PAGES=$(f_get_gh_user_repos_pagination_count_or_die)
 t_keep_going=true
 while $t_keep_going; do
-    t_head_response=$( curl "${MY_CURL_OPTS[@]}" \
-                            --head               \
-                            "${MY_GITHUB_REPOS_URL}" \
-                       | tr -d '\r' )
-
-    if test $? -ne 0; then
-        # Hopefully curl printed something meaningful to stderr here...
-        printf "${PROG} (error): was unable to obtain pagination info for repos; bailing out\n" 1>&2
-        exit 1
-    fi
-
-    # From RFC 7230:
-    #
-    #     3.1.2.  Status Line
-    #
-    #        The first line of a response message is the status-line, consisting
-    #        of the protocol version, a space (SP), the status code, another
-    #        space, a possibly empty textual phrase describing the status code,
-    #        and ending with CRLF.
-    #
-    #          status-line = HTTP-version SP status-code SP reason-phrase CRLF
-    #
-    #        The status-code element is a 3-digit integer code describing the
-    #        result of the server's attempt to understand and satisfy the client's
-    #        corresponding request.  The rest of the response message is to be
-    #        interpreted in light of the semantics defined for that status code.
-    #        See Section 6 of [RFC7231] for information about the semantics of
-    #        status codes, including the classes of status code (indicated by the
-    #        first digit), the status codes defined by this specification,
-    #        considerations for the definition of new status codes, and the IANA
-    #        registry.
-    #
-    #          status-code    = 3DIGIT
-    #
-    #        The reason-phrase element exists for the sole purpose of providing a
-    #        textual description associated with the numeric status code, mostly
-    #        out of deference to earlier Internet application protocols that were
-    #        more frequently used with interactive text clients.  A client SHOULD
-    #        ignore the reason-phrase content.
-    #
-    #          reason-phrase  = *( HTAB / SP / VCHAR / obs-text )
-    #
-    # Note that we're following Postel's Prescription to an extent in being
-    # lenient about whether or not there is more than a single whitespace
-    # token between fields.
-    #
-    t_http_head_stat_and_label=$(echo "${t_head_response}" | head -n 1 | sed -n -e '/^HTTP[/]/ { s#^HTTP/[^[:space:]]\{1,\}[[:space:]]\{1,\}\([[:digit:]]\{3\}[[:space:]]\{1,\}.*\)#\1#p;q }')
-    if test -z "${t_http_head_stat_and_label}"; then
-        printf "${PROG} (error): was unable to extract HTTP status code from responses; bailing out\n    Full HTTP response headers:\n%s\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-    if $DEBUGGING; then
-        printf "${PROG} (debug): HTTP status and label for pagination info: %s\n" "${t_http_head_stat_and_label}" 1>&2
-    fi
-
-    t_http_head_stat=$(  echo "${t_http_head_stat_and_label}" | sed -e 's#^\([[:digit:]]\{3\}\)[[:space:]]\{1,\}.*#\1#')
-    t_http_head_label=$( echo "${t_http_head_stat_and_label}" | sed -e 's#^[[:digit:]]\{3\}[[:space:]]\{1,\}\([[:space:][:alnum:][:punct:]]*\)$#\1#')
-
-    if $DEBUGGING; then
-        printf "${PROG} (debug): HTTP status for pagination info: %s\n" "${t_http_head_stat}"  1>&2
-        printf "${PROG} (debug): HTTP label for pagination info: %s\n"  "${t_http_head_label}" 1>&2
-    fi
-
-    if test -z "${t_http_head_stat}"; then
-        printf "${PROG} (error): was unable to determine HTTP status code of pagination info request for repo; bailing out\n" 1>&2
-        exit 1
-    fi
-
-    # Slice off leading zeros in bogon HTTP response code. Belt AND suspenders...
-    #
-    t_http_head_stat=$((10#$t_http_head_stat))
-
-    if test $t_http_head_stat -lt 100; then
-        # We'll include the full response line to help in troubleshooting. In
-        # the worst case scenario we will learn that we mis-parsed it somehow,
-        # which is a really a win in the long term.
-        printf "${PROG} (error): received bogon HTTP status line with response code less than 100 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
-        exit 1
-    fi
-
-    # Oh hell, if we're gonna check the lower bound, then we're boning it if
-    # we don't also check the upper bound...
-    if test $t_http_head_stat -gt 599; then
-        printf "${PROG} (error): received bogon HTTP status line with response code greater than 599 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
-        exit 1
-    fi
-
-    # So we know that the HTTP status code is somewhere between 100 and 599...
-
-    if test $t_http_head_stat -ge 100 \
-    && test $t_http_head_stat -lt 200; then
-        printf "${PROG} (error): program does not directly grok HTTP 1xx \"Informational\" status codes; bailing out\n    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-    if test $t_http_head_stat -ge 300 \
-    && test $t_http_head_stat -lt 400; then
-        printf "${PROG} (error): program does not directly grok HTTP 3xx \"Redirection\" status codes; bailing out\n"\
-"    If you encounter this error, please submit a bug report; real-world need is likely to get it fixed.\n"\
-"    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-    if test $t_http_head_stat -ge 400 \
-    && test $t_http_head_stat -lt 500; then
-        printf "${PROG} (error): program received a HTTP 4xx \"Client Error\" status codes; bailing out\n"\
-"    If you encounter this error, please submit a bug report; it suggests there is a problem with the\n"\
-"    way in which the program is formulating requests to the upstream GitHub service.\n"\
-"    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-    if test $t_http_head_stat -ge 500 \
-    && test $t_http_head_stat -lt 600; then
-        printf "${PROG} (error): program received a HTTP 5xx \"Server Error\" status codes; bailing out\n"\
-"    If you encounter this error, it suggests there is a problem with the upstream GitHub service;\n"\
-"    please wait a while and try your request later.\n"\
-"    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-    # Internal sanity check
-    if test $t_http_head_stat -ge 200 \
-    && test $t_http_head_stat -lt 300; then :; else
-        printf "${PROG} (bug): internal check failed. Expected that we received a 2xx \"Successful\" HTTP status code, but really have: \"%s\"; bailing out.\n"\
-"    If you encounter this error, there is a serious bug with this program; please submit a bug report.\n"\
-"    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
-        exit 1
-    fi
-
-
-#FIXME: working here
-#       [ ] Push above mumbo jumbo into a function
-#       [ ] Extract 'Link: ' header pagination info
-
 
     t_keep_going=false
 
