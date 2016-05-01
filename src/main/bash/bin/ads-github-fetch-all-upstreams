@@ -652,6 +652,20 @@ MY_CURL_OPTS+=( '--header' )
 MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 
 
+# We'll build up this multi-line value in memory below. Each line will have
+# the form:
+#
+#     repo_name:repo_full_name:default_branch
+#
+# Example of 4 such lines:
+#
+#     aas:salewski/aas:master
+#     abcl:salewski/abcl:master
+#     abstract-tables:salewski/abstract-tables:master
+#     ac-nrepl:salewski/ac-nrepl:master
+#
+REPO_DATA_LINES=''
+
 # Pagination: 
 
 # HTTP/1.1 200 OK
@@ -659,35 +673,187 @@ MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
 
 MY_TOTAL_REPO_PAGES=$(f_get_gh_user_repos_pagination_count_or_die)
+t_cur_page=0
 t_keep_going=true
 while $t_keep_going; do
 
-    t_keep_going=false
+    let t_cur_page=$t_cur_page+1
+
+    t_gh_url_for_page=${MY_GITHUB_REPOS_URL}'&page='${t_cur_page}
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): requesting /user/repo page %s of %s\n" "${t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
+    fi
+
+    # For now we'll just slurp up all of the repo info into memory; we'll
+    # revisit this if needed, but <famous-last-words>we're not expecting to
+    # have enough repos that it will be a problem</famous-last-words.
+    #
+    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch' < all-repos-per_page-105-001.js | head -n 5
+    #     aas:salewski/aas:master
+    #     abcl:salewski/abcl:master
+    #     abstract-tables:salewski/abstract-tables:master
+    #     ac-nrepl:salewski/ac-nrepl:master
+    #     ack2:salewski/ack2:dev
+    #
+    REPO_DATA_LINES=${REPO_DATA_LINES}$( curl "${MY_CURL_OPTS[@]}" \
+                                              --get                \
+                                              "${t_gh_url_for_page}" \
+                                         | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch' )
+
+    if test $t_cur_page -ge $MY_TOTAL_REPO_PAGES; then
+        t_keep_going=false
+    fi
 
 done
 
-# repo_name:repo_full_name:default_branch
-#
-# Example of 3 such lines:
-#
-#     aas:salewski/aas:master
-#     abcl:salewski/abcl:master
-#     abstract-tables:salewski/abstract-tables:master
-#     ac-nrepl:salewski/ac-nrepl:master
 
-REPO_DATA_LINES=''
+while IFS=':' read -r repo_name repo_full_name default_branch; do
 
-REPO_DATA_LINES=''
+    # If there's a subdirectory beneath the current location with the
+    # repository name, then it is probably the git working directory for the
+    # project. Note that it is possible to have a project cloned into a
+    # directory that does not exactly match the project name, but I don't do
+    # that with my own repos.
+    #
+    if test -d "${repo_name}"; then :; else
 
+#FIXME: add feature to use 'git-hub clone' to clone such repos, if specified by the user
 
-# $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch' < all-repos-per_page-105-001.js | head
-# aas:salewski/aas:master
-# abcl:salewski/abcl:master
-# abstract-tables:salewski/abstract-tables:master
-# ac-nrepl:salewski/ac-nrepl:master
-# ack2:salewski/ack2:dev
-# acpica:salewski/acpica:master
-# acpid2:salewski/acpid2:master
-# activemq:salewski/activemq:master
-# activemq-artemis:salewski/activemq-artemis:master
-# activemq-openwire:salewski/activemq-openwire:master
+        if $DEBUGGING; then
+            printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+            continue
+        fi
+    fi
+
+    if test -d "${repo_name}/.git"; then :; else
+        printf "${PROG} (warning): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+        continue
+    fi
+
+    unset CDPATH
+    (
+        set -o pipefail  # not inherited from parent shell
+
+        cd "${repo_name}" || exit 1  # from subshell
+
+        declare -a t_pipestatus_hold
+
+        git remote | grep -q --max-count=1 '^upstream$'
+
+        t_pipestatus_hold=( ${PIPESTATUS[@]} )
+
+        if test "${#t_pipestatus_hold[@]}" -ne 2; then
+            # This is only possible if we've broken something above, which I
+            # did do during development, so I'm leaving it in.
+            printf "${PROG} (error): was error while attempting to determine if repo \"%s\" has an \"upstream\" remote defined; bailing out\n" "${repo_name}" 1>&2
+            exit 1
+        fi
+
+        if test "${t_pipestatus_hold[0]}" -eq 0 \
+        && test "${t_pipestatus_hold[1]}" -eq 0; then
+
+            if $DEBUGGING; then
+                printf "${PROG} (debug): working dir for repo \"%s\" has an \"upstream\" remote defined\n" "${repo_name}" 1>&2
+            fi
+            # Keep going...
+
+        elif test "${t_pipestatus_hold[0]}" -eq 0 \
+          && test "${t_pipestatus_hold[1]}" -eq 1; then
+
+            # No 'upstream' remote is defined for this repo. Either it is the
+            # user's own project (not a fork of some other project), or the
+            # 'upstream' remote just wasn't set up.
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): did not find an \"upstream\" remote configured for repo \"%s\"\n" "${repo_name}" 1>&2
+            fi
+
+            # We'll ask the GitHub service if this repo has a "parent". If
+            # not, then there's nothing left to do. Note that we have to make
+            # a call to the service inquiring about a specific repo for this
+            # info; it is not available in the output of the full list of
+            # repos which we've alread obtained. This could be a bit expensive
+            # against your rate limit if you have a large number of repos, but
+            # if most of those repos are forks it will only be expensive the
+            # first time the program is run to update those repos.
+
+            # From the GitHub v3 API:
+            #
+            #     Get
+            #
+            #     GET /repos/:owner/:repo
+            #     Response
+            #
+            #     The parent and source objects are present when the
+            #     repository is a fork. parent is the repository this
+            #     repository was forked from, source is the ultimate source
+            #     for the network.
+
+            # Note that the repo_full_name value here has the form
+            # 'username/repo_name', so matches the structure of the URL
+            # needed.
+            #
+            t_gh_url_for_this_repo="${gl_const_github_api_base_url}repos/${repo_full_name}"
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): querying GitHub service to determine if repo \"%s\" has a parent\n" "${repo_name}" 1>&2
+            fi
+
+            t_parent_exists=$( curl "${MY_CURL_OPTS[@]}" \
+                                    --get                \
+                                    "${t_gh_url_for_this_repo}" \
+                                     | jq -r 'if has("parent") then "true" else "false" end')
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to query GitHub service to determine if repo \"%s\" has a parent; bailing out\n" "${repo_name}" 1>&2
+                exit 1  # from subshell
+            fi
+            if test -z "${t_parent_exists}"; then
+                printf "${PROG} (error): was unable to determine whether or not repo \"%s\" has a parent; bailing out\n" "${repo_name}" 1>&2
+                exit 1  # from subshell
+            fi
+
+            if $t_parent_exists; then :; else
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): repo \"%s\" does not have a parent; nothing to do (okay)\n" "${repo_name}" 1>&2
+                    exit 0  # from subshell
+                fi
+            fi
+
+# FIXME: add feature to set up an 'upstream' remote that points to the parent
+#        (probably by using the git-hub tool).
+
+            printf "${PROG} (warning): no remote named \"upstream\" defined for repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+            exit 0  # from subshell
+        else
+
+# FIXME: Introduce a "keep going" feature to avoid bailing out here
+# FIXME: Introduce a "skip repo" feature to allow caller to exclude processing of some repo subidrs
+
+            printf "${PROG} (error): was error while attempting to determine if repo \"%s\" has an \"upstream\" remote defined; bailing out\n" "${repo_name}" 1>&2
+            exit 1
+        fi
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): invoking 'git fetch upstream' for repo \"%s\"\n" "${repo_name}" 1>&2
+        fi
+
+        git fetch upstream
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while attempting to 'git fetch upstream' for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
+            exit 1
+        fi
+
+        if $DEBUGGING; then
+            printf "${PROG} (debug): successfully invoked 'git fetch upstream' for repo \"%s\"\n" "${repo_name}" 1>&2
+        fi
+    )
+
+    if test $? -ne 0; then
+# FIXME: see above note about introducing a "keep going" feature
+
+        # We're expecting that an error message would have already been printed by the subshell
+        exit $?
+    fi
+
+done < <(echo "$REPO_DATA_LINES")
