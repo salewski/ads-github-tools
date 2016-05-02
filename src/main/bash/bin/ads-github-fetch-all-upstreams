@@ -98,6 +98,16 @@ BE_VERBOSE=false # override with one '-v' opt
 DEBUGGING=false  # override with two '-v' opts
 
 
+# FIXME: A future enhancement will provide for a command line option to force
+#        cloning a repository if we do not have a local working directory for
+#        it, but the default behavior will still be to just operate on the
+#        working directories that are present. We're adding this now, though,
+#        because we can avoid a fair amount of unnecessary work if we know
+#        which mode we're operating in.
+#
+DO_CLONE_IF_NOT_PRESENT=false
+
+
 # Folks using GitHub Enterprise might access their API at a different
 # location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
 # URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
@@ -655,14 +665,23 @@ MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 # We'll build up this multi-line value in memory below. Each line will have
 # the form:
 #
-#     repo_name:repo_full_name:default_branch
+#     repo_name:repo_full_name:default_branch:is_fork
 #
 # Example of 4 such lines:
 #
-#     aas:salewski/aas:master
-#     abcl:salewski/abcl:master
-#     abstract-tables:salewski/abstract-tables:master
-#     ac-nrepl:salewski/ac-nrepl:master
+#     aas:salewski/aas:master:true
+#     abcl:salewski/abcl:master:true
+#     abstract-tables:salewski/abstract-tables:master:true
+#     ac-nrepl:salewski/ac-nrepl:master:true
+#
+# The 'is_fork' field will always be either 'true' or 'false', and indicates
+# whether or not the repo was forked from another GitHub repository. Where the
+# value is 'true', callers know they can make a request to the GitHub API's
+# /repos/:owner:repo endpoint to request more comprehensive information about
+# the repo that would include a 'parent' object. We return the value here
+# because it is also useful to know that such a call need not be made if
+# you're only interested in the parent data, or just want to know whether or
+# not a parent exists.
 #
 REPO_DATA_LINES=''
 
@@ -689,17 +708,17 @@ while $t_keep_going; do
     # revisit this if needed, but <famous-last-words>we're not expecting to
     # have enough repos that it will be a problem</famous-last-words.
     #
-    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch' < all-repos-per_page-105-001.js | head -n 5
-    #     aas:salewski/aas:master
-    #     abcl:salewski/abcl:master
-    #     abstract-tables:salewski/abstract-tables:master
-    #     ac-nrepl:salewski/ac-nrepl:master
-    #     ack2:salewski/ack2:dev
+    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' < all-repos-per_page-105-001.js | head -n 5
+    #     aas:salewski/aas:master:true
+    #     abcl:salewski/abcl:master:true
+    #     abstract-tables:salewski/abstract-tables:master:true
+    #     ac-nrepl:salewski/ac-nrepl:master:true
+    #     ack2:salewski/ack2:dev:true
     #
     REPO_DATA_LINES=${REPO_DATA_LINES}$( curl "${MY_CURL_OPTS[@]}" \
                                               --get                \
                                               "${t_gh_url_for_page}" \
-                                         | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch' )
+                                         | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
 
     if test $t_cur_page -ge $MY_TOTAL_REPO_PAGES; then
         t_keep_going=false
@@ -708,7 +727,7 @@ while $t_keep_going; do
 done
 
 
-while IFS=':' read -r repo_name repo_full_name default_branch; do
+while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
     # If there's a subdirectory beneath the current location with the
     # repository name, then it is probably the git working directory for the
@@ -718,7 +737,12 @@ while IFS=':' read -r repo_name repo_full_name default_branch; do
     #
     if test -d "${repo_name}"; then :; else
 
+        if $DO_CLONE_IF_NOT_PRESENT; then
+            printf "${PROG} (warning): DO_CLONE_IF_NOT_PRESENT feature not yet implemented; skipping clone of repo \"$s\"\n" "${repo_name}" 1>&2
+            continue
 #FIXME: add feature to use 'git-hub clone' to clone such repos, if specified by the user
+
+        fi
 
         if $DEBUGGING; then
             printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
@@ -728,6 +752,27 @@ while IFS=':' read -r repo_name repo_full_name default_branch; do
 
     if test -d "${repo_name}/.git"; then :; else
         printf "${PROG} (warning): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+        continue
+    fi
+
+    # The main purpose of this program is to 'git fetch upstream', but we know
+    # that a repo that is not a fork does not have an 'upstream'.
+    #
+    # XXX: Note that we're doing this check here (rather than at the top of
+    # the loop) to allow for the side effect of cloning GitHub repos if there
+    # is no working directory present. This behavior should be considered
+    # experimental and subject to change in the future. It happens to be
+    # convenient for me to do it this way at the moment, but my gut says we
+    # might be better off having a separate tool whose job it is to perform
+    # just that task.
+    #
+    # XXX: You may have other remotes defined, or have a non-github repo that
+    # has a remote named 'upstream', but this tool will not operate on
+    # them. Our purpose here is only to fetch the 'upstream' repo for GitHub
+    # repos.
+    #
+    if $is_fork; then :; else
+        printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
         continue
     fi
 
@@ -763,61 +808,12 @@ while IFS=':' read -r repo_name repo_full_name default_branch; do
 
             # No 'upstream' remote is defined for this repo. Either it is the
             # user's own project (not a fork of some other project), or the
-            # 'upstream' remote just wasn't set up.
+            # 'upstream' remote just wasn't set up. It should be the latter
+            # case, though, because we checked the 'fork' flag from the repo's
+            # GitHub metadata.
 
             if $BE_VERBOSE; then
                 printf "${PROG} (info): did not find an \"upstream\" remote configured for repo \"%s\"\n" "${repo_name}" 1>&2
-            fi
-
-            # We'll ask the GitHub service if this repo has a "parent". If
-            # not, then there's nothing left to do. Note that we have to make
-            # a call to the service inquiring about a specific repo for this
-            # info; it is not available in the output of the full list of
-            # repos which we've alread obtained. This could be a bit expensive
-            # against your rate limit if you have a large number of repos, but
-            # if most of those repos are forks it will only be expensive the
-            # first time the program is run to update those repos.
-
-            # From the GitHub v3 API:
-            #
-            #     Get
-            #
-            #     GET /repos/:owner/:repo
-            #     Response
-            #
-            #     The parent and source objects are present when the
-            #     repository is a fork. parent is the repository this
-            #     repository was forked from, source is the ultimate source
-            #     for the network.
-
-            # Note that the repo_full_name value here has the form
-            # 'username/repo_name', so matches the structure of the URL
-            # needed.
-            #
-            t_gh_url_for_this_repo="${gl_const_github_api_base_url}repos/${repo_full_name}"
-
-            if $BE_VERBOSE; then
-                printf "${PROG} (info): querying GitHub service to determine if repo \"%s\" has a parent\n" "${repo_name}" 1>&2
-            fi
-
-            t_parent_exists=$( curl "${MY_CURL_OPTS[@]}" \
-                                    --get                \
-                                    "${t_gh_url_for_this_repo}" \
-                                     | jq -r 'if has("parent") then "true" else "false" end')
-            if test $? -ne 0; then
-                printf "${PROG} (error): was unable to query GitHub service to determine if repo \"%s\" has a parent; bailing out\n" "${repo_name}" 1>&2
-                exit 1  # from subshell
-            fi
-            if test -z "${t_parent_exists}"; then
-                printf "${PROG} (error): was unable to determine whether or not repo \"%s\" has a parent; bailing out\n" "${repo_name}" 1>&2
-                exit 1  # from subshell
-            fi
-
-            if $t_parent_exists; then :; else
-                if $BE_VERBOSE; then
-                    printf "${PROG} (info): repo \"%s\" does not have a parent; nothing to do (okay)\n" "${repo_name}" 1>&2
-                    exit 0  # from subshell
-                fi
             fi
 
 # FIXME: add feature to set up an 'upstream' remote that points to the parent
