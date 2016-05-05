@@ -112,6 +112,18 @@ DEBUGGING=false  # override with two '-v' opts
 DO_CLONE_IF_NOT_PRESENT=false
 
 
+# It may be the case that we have cloned one of our repositories manually, but
+# for whatever reason have not set up the 'upstream' remote to point to the
+# parent GitHub repository from which ours was cloned.
+#
+# By default, this program will not perform any action on any such working
+# directories. But if the '-u' ('--upstream-remote-if-missing') option is
+# specified, we will take action to setup a git remote named "upstream" using
+# the parent repo's clone url.
+#
+DO_CREATE_UPSTREAM_REMOTE_IF_NOT_PRESENT=false
+
+
 # Folks using GitHub Enterprise might access their API at a different
 # location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
 # URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
@@ -211,12 +223,13 @@ Options with an asterisk (*) are required unless -h or -V is specified.
 
 Mandatory arguments to long options are mandatory for short options too.
 
-  -h, --help                     Print this help message on stdout
-  -V, --version                  Print the version of the program on stdout
-  -c, --clone-if-missing         Use git-hub(1) to clone your missing repos from GitHub
-  -v, --verbose                  Tell what is being done. Two or more -v options turns on tracing (set -x)
-      --                         Signals the end of options and disables further options processing. All
-                                   remaining arguments will be passed through to confget(1)
+  -h, --help                        Print this help message on stdout
+  -V, --version                     Print the version of the program on stdout
+  -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
+  -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
+  -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
+      --                            Signals the end of options and disables further options processing. All
+                                      remaining arguments will be passed through to confget(1)
 
 Report bugs to $MAINTAINER.
 EOF
@@ -484,6 +497,11 @@ while test $# -gt 0 ; do
 
         --clone-if-missing | -c )
             DO_CLONE_IF_NOT_PRESENT=true
+            shift
+            ;;
+
+        --upstream-remote-if-missing | -u )
+            DO_CREATE_UPSTREAM_REMOTE_IF_NOT_PRESENT=true
             shift
             ;;
 
@@ -889,11 +907,106 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                 printf "${PROG} (info): did not find an \"upstream\" remote configured for repo \"%s\"\n" "${repo_name}" 1>&2
             fi
 
-# FIXME: add feature to set up an 'upstream' remote that points to the parent
-#        (probably by using the git-hub tool).
+            if $DO_CREATE_UPSTREAM_REMOTE_IF_NOT_PRESENT; then
 
-            printf "${PROG} (warning): no remote named \"upstream\" defined for repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
-            exit 0  # from subshell
+# vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): '-u' (--upstream-remote-if-missing) option was specified; will attempt to create \"upstream\" git remote for repo \"%s\"\n" "${repo_name}" 1>&2
+                fi
+
+                # We will set up (using the git-hub tool) an "upstream" remote
+                # that points to the parent.
+
+# FIXME: go
+#     I thought git-hub would just add the 'upstream' repo here, but upon
+#     closer reading I see that is not the case. We're just doing this inline
+#     for now, but it might be a better fit as an enhancement to 'git-hub'.
+                # printf "${PROG} (WIP): '--upstream-remote-if-missing' feature not yet fully implemented; bailing out\n" 1>&2
+                # exit 1
+# FIXME: end
+
+                # declare t_v_opts2=()
+                # if $BE_VERBOSE; then t_v_opts2+=( '--verbose' ); fi
+                # if $DEBUGGING;  then t_v_opts2+=( '--verbose' ); fi
+
+                # git hub "${t_v_opts2[@]}" clone "${repo_name}"
+
+                # if test $? -ne 0; then
+                #     printf "${PROG} (error): was error while attempting to establish the \"upstream\" remote for repo \"%s\" from via 'git hub clone...'; bailing out\n" "${repo_name}" 1>&2
+                #     exit 1
+                # fi
+
+
+                # We'll ask the GitHub service if this repo has a "parent",
+                # which it should (read as: "will, modulo changes due to
+                # timing since we checked") because we've already checked
+                # above. If not (won't happen), then there's nothing left to
+                # do. Note that we have to make a call to the service
+                # inquiring about a specific repo to obtain the parent's
+                # 'clone_url'; it is not available in the output of the full
+                # list of repos which we've alread obtained. This could be a
+                # bit expensive against your rate limit if you have a large
+                # number of repos, but if most of those repos are forks it
+                # will only be expensive the first time the program is run to
+                # update those repos.
+
+                # From the GitHub v3 API:
+                #
+                #     Get
+                #
+                #     GET /repos/:owner/:repo
+                #     Response
+                #
+                #     The parent and source objects are present when the
+                #     repository is a fork. parent is the repository this
+                #     repository was forked from, source is the ultimate source
+                #     for the network.
+
+                # Note that the repo_full_name value here has the form
+                # 'username/repo_name', so matches the structure of the URL
+                # needed.
+                #
+                t_gh_url_for_this_repo="${gl_const_github_api_base_url}repos/${repo_full_name}"
+
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): querying GitHub service to obtain parent clone url for repo \"%s\"\n" "${repo_name}" 1>&2
+                fi
+
+                t_parent_clone_url=$( curl "${MY_CURL_OPTS[@]}" \
+                                      --get                \
+                                      "${t_gh_url_for_this_repo}" \
+                                      | jq -r '.clone_url' )
+                if test $? -ne 0; then
+                    printf "${PROG} (error): was unable to query GitHub service to obtain clone url for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
+                    exit 1  # from subshell
+                fi
+                if test -z "${t_parent_clone_url}"; then
+                    printf "${PROG} (error): was unable to obtain clone url for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
+                    exit 1  # from subshell
+                fi
+
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): setting up \"upstream\" remote for repo \"%s\" to: %s\n" "${repo_name}" "${t_parent_clone_url}" 1>&2
+                fi
+
+                git remote add upstream "${t_parent_clone_url}"
+
+                if test $? -ne 0; then
+                    printf "${PROG} (error): was unable to establish \"upstream\" remote for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
+                    exit 1
+                fi
+
+                if $DEBUGGING; then
+                    printf "${PROG} (info): successfully set up \"upstream\" remote for repo \"%s\" to: %s\n" "${repo_name}" "${t_parent_clone_url}" 1>&2
+                fi
+
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            else
+                printf "${PROG} (warning): no remote named \"upstream\" defined for repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+                exit 0  # from subshell
+            fi
+
         else
 
 # FIXME: Introduce a "keep going" feature to avoid bailing out here
