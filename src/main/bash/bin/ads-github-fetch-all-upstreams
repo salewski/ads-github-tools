@@ -98,12 +98,16 @@ BE_VERBOSE=false # override with one '-v' opt
 DEBUGGING=false  # override with two '-v' opts
 
 
-# FIXME: A future enhancement will provide for a command line option to force
-#        cloning a repository if we do not have a local working directory for
-#        it, but the default behavior will still be to just operate on the
-#        working directories that are present. We're adding this now, though,
-#        because we can avoid a fair amount of unnecessary work if we know
-#        which mode we're operating in.
+# If specified, the '--clone-if-missing' command line option directs this
+# program to clone any repository from GitHub where the local git working
+# directory is missing. The default behavior (when that option is not
+# specified) is to just operate on the working directories that are present.
+#
+# Note that we invoke the 'git-hub' tool (via 'git hub clone') to implement
+# this feature. That means that we'll not only clone the repository if it is
+# missing, but we'll also have the 'upstream' remote set up (if the repo is a
+# fork of another repo). This works regardless of whether or not the working
+# directory was present when this command was invoked.
 #
 DO_CLONE_IF_NOT_PRESENT=false
 
@@ -209,6 +213,7 @@ Mandatory arguments to long options are mandatory for short options too.
 
   -h, --help                     Print this help message on stdout
   -V, --version                  Print the version of the program on stdout
+      --clone-if-missing         Use git-hub(1) to clone your missing repos from GitHub
   -v, --verbose                  Tell what is being done. Two or more -v options turns on tracing (set -x)
       --                         Signals the end of options and disables further options processing. All
                                    remaining arguments will be passed through to confget(1)
@@ -475,6 +480,11 @@ while test $# -gt 0 ; do
             # print program version info
             f_print_version
             exit 0
+            ;;
+
+        --clone-if-missing )
+            DO_CLONE_IF_NOT_PRESENT=true
+            shift
             ;;
 
         --verbose | -v )
@@ -784,17 +794,33 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     if test -d "${repo_name}"; then :; else
 
         if $DO_CLONE_IF_NOT_PRESENT; then
-            printf "${PROG} (warning): DO_CLONE_IF_NOT_PRESENT feature not yet implemented; skipping clone of repo \"$s\"\n" "${repo_name}" 1>&2
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): no subdirectory exists for repo name \"%s\"; --clone-if-missing specified, so will clone repo from GitHub\n" "${repo_name}" 1>&2
+            fi
+
+            declare t_v_opts=()
+            if $BE_VERBOSE; then t_v_opts+=( '--verbose' ); fi
+            if $DEBUGGING;  then t_v_opts+=( '--verbose' ); fi
+            git hub "${t_v_opts[@]}" clone "${repo_name}"
+
+            if test $? -ne 0; then
+                printf "${PROG} (error): was error while attempting to clone repo \"%s\" from GitHub; bailing out\n" "${repo_name}" 1>&2
+                exit 1
+            fi
+
+            # Sanity check
+            if test -d "${repo_name}"; then :; else
+                printf "${PROG} (error): just cloned repo \"%s\", but subdir with that name is not present; bailing out\n" "${repo_name}" 1>&2
+                exit 1
+            fi
+        else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+            fi
+
             continue
-#FIXME: add feature to use 'git-hub clone' to clone such repos, if specified by the user
-
         fi
-
-        if $DEBUGGING; then
-            printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
-        fi
-
-        continue
     fi
 
     if test -d "${repo_name}/.git"; then :; else
