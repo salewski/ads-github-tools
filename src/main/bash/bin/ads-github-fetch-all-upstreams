@@ -792,8 +792,9 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
         if $DEBUGGING; then
             printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
-            continue
         fi
+
+        continue
     fi
 
     if test -d "${repo_name}/.git"; then :; else
