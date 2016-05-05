@@ -926,3 +926,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     fi
 
 done < <(echo "$REPO_DATA_LINES")
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): completed successfully\n" 1>&2
+fi
