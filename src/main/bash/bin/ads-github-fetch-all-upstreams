@@ -525,14 +525,27 @@ while test $# -gt 0 ; do
     esac
 done
 
-# # All remaining arguments are interpretted as the names of files to process.
-# #
-# while test $# -gt 0 ; do
+declare -a EXPLICITLY_REQUESTED_REPOS=()
 
-#     _one_file_path=$1; shift
+# Any remaining arguments are interpretted as the names of repositories that
+# the user specifically wants to operate on.
+#
+# XXX: We do not currently do anything special to account for the same repo
+#      being specified more than once; I'm not yet convinced that we
+#      should. If the user tells us to operate on repos "foo bar foo", we'll
+#      operate on "foo" twice (though the second will effectively be an
+#      elaborate NOOP).
+#
+while test $# -gt 0 ; do
 
-#     # do something with ${_one_file_path}
-# done
+    _one_repo_name=$1; shift
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): noting user-specified explicit repo name: \"%s\"\n" "${_one_repo_name}" 1>&2
+    fi
+
+    EXPLICITLY_REQUESTED_REPOS+=( "${_one_repo_name}" )
+done
 
 for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
 
@@ -691,6 +704,17 @@ REPO_DATA_LINES=''
 # ...
 # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
 
+# Note that we still obtain info on /all/ repos even if the user has specified
+# that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
+# the user specified only a couple of repos, then we lose here because we
+# techically could query the GitHub service for the info on just those
+# specific repos to accomplish our work.  If the user explicitly specifies
+# more than a few, though, we're back on solid ground because we can typically
+# get the info on all available user repos with fewer than 5 GitHub API calls
+# (it is unlikely that a typical GitHub user has more than 500 repos). In any
+# event, we do not know which page of the results a particular repo will be
+# on, so we need to pull full summary data anyway.
+#
 MY_TOTAL_REPO_PAGES=$(f_get_gh_user_repos_pagination_count_or_die)
 t_cur_page=0
 t_keep_going=true
@@ -728,6 +752,28 @@ done
 
 
 while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
+
+    if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
+
+        t_repo_is_keeper=false
+
+        for expl_repo_name in "${EXPLICITLY_REQUESTED_REPOS[@]}"; do
+
+            if test "${expl_repo_name}" = "${repo_name}"; then
+                t_repo_is_keeper=true
+                break;
+            fi
+        done
+
+        if $t_repo_is_keeper; then :; else
+
+            if $DEBUGGING; then
+                printf "${PROG} (debug): repo \"%s\" is not one of those explicitly requested for operation; skipping (okay)\n" \
+                       "${repo_name}" 1>&2
+            fi
+            continue
+        fi
+    fi
 
     # If there's a subdirectory beneath the current location with the
     # repository name, then it is probably the git working directory for the
