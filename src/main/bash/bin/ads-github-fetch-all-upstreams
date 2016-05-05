@@ -213,7 +213,7 @@ Mandatory arguments to long options are mandatory for short options too.
 
   -h, --help                     Print this help message on stdout
   -V, --version                  Print the version of the program on stdout
-      --clone-if-missing         Use git-hub(1) to clone your missing repos from GitHub
+  -c, --clone-if-missing         Use git-hub(1) to clone your missing repos from GitHub
   -v, --verbose                  Tell what is being done. Two or more -v options turns on tracing (set -x)
       --                         Signals the end of options and disables further options processing. All
                                    remaining arguments will be passed through to confget(1)
@@ -482,7 +482,7 @@ while test $# -gt 0 ; do
             exit 0
             ;;
 
-        --clone-if-missing )
+        --clone-if-missing | -c )
             DO_CLONE_IF_NOT_PRESENT=true
             shift
             ;;
