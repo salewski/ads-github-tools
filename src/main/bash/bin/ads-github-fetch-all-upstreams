@@ -216,10 +216,10 @@ trap 'f_cleanup' EXIT
 f_print_help () {
 
     cat <<EOF
-usage: $PROG [OPTION...] FILE...
-Does this, that, and the other thing
-
-Options with an asterisk (*) are required unless -h or -V is specified.
+usage: $PROG [OPTION...] [REPO...]
+Invokes 'git fetch upstream' for all of the user's GitHub repos that are
+present. With appropriate options, will clone some or all missing repos and
+set up the 'upstream' remote.
 
 Mandatory arguments to long options are mandatory for short options too.
 
