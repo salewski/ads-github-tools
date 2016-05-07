@@ -1,0 +1,264 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-normalize-url: Normalize the URL provided on the command
+# line. Emit the normalized representation of URL on stdout.
+#
+# The URL emitted on stdout is sutiable for hashing or otherwise using as an
+# input to some function for generating an ID for the normalized URL.
+#
+#
+# Motivation
+# ==========
+# There are many different and legitimate ways to represent URLs; while
+# variations of a given URL may represent the same logical resource, the text
+# representations of the URLs themselves can vary. For the purposes to
+# generating identifiers for a given logical URL (e.g., for use in a cache) or
+# when comparing two URLs directly, the textual variations need to be put into
+# a "normalized" form to allow their textual representations to be
+# meaningfully compared. For example, among other transformations, the query
+# parameters will be put into alphabetical order.
+#
+#
+# CAVEATS:
+# ========
+#
+#    * The current implementation is not compliant with RFC 3986, and may
+#      produce URLs that are actually broken. In particular, the normalization
+#      performed here may be incomplete with reference to that spec, and we
+#      explicitly remove both '.' and '..' path segments from the URL. This is
+#      likely to change in the future, so please do not write any code that
+#      depends on the precise output emitted here overly much.
+#
+#
+# See Also
+# ========
+#
+#     * RFC 3986 "Uniform Resource Identifier (URI): Generic Syntax", Section 6 ("Normalization and Comparison")
+#       https://tools.ietf.org/html/rfc3986
+#
+#     * https://en.wikipedia.org/wiki/URL_normalization
+#
+
+package _PROG_ADS_GITHUB_NORMALIZE_URL;
+
+use strict;
+use warnings;
+
+use Carp qw( confess cluck );
+
+use Getopt::Long   qw( GetOptions );
+
+use URL::Normalize 0.33;  # Note: this dep is X11 (MIT) licensed
+
+# We want perl to check for valid UTF-8 input as it is read, and any invalid
+# UTF-8 found to throw a fatal exception.
+use warnings q{utf8};
+use warnings FATAL => q{utf8};
+
+# Set the encoding on all newly opened filehandles. This says that any "open"
+# without a specified encoding will default to UTF-8, as will STDIN, STDOUT,
+# and STDERR:
+use open qw( :encoding(UTF-8) :std );
+
+my $PROG = q{ads-github-normalize-url};
+
+our $VERSION = q{0.01};
+
+my $ESTAT_SUCCESS = 0;
+my $ESTAT_ERROR   = 1;
+
+# Options
+Getopt::Long::Configure(qw( bundling
+                            bundling_override
+                            no_auto_abbrev
+                            no_auto_help
+                            no_auto_version
+                            no_getopt_compat
+                            no_gnu_compat
+                            no_ignore_case_always
+                            no_pass_through
+                            no_require_order
+                            permute));
+
+my $BE_VERBOSE   = 0;
+my $DEBUGGING    = 0;
+my $SHOW_HELP    = 0;
+my $SHOW_VERSION = 0;
+
+
+# Returns the function name of the calling function. Functions can use this
+# as a generic way to get their own name without sprinkling clunky caller()
+# invocations all over the place.
+sub __func {
+    # ($package,   $filename, $line,       $subroutine, $hasargs,
+    #  $wantarray, $evaltext, $is_require, $hints,      $bitmask) = caller($ii);
+    return (caller(1))[3];
+}
+
+# Prints "help" message on the supplied stream
+sub print_usage {
+    my ($where) = @_;
+    print $where <<"EOH";
+Usage: $PROG [OPTION...] [URL]
+Emit on stdout the normalized representation of URL.
+If URL is not provided on the command line, then it is read from stdin.
+
+Options:
+
+  -h, --help            Display this message and then exit
+  -D, --debug           Turn on debugging mode (implies '-v')
+  -v, --verbose         Print program progress messages on stderr
+  -V, --version         Print program version on stdout and then exit
+
+  --                    Signals the end of options and disables further options processing.
+EOH
+}
+
+# Prints program version info on stdout
+sub print_version {
+    print <<"EOV";
+$PROG  $VERSION
+Copyright (C) 2016 Alan D. Salewski
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOV
+    return;
+}
+
+
+# @return "normalized" version of provided URL.
+#
+# FIXME: Review whether or not we should adhere more closely to RFC 3986
+#        section 6; for now, the most important thing for my use case is that
+#        a consistent URL is emitted for the purpose of generating an id for
+#        use in generating a cache key.
+#
+sub normalize_url {
+
+    my $args = { URL => undef,
+                 @_  # caller-provided named params override above default(s)
+               };
+
+    confess( __func(), q{(): }, q{undef provided for required 'URL' param} )
+        unless ( defined( $args->{URL} ));
+
+    my $normalizer = URL::Normalize->new( $args->{URL} );
+
+    # before: http://www.example.com/index.cgi?foo=/'
+    # after:  http://www.example.com/?foo=/
+    #
+    $normalizer->remove_directory_index;
+
+    # XXX: As noted in URL::Normalize(3pm), this method does NOT follow the
+    #      algorithm described in RFC 3986, but rather flattens (removes) each
+    #      path segment.
+    #
+    # before: http://www.example.com/../a/b/../c/./d.html
+    # after:  http://www.example.com/a/c/d.html
+    #
+    $normalizer->remove_dot_segments;
+
+    # before: http://www.example.com/foo//bar.html
+    # after:  http://www.example.com/foo/bar.html
+    #
+    $normalizer->remove_duplicate_slashes;
+
+    # before: http://www.example.com/?a=1&a=2&b=4&a=1&c=4
+    # after:  http://www.example.com/?a=1&a=2&b=3&c=4
+    #
+    $normalizer->remove_duplicate_query_parameters;
+
+    # before: http://www.example.com/foo?
+    # after:  http://www.example.com/foo
+    #
+    $normalizer->remove_empty_query;
+
+    # # before: http://www.example.com/bar.html#section1
+    # # after:  http://www.example.com/bar.html
+    # #
+    # $normalizer->remove_fragment;
+
+    # before: http://www.example.com/?b=2&c=3&a=0&A=1
+    # after:  http://www.example.com/?a=0&A=1&b=2&c=3
+    #
+    $normalizer->sort_query_parameters;
+
+    my $normalized_url = $normalizer->url;
+
+    return $normalized_url;
+}
+
+
+# +-------------------------------+
+# |  main of program starts here  |
+# +-------------------------------+
+
+unless ( GetOptions(
+                    q{h|help}          => \$SHOW_HELP,
+                    q{D|debug}         => \$DEBUGGING,
+                    # q{n|take-n=i}      => \$TAKE_N,
+                    q{V|version}       => \$SHOW_VERSION,
+                    q{v|verbose}       => \$BE_VERBOSE,
+                   ))
+{
+    print_usage( \*STDERR );
+    exit $ESTAT_ERROR;
+}
+
+if ($SHOW_HELP) {
+    print_usage( \*STDOUT );
+    exit $ESTAT_SUCCESS;
+}
+
+if ($SHOW_VERSION) {
+    print_version;
+    exit $ESTAT_SUCCESS;
+}
+
+my $URL;
+if ( 0 == scalar( @ARGV )) {
+    print STDERR qq{$PROG (info): URL not provided on command line; attempting to read it from stdin\n}
+        if $BE_VERBOSE;
+
+    $URL = <STDIN>;
+    chomp $URL;
+
+    print STDERR qq{$PROG (info): input URL read from stdin: "$URL"\n}
+        if $BE_VERBOSE;
+
+}
+elsif ( 1 == scalar( @ARGV )) {
+
+    $URL = shift;
+
+    print STDERR qq{$PROG (info): input URL: "$URL"\n}
+        if $BE_VERBOSE;
+}
+else {
+    print STDERR qq{$PROG (error): multiple URL options provided on command line (@ARGV); expected zero or one; bailing out\n};
+    print_usage( \*STDERR );
+    exit $ESTAT_ERROR;
+}
+
+my $normalized_url = normalize_url( URL => $URL );
+
+print STDOUT qq{$normalized_url\n};
