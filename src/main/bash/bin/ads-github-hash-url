@@ -1,0 +1,277 @@
+#!/bin/bash -
+
+# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-hash-url: Computes an ID for a given URL.
+#
+# The ID is currently computed using the SHA-3 512 bit algorithm variant.
+#
+# Since there are many textual representation for the resource indicated by a
+# particular URL, a typical caller would "normalize" the URL (using
+# 'ads-github-normalize-url', or similar) before requesting that an ID be made
+# out of it.
+
+declare -r PROG='ads-github-hash-url'
+
+set -o pipefail
+
+
+# FIXME: one day this will be filtered in at build time
+declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+
+# FIXME: one day this will be filtered in at build time
+declare -r VERSION='0.0.1'
+
+# FIXME: one day this will be filtered in at build time
+# This variable is replaced at build time
+# declare -r gl_const_build_date='@BUILD_DATE@'
+# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+declare -r gl_const_release="${VERSION}"
+
+BE_VERBOSE=false # override with one '-v' opt
+
+# This one implies BE_VERBOSE, too
+DEBUGGING=false  # override with two '-v' opts
+
+declare -a NEEDED_EXTERNAL_PROGS=(
+    awk
+    expr
+    sha3sum
+)
+
+
+declare -a F_CLEANUP_HOOK_NAMES=()
+
+function f_add_cleanup_hook_name () {
+    F_CLEANUP_HOOK_NAMES+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#F_CLEANUP_HOOK_NAMES[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#F_CLEANUP_HOOK_NAMES[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${F_CLEANUP_HOOK_NAMES[$idx]}
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): running cleanup hook: [%s]\n" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf "$PROG (warn): HUP signal caught; bailing out\n"  1>&2; f_cleanup_and_die' HUP
+trap 'printf "$PROG (warn): INT signal caught; bailing out\n"  1>&2; f_cleanup_and_die' INT
+trap 'printf "$PROG (warn): QUIT signal caught; bailing out\n" 1>&2; f_cleanup_and_die' QUIT
+trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+
+f_print_help () {
+
+    cat <<EOF
+usage: $PROG [OPTION...] [URL]
+Computes an ID for a URL after normalizing it.
+If URL is not provided on the command line, then it is read from stdin.
+
+  -h, --help                        Print this help message on stdout
+  -V, --version                     Print the version of the program on stdout
+  -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
+      --                            Signals the end of options and disables further options processing. All
+                                      remaining arguments will be passed through to confget(1)
+
+Report bugs to $MAINTAINER.
+EOF
+}
+
+f_print_version () {
+    cat <<EOF
+${PROG} ${gl_const_release}
+Copyright (C) 2016 Alan D. Salewski
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+
+while test $# -gt 0 ; do
+
+    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
+                  "x$1" : 'x\(-.\)'      \| \
+                  "x$1" : 'x\(.*\)')
+
+    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
+                  "x$1" : 'x-.\(.*\)')
+
+    case $1 in
+
+        --help | -h )
+            # print help message
+            f_print_help
+            exit 0
+            ;;
+
+        --version | -V )
+            # print program version info
+            f_print_version
+            exit 0
+            ;;
+
+        --verbose | -v )
+            # Accumulating 'verbose' opt. A single -v opt simply turns
+            # BE_VERBOSE on; two or more '-v' opts turns tracing on. Note that
+            # if you intend to turn tracing on, you'll probably want your -v
+            # opts to be the first opts on the command line (so they take
+            # effect earlier).
+            if $BE_VERBOSE; then
+
+                # We've seen at least one -v opt before; if this is the second
+                # we'll turn on debugging mode, but if it's the third or
+                # greater then we'll turn tracing on
+                if $DEBUGGING; then
+                    # We've seen at least two -v opts before, so now we're turning tracing on
+                    set -x
+                else
+                    # Second -v opt we're seeing
+                    DEBUGGING=true
+                fi
+            else
+                # First -v opt we're seeing
+                BE_VERBOSE=true
+            fi
+            shift
+            ;;
+
+        -- ) # Stop option processing
+            shift
+            break
+            ;;
+
+        --* | -* )
+            # Unrecognized option
+            printf "${PROG} (error): unrecognized option \`%s'\n" "$option" 1>&2
+            f_print_help 1>&2
+            exit 1
+            ;;
+
+        * ) # Unrecognized non-option
+
+            # We'll treat the first non-option and all remaining arguments as
+            # names of files to process; note that we DO NOT shift off the
+            # first, but merely stop processing command line options when we
+            # see it.
+            break
+            ;;
+    esac
+done
+
+declare -a EXPLICITLY_REQUESTED_REPOS=()
+
+declare INPUT_URL
+
+# A remaining argument is interpretted as the URL for which to compute an ID.
+#
+while test $# -gt 0 ; do
+
+    _one_url=$1; shift
+
+    if test -z "${INPUT_URL}"; then :; else
+        printf "$PROG (error): only one URL may be provided; bailing out\n" "${INPUT_URL}" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): URL provided on command line: \"%s\"\n" "${_one_url}" 1>&2
+    fi
+
+    INPUT_URL="${_one_url}"
+done
+
+# If we did not receive a URL on the command line, the read it from from the first line of stdin
+#
+if test -z "${INPUT_URL}"; then
+    if $BE_VERBOSE; then
+        printf "${PROG} (input): URL not provided on command line; attempting to read it from stdin\n" 1>&2
+    fi
+
+    # XXX: blocks indefinitely
+    read -r INPUT_URL
+fi
+
+declare -r re_is_blank='^[[:space:]]*$'
+
+if [[ "${INPUT_URL}" =~ $re_is_blank ]]; then
+    printf "${PROG} (error): URL must be provided and must not be blank; bailing out\n" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+
+for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
+
+    t_path=$(builtin type -p "${ext_tool}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
+
+
+t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 512 | awk '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 384 | awk '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 224 | awk '{print $1}' )
+if test $? -ne 0; then
+    printf "${PROG} (error): was error while attempting to compute the hash of url \"%s\"; bailing out\n" "${INPUT_URL}" 1>&2
+    exit 1
+fi
+if test -z "${t_hash_value}"; then
+    # should never happen...
+    printf "${PROG} (BUG): computed url hash is the empty string; bailing out\n" 1>&2
+    exit 1
+fi
+
+printf '%s\n' "${t_hash_value}"
