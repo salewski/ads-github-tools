@@ -767,10 +767,25 @@ while $t_keep_going; do
     #     ac-nrepl:salewski/ac-nrepl:master:true
     #     ack2:salewski/ack2:dev:true
     #
-    REPO_DATA_LINES=${REPO_DATA_LINES}$( curl "${MY_CURL_OPTS[@]}" \
-                                              --get                \
-                                              "${t_gh_url_for_page}" \
-                                         | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
+    REPO_DATA_LINES=${REPO_DATA_LINES}\
+$'\n'\
+$( curl "${MY_CURL_OPTS[@]}" \
+        --get                \
+        "${t_gh_url_for_page}" \
+        | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
+
+    # The newline embedded between our existing and new REPO_DATA_LINES
+    # instances is intended to ensure that the concatenation of the two does
+    # not join the first line of the new to the last line of the old. It is
+    # possible, though, that we may have just introduced a spurious blank
+    # line; we'll strip it out if so.
+    #
+    REPO_DATA_LINES=$(echo "${REPO_DATA_LINES}" | sed -e '/^[[:space:]]*$/d' )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to strip possible empty line out of REPO_DATA_LINES (working page: %s); bailing out\n" \
+               "${t_cur_page}" 1>&2
+        exit 1
+    fi
 
     if test $t_cur_page -ge $MY_TOTAL_REPO_PAGES; then
         t_keep_going=false
@@ -780,6 +795,36 @@ done
 
 
 while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
+
+    : TRACE: repo_name:      "$repo_name"
+    : TRACE: repo_full_name: "$repo_full_name"
+    : TRACE: default_branch: "$default_branch"
+    : TRACE: is_fork:        "$is_fork"
+
+    # Sanity checking
+    if test -z "${repo_name}"; then
+        printf "${PROG} (BUG): 'repo_name' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${repo_full_name}"; then
+        printf "${PROG} (BUG): 'repo_full_name' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${default_branch}"; then
+        printf "${PROG} (BUG): 'default_branch' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${is_fork}"; then
+        printf "${PROG} (BUG): 'is_fork' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if   test "${is_fork}" = 'true';  then :
+    elif test "${is_fork}" = 'false'; then :
+    else
+        printf "${PROG} (BUG): invalid value detected for 'is_fork' (\"%s\"); should be either 'true' or 'false'; bailing out\n" \
+               "${is_fork}" 1>&2
+        exit 1
+    fi
 
     if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
 
@@ -863,7 +908,9 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     # repos.
     #
     if $is_fork; then :; else
-        printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
+        fi
         continue
     fi
 
