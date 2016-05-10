@@ -753,7 +753,7 @@ while $t_keep_going; do
     t_gh_url_for_page=${MY_GITHUB_REPOS_URL}'&page='${t_cur_page}
 
     if $BE_VERBOSE; then
-        printf "${PROG} (info): requesting /user/repo page %s of %s\n" "${t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
+        printf "${PROG} (info): requesting /user/repos page %s of %s\n" "${t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
     fi
 
     # For now we'll just slurp up all of the repo info into memory; we'll
