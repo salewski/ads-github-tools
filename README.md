@@ -21,7 +21,7 @@ At the moment (2016-05-09) there are three tools:
     will be cloned (using the `git-hub` tool's `clone` operation, which sets
     up the 'upstream' remote if the repo is a fork).
 
-  * There's also a `--upstream-remote-if-missing` option that will add the
+  * There's also an `--upstream-remote-if-missing` option that will add the
     'upstream' remote on existing project working directories that do not have
     it (only if the project is a fork of another project, of course).
 
