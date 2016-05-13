@@ -14,14 +14,16 @@ At the moment (2016-05-09) there are three tools:
 
 * `ads-github-fetch-all-upstreams` - Operates on the working directories of a
   collection of GitHub-hosted git repositories. Each that is found with an
-  'upstream' remote defined will have `git fetch upstream` invoked in it. With
-  the `--clone-if-missing` option, any of the user's GitHub repos for which
-  there is not a git working directory beneath the current location will be
-  cloned (using the `git-hub` tool's `clone` operation, which sets up the
-  'upstream' remote if the repo is a fork). There's also a
-  `--upstream-remote-if-missing` option that will add the 'upstream' remote on
-  existing project working directories that do not have it (only if the
-  project is a fork of another project, of course).
+  'upstream' remote defined will have `git fetch upstream` invoked in it.
+  
+** With the `--clone-if-missing` option, any of the user's GitHub repos for
+   which there is not a git working directory beneath the current location
+   will be cloned (using the `git-hub` tool's `clone` operation, which sets up
+   the 'upstream' remote if the repo is a fork).
+
+** There's also a `--upstream-remote-if-missing` option that will add the
+   'upstream' remote on existing project working directories that do not have
+   it (only if the project is a fork of another project, of course).
 
 I'm working on sketching out a caching system for results from the GitHub API
 with the intent of making it easy to use from shell scripts or similar. The
