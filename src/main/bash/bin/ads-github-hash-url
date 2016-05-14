@@ -112,10 +112,13 @@ usage: $PROG [OPTION...] [URL]
 Computes an ID for a URL after normalizing it.
 If URL is not provided on the command line, then it is read from stdin.
 
-  -h, --help                        Print this help message on stdout
-  -V, --version                     Print the version of the program on stdout
-  -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
-      --                            Signals the end of options and disables further options processing.
+  -h, --help     Print this help message on stdout
+  -V, --version  Print the version of the program on stdout
+
+  -v, --verbose  Tell what is being done. Specify multiple times to increase
+                   verbosity: info, debug, and tracing (set -x)
+
+      --         Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
 EOF
@@ -159,10 +162,12 @@ while test $# -gt 0 ; do
 
         --verbose | -v )
             # Accumulating 'verbose' opt. A single -v opt simply turns
-            # BE_VERBOSE on; two or more '-v' opts turns tracing on. Note that
-            # if you intend to turn tracing on, you'll probably want your -v
-            # opts to be the first opts on the command line (so they take
-            # effect earlier).
+            # BE_VERBOSE on (info level output); two '-v' opts turns on
+            # $DEBUGGING (debug level output); three or more '-v' opts turns
+            # tracing on. Note that if you intend to turn tracing on, you'll
+            # probably want your -v opts to be the first opts on the command
+            # line (so they take effect earlier).
+            #
             if $BE_VERBOSE; then
 
                 # We've seen at least one -v opt before; if this is the second
