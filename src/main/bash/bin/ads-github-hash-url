@@ -16,7 +16,8 @@
 #     along with this program; if not, write to the Free Software Foundation,
 #     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
 
-# ads-github-hash-url: Computes an ID for a given URL.
+# ads-github-hash-url: Computes an ID for a given URL (after normalizing it).
+# If URL is not provided on the command line, then it is read from stdin.
 #
 # The ID is currently computed using the SHA-3 512 bit algorithm variant.
 #
