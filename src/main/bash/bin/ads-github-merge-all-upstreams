@@ -1,0 +1,1157 @@
+#!/bin/bash -
+
+# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-merge-all-upstreams: Make an authenticated call to the GitHub API
+# (using curl) to obtain a list of all of my repositories. For each, if a
+# local directory (beneath the current location) is found that matches the
+# repo name (and that directory is a git working directory, and it has git
+# remotes named 'upstream' and 'origin' defined), then this program will
+# change into the local working directory for that repo and:
+#
+#     * confirm that there are no changes staged in the index
+#       (if any changes are found, a warning message will be printed that the
+#       repository is being skipped)
+#
+#     * determine the branch currently checked out in the working directory
+#       and remember it
+#
+#     * determine the name of the default branch for the repo
+#
+#     * change to the default branch, if needed
+#
+#     * merge in the upstream/<DEFAULT_BRANCH_NAME>
+#
+#       The current version of the program specifies the '--ff-only' option to
+#       'git merge', so the merge will only be performed if git-merge(1) is
+#       able to resolve the merge as a "fast forward".
+#
+#       (There's an assumption that you have already fetched from the 'upstram'
+#       remote, if desired, and that you want to merge in whatever the locally
+#       available state is).
+#
+#     * push the changes back to 'origin', if the '--push' option was specified
+#
+#     * check out the original branch name, if needed, to put the git working
+#       directory back into the original state we found it in
+#
+#
+# All requests are made over HTTPS.
+#
+# Authentication
+# ==============
+# No authentication data is used directly; the curl(1) '-n' (--netrc) option
+# is used, so the user is expected to have his GitHub credentials stored in a
+# ~/.netrc file. For details on setting that up, see curl(1) and
+# netrc(5). Note that curl will not use the ~/.netrc file if the permissions
+# allow reading by group or other.
+#
+# HINT: The relevant line ~/.netrc file content should have the form:
+#
+#     machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PASSWORD
+#
+# CAVEAT: Use of the netrc(5) configuration means that this tool is ultimately
+# using username/password with the GitHub API. Though all communication is
+# conducted over HTTPS (so is encrypted "on the wire"), this authentication
+# mechanism allows this tool to access the full power of the GitHub API.
+#
+# DO NOT USE THIS TOOL UNLESS YOU TRUST THAT IT IS NOT ABUSING THIS TRUST.
+#
+# Use of the OAuth mechanisms would allow for the access needed by this
+# program while preventing use of the access it does not need. I'm not
+# worrying about that at the moment though, as I'm the only user, and I expect
+# that anything more elaborate should probably be integrated into a more
+# featureful tool (such as 'git-hub', which already has OAuth support).
+#
+# Motivation
+# ==========
+# With even a relatively small number of GitHub repositories, keeping local
+# trees up to date with upstreams can be a chore. This tool performs one piece
+# of automation that can contribute to a solution.
+#
+# TODO
+# ====
+#
+#     * Use lower-level 'ads-github-cache*' tools when they become
+#       available. The current implementation tries to be conservative with
+#       requests made against the GitHub API in order to not deplete the
+#       user's available rate limit, but using a cache would be more
+#       efficient.
+#
+#
+# See Also:
+# =========
+#
+#     * The 'Repos' section of the GitHub API (v3)
+#       https://developer.github.com/v3/repos/
+#
+
+declare -r PROG='ads-github-merge-all-upstreams'
+
+set -o pipefail
+
+
+# FIXME: one day this will be filtered in at build time
+declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+
+# FIXME: one day this will be filtered in at build time
+declare -r VERSION='0.0.1'
+
+# FIXME: one day this will be filtered in at build time
+# This variable is replaced at build time
+# declare -r gl_const_build_date='@BUILD_DATE@'
+# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+declare -r gl_const_release="${VERSION}"
+
+BE_VERBOSE=false # info-level output; override with one '-v' opt
+
+# This one implies BE_VERBOSE, too
+DEBUGGING=false  # debug-level output; override with two '-v' opts
+
+# By default the 'upstream/<DEFAULT_BRANCH_NAME>' will be merged in, but not
+# pushed back up to GitHub. The '--push' option causes the newly merged
+# default branch content to be pushed back up to GitHub
+# ("git push --tags origin master", or whatever the equivalent analogue is if
+# the repo has a weirdo default branch name other than 'master').
+#
+DO_PUSH=false
+
+
+# Folks using GitHub Enterprise might access their API at a different
+# location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
+# URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
+# credentials being transmitted in cleartext!).
+#
+# This is NOT declared read-only here because there is some minor fixup that
+# we attempt so users do not need to be concerned with whether or not the URL
+# ends with a slash. For our purposes we need the value to end with a slash,
+# and will add a slash to the end if it is not specified here.
+#
+declare    gl_const_github_api_base_url='https://api.github.com/'
+
+# We'll help future-proof this program by explicitly requesting version 3 of
+# the GitHub API (although it is the default at the time of writing
+# (2016-05)).
+#
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+declare -a NEEDED_EXTERNAL_PROGS=(
+    cat
+    curl
+    expr
+    head
+    jq
+    git
+    sed
+    tr
+)
+
+
+declare -a F_CLEANUP_HOOK_NAMES=()
+
+function f_add_cleanup_hook_name () {
+    F_CLEANUP_HOOK_NAMES+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#F_CLEANUP_HOOK_NAMES[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#F_CLEANUP_HOOK_NAMES[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${F_CLEANUP_HOOK_NAMES[$idx]}
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): running cleanup hook: [%s]\n" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf "$PROG (warn): HUP signal caught; bailing out\n"  1>&2; f_cleanup_and_die' HUP
+trap 'printf "$PROG (warn): INT signal caught; bailing out\n"  1>&2; f_cleanup_and_die' INT
+trap 'printf "$PROG (warn): QUIT signal caught; bailing out\n" 1>&2; f_cleanup_and_die' QUIT
+trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+
+f_print_help () {
+
+    cat <<EOF
+usage: $PROG [OPTION...] [REPO...]
+Invokes 'git merge upstream' for all of the user's GitHub repos that are
+present or those explicitly specified (only if the git index has no changes
+recorded, and only after temporarily checking out the default branch in the
+git working directory).
+
+With appropriate option, will also push the default branch changes back to the
+origin repo.
+
+Mandatory arguments to long options are mandatory for short options too.
+
+  -h, --help     Print this help message on stdout
+  -V, --version  Print the version of the program on stdout
+  -p, --push     Push changes back to the 'origin' remote
+
+  -v, --verbose  Print program progress messages on stderr. Specify multiple
+                   times to increase verbosity: info, debug, and tracing (set -x)
+
+      --         Signals the end of options and disables further options processing.
+
+Report bugs to $MAINTAINER.
+EOF
+}
+
+f_print_version () {
+    cat <<EOF
+${PROG} ${gl_const_release}
+Copyright (C) 2016 Alan D. Salewski
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+
+# Makes a HTTP HEAD request to the GitHub service to obtain pagination
+# information for pulling all /user/repos data in the minimal number of
+# service calls (that is, within the service restriction of 100 repos per
+# response "page").
+#
+# Upon success, emits on stdout the number of "pages" that need to be
+# requested.
+#
+# Recall that the first page is one, not zero.
+#
+f_get_gh_user_repos_pagination_count_or_die () {
+ 
+    # Pagination: 
+    #
+    # HTTP/1.1 200 OK
+    # ...
+    # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+
+    t_head_response=$( curl "${MY_CURL_OPTS[@]}" \
+                            --head               \
+                            "${MY_GITHUB_REPOS_URL}" \
+                       | tr -d '\r' )
+
+    if test $? -ne 0; then
+        # Hopefully curl printed something meaningful to stderr here...
+        printf "${PROG} (error): was unable to obtain pagination info for repos; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # From RFC 7230:
+    #
+    #     3.1.2.  Status Line
+    #
+    #        The first line of a response message is the status-line, consisting
+    #        of the protocol version, a space (SP), the status code, another
+    #        space, a possibly empty textual phrase describing the status code,
+    #        and ending with CRLF.
+    #
+    #          status-line = HTTP-version SP status-code SP reason-phrase CRLF
+    #
+    #        The status-code element is a 3-digit integer code describing the
+    #        result of the server's attempt to understand and satisfy the client's
+    #        corresponding request.  The rest of the response message is to be
+    #        interpreted in light of the semantics defined for that status code.
+    #        See Section 6 of [RFC7231] for information about the semantics of
+    #        status codes, including the classes of status code (indicated by the
+    #        first digit), the status codes defined by this specification,
+    #        considerations for the definition of new status codes, and the IANA
+    #        registry.
+    #
+    #          status-code    = 3DIGIT
+    #
+    #        The reason-phrase element exists for the sole purpose of providing a
+    #        textual description associated with the numeric status code, mostly
+    #        out of deference to earlier Internet application protocols that were
+    #        more frequently used with interactive text clients.  A client SHOULD
+    #        ignore the reason-phrase content.
+    #
+    #          reason-phrase  = *( HTAB / SP / VCHAR / obs-text )
+    #
+    # Note that we're following Postel's Prescription to an extent in being
+    # lenient about whether or not there is more than a single whitespace
+    # token between fields.
+    #
+    t_http_head_stat_and_label=$(echo "${t_head_response}" | head -n 1 | sed -n -e '/^HTTP[/]/ { s#^HTTP/[^[:space:]]\{1,\}[[:space:]]\{1,\}\([[:digit:]]\{3\}[[:space:]]\{1,\}.*\)#\1#p;q }')
+    if test -z "${t_http_head_stat_and_label}"; then
+        printf "${PROG} (error): was unable to extract HTTP status code from responses; bailing out\n    Full HTTP response headers:\n%s\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): HTTP status and label for pagination info: %s\n" "${t_http_head_stat_and_label}" 1>&2
+    fi
+
+    t_http_head_stat=$(  echo "${t_http_head_stat_and_label}" | sed -e 's#^\([[:digit:]]\{3\}\)[[:space:]]\{1,\}.*#\1#')
+    t_http_head_label=$( echo "${t_http_head_stat_and_label}" | sed -e 's#^[[:digit:]]\{3\}[[:space:]]\{1,\}\([[:space:][:alnum:][:punct:]]*\)$#\1#')
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): HTTP status for pagination info: %s\n" "${t_http_head_stat}"  1>&2
+        printf "${PROG} (debug): HTTP label for pagination info: %s\n"  "${t_http_head_label}" 1>&2
+    fi
+
+    if test -z "${t_http_head_stat}"; then
+        printf "${PROG} (error): was unable to determine HTTP status code of pagination info request for repo; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # Slice off leading zeros in bogon HTTP response code. Belt AND suspenders...
+    #
+    t_http_head_stat=$((10#$t_http_head_stat))
+
+    if test $t_http_head_stat -lt 100; then
+        # We'll include the full response line to help in troubleshooting. In
+        # the worst case scenario we will learn that we mis-parsed it somehow,
+        # which is a really a win in the long term.
+        printf "${PROG} (error): received bogon HTTP status line with response code less than 100 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
+        exit 1
+    fi
+
+    # Oh hell, if we're gonna check the lower bound, then we're boning it if
+    # we don't also check the upper bound...
+    if test $t_http_head_stat -gt 599; then
+        printf "${PROG} (error): received bogon HTTP status line with response code greater than 599 (\"%s\"); bailing out\n" "${t_http_head_stat_and_label}" 1>&2
+        exit 1
+    fi
+
+    # So we know that the HTTP status code is somewhere between 100 and 599...
+
+    if test $t_http_head_stat -ge 100 \
+    && test $t_http_head_stat -lt 200; then
+        printf "${PROG} (error): program does not directly grok HTTP 1xx \"Informational\" status codes; bailing out\n    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 300 \
+    && test $t_http_head_stat -lt 400; then
+        printf "${PROG} (error): program does not directly grok HTTP 3xx \"Redirection\" status codes; bailing out\n"\
+"    If you encounter this error, please submit a bug report; real-world need is likely to get it fixed.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 400 \
+    && test $t_http_head_stat -lt 500; then
+        printf "${PROG} (error): program received a HTTP 4xx \"Client Error\" status codes; bailing out\n"\
+"    If you encounter this error, please submit a bug report; it suggests there is a problem with the\n"\
+"    way in which the program is formulating requests to the upstream GitHub service.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    if test $t_http_head_stat -ge 500 \
+    && test $t_http_head_stat -lt 600; then
+        printf "${PROG} (error): program received a HTTP 5xx \"Server Error\" status codes; bailing out\n"\
+"    If you encounter this error, it suggests there is a problem with the upstream GitHub service;\n"\
+"    please wait a while and try your request later.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # Internal sanity check
+    if test $t_http_head_stat -ge 200 \
+    && test $t_http_head_stat -lt 300; then :; else
+        printf "${PROG} (bug): internal check failed. Expected that we received a 2xx \"Successful\" HTTP status code, but really have: \"%s\"; bailing out.\n"\
+"    If you encounter this error, there is a serious bug with this program; please submit a bug report.\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # So we know that the HTTP status code is somewhere between 200 and 299;
+    # we're good (probably).
+
+    # FIXME: This will break if the 'Link:' header content spans multiple
+    #        lines (which is legit; see RFC 2616 section 4.2 "Message
+    #        Headers").
+
+    # Let's find the 'Link: ' header...
+    t_http_head_link=$(echo "${t_head_response}" | grep '^Link:[[:space:]]')
+    if test $? -ne 0; then
+
+        # It's not necessarily an error if the 'Link:' header is not
+        # present. That will happen for resources that do not require any
+        # pagination. So we'll examine the individual exit status codes from
+        # our pipeline; if grep exited with status 1, it means the header was
+        # not found. If it exited with 2 it indicates an error (such as a
+        # malformed regex).
+        #
+        if test "${PIPESTATUS[0]}" -eq 0 \
+        && test "${PIPESTATUS[1]}" -eq 1; then
+            # We'll emit 1 as the count of pages needed
+            printf "1\n"
+            return  # success
+        fi
+
+        # Hopefully grep emitted something helpful on stderr already if we're
+        # falling through here...
+
+        printf "${PROG} (error): was error while attempting to locate HTTP \"Link:\" header in HEAD response; no pagination data available; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    # After the 'Link: ' header label, we expect the content to contain a
+    # comma-space-separated list of values in the form:
+    #
+    #     <url>; rel="foo", <url>; rel="bar"
+    #
+    # Example:
+    #
+    #     Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+    #
+    # We'll look for the rel="last" entry, which should be present even when
+    # it's URL value would be the same as the rel="next" entry. The first
+    # 'sed' invocation lifts out the URL from the rel="last" entry, and the
+    # second then extracts the number of the last page from the 'page=N'
+    # parameter.
+    #
+    t_last_page_number=$( echo "${t_http_head_link}" \
+                          | sed -n -e 's#.*\([<][^>]\{1,\}[>]\)[[:space:]]*[;][^,]*rel="last"#\1#p' \
+                          | sed -n -e 's#.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]]#\1#p' )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was error while attempting to parse last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+    if test -z "${t_last_page_number}"; then
+        printf "${PROG} (error): extracted empty value for last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
+"    Full HTTP response headers:\n%n\n" \
+               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+        exit 1
+    fi
+
+    printf "%s\n" "${t_last_page_number}"
+    return  # success
+}
+
+# Expects to be invoked when $PWD is within a git working directory. Checks
+# for the presence of the named git "remote" and emits 'true' or 'false' on
+# stdout to indicate whether it is present or not.
+#
+# @param REPO_NAME - the name of the git repository in which we're rummaging
+#                    around. Used only to create more informative log messages.
+#
+# @param REMOTE_NAME - the name of the git "remote" for which to check
+#
+f_check_for_git_remote_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __repo_name=$1
+    local -r __remote_name=$2
+
+    # Save original state of 'set -o' options so we can restore it below.
+    local -r __set_opts_hold=$(set +o )
+
+    set -o pipefail  # not inherited from any parent shell
+
+    local -a __t_pipestatus_hold
+
+    git remote | grep -q -F --word-regexp --max-count=1 "${__remote_name}"
+    __t_pipestatus_hold=( ${PIPESTATUS[@]} )
+
+    if test "${#__t_pipestatus_hold[@]}" -ne 2; then
+        # This is only possible if we've broken something above, which I
+        # did do during development, so I'm leaving it in.
+        printf "${PROG} (error): was error while attempting to determine if repo \"%s\" has a remote named \"%s\" defined; bailing out\n" \
+               "${__repo_name}" "${__remote_name}" 1>&2
+        exit 1
+    fi
+
+    # Restore our saved state of the original 'set -o' options
+    eval "${__set_opts_hold}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to restore saved state of 'set -o' options; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if test "${__t_pipestatus_hold[0]}" -eq 0 \
+    && test "${__t_pipestatus_hold[1]}" -eq 0; then
+
+        if $DEBUGGING; then
+            printf "${PROG} (debug): working dir for repo \"%s\" has a remote named \"%s\" defined\n" "${__repo_name}" "${__remote_name}" 1>&2
+        fi
+        printf 'true\n'
+        return 0  # success; found
+    fi
+
+    if test "${__t_pipestatus_hold[0]}" -eq 0 \
+    && test "${__t_pipestatus_hold[1]}" -eq 1; then
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): did not find a repo named \"%s\" configured for repo \"%s\"\n" "${__remote_name}" "${__repo_name}" 1>&2
+        fi
+        printf 'false\n'
+        return 0  # success; not found
+    fi
+
+    printf "${PROG} (error): was error while attempting to determine if repo \"%s\" has a remote named \"%s\" defined; bailing out\n" \
+           "${__repo_name}" "${__remote_name}" 1>&2
+    exit 1
+}
+
+while test $# -gt 0 ; do
+
+    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
+                  "x$1" : 'x\(-.\)'      \| \
+                  "x$1" : 'x\(.*\)')
+
+    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
+                  "x$1" : 'x-.\(.*\)')
+
+    case $1 in
+
+        --help | -h )
+            # print help message
+            f_print_help
+            exit 0
+            ;;
+
+        --version | -V )
+            # print program version info
+            f_print_version
+            exit 0
+            ;;
+
+        --push | -p )
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): '-p' (--push) option was specified; changes (if any) will be pushed back to 'origin' remotes\n" 1>&2
+            fi
+            DO_PUSH=true
+            shift
+            ;;
+
+        --verbose | -v )
+            # Accumulating 'verbose' opt. A single -v opt simply turns
+            # BE_VERBOSE on (info level output); two '-v' opts turns on
+            # $DEBUGGING (debug level output); three or more '-v' opts turns
+            # tracing on. Note that if you intend to turn tracing on, you'll
+            # probably want your -v opts to be the first opts on the command
+            # line (so they take effect earlier).
+            #
+            if $BE_VERBOSE; then
+
+                # We've seen at least one -v opt before; if this is the second
+                # we'll turn on debugging mode, but if it's the third or
+                # greater then we'll turn tracing on
+                if $DEBUGGING; then
+                    # We've seen at least two -v opts before, so now we're turning tracing on
+                    set -x
+                else
+                    # Second -v opt we're seeing
+                    DEBUGGING=true
+                fi
+            else
+                # First -v opt we're seeing
+                BE_VERBOSE=true
+            fi
+            shift
+            ;;
+
+        -- ) # Stop option processing
+            shift
+            break
+            ;;
+
+        --* | -* )
+            # Unrecognized option
+            printf "${PROG} (error): unrecognized option \`%s'\n" "$option" 1>&2
+            f_print_help 1>&2
+            exit 1
+            ;;
+
+        * ) # Unrecognized non-option
+
+            # We'll treat the first non-option and all remaining arguments as
+            # names of files to process; note that we DO NOT shift off the
+            # first, but merely stop processing command line options when we
+            # see it.
+            break
+            ;;
+    esac
+done
+
+declare -a EXPLICITLY_REQUESTED_REPOS=()
+
+# Any remaining arguments are interpretted as the names of repositories that
+# the user specifically wants to operate on.
+#
+# XXX: We do not currently do anything special to account for the same repo
+#      being specified more than once; I'm not yet convinced that we
+#      should. If the user tells us to operate on repos "foo bar foo", we'll
+#      operate on "foo" twice (though the second will effectively be an
+#      elaborate NOOP).
+#
+while test $# -gt 0 ; do
+
+    _one_repo_name=$1; shift
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): noting user-specified explicit repo name: \"%s\"\n" "${_one_repo_name}" 1>&2
+    fi
+
+    EXPLICITLY_REQUESTED_REPOS+=( "${_one_repo_name}" )
+done
+
+for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
+
+    t_path=$(builtin type -p "${ext_tool}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
+
+
+# Refuse to run if we do not recognize the URL as something that will be
+# encrypted on the wire. This is intended to help prevent accidentally
+# transmitting HTTP Basic Auth credentials in cleartext.
+#
+re_starts_with_https='^https://'
+if test -z "${gl_const_github_api_base_url}"; then
+    printf "${PROG} (error): GitHub API base URL is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_github_api_base_url}" =~ $re_starts_with_https ]]; then :; else
+    printf "${PROG} (error): configured GitHub API base URL (\"%s\") does not start with 'https://'; bailing out\n" "${gl_const_github_api_base_url}" 1>&2
+    exit 1
+fi
+#
+re_ends_with_slash='.*[/]$'
+if [[ "${gl_const_github_api_base_url}" =~ $re_ends_with_slash ]]; then :; else
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (\"%s\") does not end with a slash; appending slash character\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+    gl_const_github_api_base_url="${gl_const_github_api_base_url}/"
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (modified) is now: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+fi
+declare -r gl_const_github_api_base_url
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured GitHub API base URL: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+fi
+
+
+re_starts_with_accept='Accept:[[:space:]]'
+if test -z "${gl_const_http_accept_github_version}"; then
+    printf "${PROG} (error): HTTP 'Accept:' header for GitHub API version is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_http_accept_github_version}" =~ $re_starts_with_accept ]]; then :; else
+    printf "${PROG} (error): configured HTTP 'Accept:' header (\"%s\") for GitHub API version does not start with 'Accept: '; bailing out\n" "${gl_const_http_accept_github_version}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured HTTP 'Accept:' header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
+fi
+
+
+# Note that the gl_const_http_accept_github_version value is known to always
+# end with a slash character.
+#
+# per_page: The GitHub v3 API allows for retrieving results in "page sizes" up
+# to 100 (in this case, 100 repositories). If a 'per_page' value greater than
+# 100 is specified, then the service silently behaves as if 100 were
+# specified. Since we need to slurp down all of the data for our purposes
+# here, we specify the maximum page size so we have to make the fewest number
+# of remote calls while paging through the results.
+#
+MY_GITHUB_REPOS_URL="${gl_const_github_api_base_url}user/repos?per_page=100"
+
+
+# Common global options for use in every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify this array.
+#
+declare -a MY_CURL_OPTS=()
+
+# This disables output of curl's progress meter /and/ output of error messages...
+MY_CURL_OPTS+=( '--silent' )
+# ...but this re-enables output of the error messages.
+MY_CURL_OPTS+=( '--show-error' )
+
+
+# Force use of TLS 1.2. Writing in 2016, all previous versions are known to be
+# broken and susceptible to known attacks. Note that the '--tlsv1.2' option
+# was added in curl 7.34.0
+#
+# This is absolutely essential since we're using HTTP Basic Auth (see below).
+#
+MY_CURL_OPTS+=( '--tlsv1.2' )
+
+# Allow ONLY https, for both the initial request and for redirects
+MY_CURL_OPTS+=( '--proto')
+MY_CURL_OPTS+=( 'https')
+MY_CURL_OPTS+=( '--proto-redir')
+MY_CURL_OPTS+=( 'https')
+
+
+# Tell curl to use HTTP Basic Authentication. This is the curl default, but
+# we're explicit about what we expect (and want to avoid any surprises from
+# weirdo ~/.curlrc files).
+#
+# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+#
+MY_CURL_OPTS+=( '--basic' )
+
+
+# User's authentication credentials will be obtained from the user's ~/.netrc
+# file. See curl(1) and netrc(5)
+#
+MY_CURL_OPTS+=( '--netrc'  )
+
+MY_CURL_OPTS+=( '--user-agent' )
+MY_CURL_OPTS+=( "$PROG"        )
+
+
+# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+# 2016, v3 is the default, but some newer version may become the default in
+# the future.
+#
+MY_CURL_OPTS+=( '--header' )
+MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+
+# We'll build up this multi-line value in memory below. Each line will have
+# the form:
+#
+#     repo_name:repo_full_name:default_branch:is_fork
+#
+# Example of 4 such lines:
+#
+#     aas:salewski/aas:master:true
+#     abcl:salewski/abcl:master:true
+#     abstract-tables:salewski/abstract-tables:master:true
+#     ac-nrepl:salewski/ac-nrepl:master:true
+#
+# The 'is_fork' field will always be either 'true' or 'false', and indicates
+# whether or not the repo was forked from another GitHub repository. Where the
+# value is 'true', callers know they can make a request to the GitHub API's
+# /repos/:owner:repo endpoint to request more comprehensive information about
+# the repo that would include a 'parent' object. We return the value here
+# because it is also useful to know that such a call need not be made if
+# you're only interested in the parent data, or just want to know whether or
+# not a parent exists.
+#
+REPO_DATA_LINES=''
+
+# Pagination: 
+
+# HTTP/1.1 200 OK
+# ...
+# Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+
+# Note that we still obtain info on /all/ repos even if the user has specified
+# that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
+# the user specified only a couple of repos, then we lose here because we
+# techically could query the GitHub service for the info on just those
+# specific repos to accomplish our work.  If the user explicitly specifies
+# more than a few, though, we're back on solid ground because we can typically
+# get the info on all available user repos with fewer than 5 GitHub API calls
+# (it is unlikely that a typical GitHub user has more than 500 repos). In any
+# event, we do not know which page of the results a particular repo will be
+# on, so we need to pull full summary data anyway.
+#
+MY_TOTAL_REPO_PAGES=$(f_get_gh_user_repos_pagination_count_or_die)
+t_cur_page=0
+t_keep_going=true
+while $t_keep_going; do
+
+    let t_cur_page=$t_cur_page+1
+
+    t_gh_url_for_page=${MY_GITHUB_REPOS_URL}'&page='${t_cur_page}
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): requesting /user/repos page %s of %s\n" "${t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
+    fi
+
+    # For now we'll just slurp up all of the repo info into memory; we'll
+    # revisit this if needed, but <famous-last-words>we're not expecting to
+    # have enough repos that it will be a problem</famous-last-words.
+    #
+    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' < all-repos-per_page-105-001.js | head -n 5
+    #     aas:salewski/aas:master:true
+    #     abcl:salewski/abcl:master:true
+    #     abstract-tables:salewski/abstract-tables:master:true
+    #     ac-nrepl:salewski/ac-nrepl:master:true
+    #     ack2:salewski/ack2:dev:true
+    #
+    REPO_DATA_LINES=${REPO_DATA_LINES}\
+$'\n'\
+$( curl "${MY_CURL_OPTS[@]}" \
+        --get                \
+        "${t_gh_url_for_page}" \
+        | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
+
+    # The newline embedded between our existing and new REPO_DATA_LINES
+    # instances is intended to ensure that the concatenation of the two does
+    # not join the first line of the new to the last line of the old. It is
+    # possible, though, that we may have just introduced a spurious blank
+    # line; we'll strip it out if so.
+    #
+    REPO_DATA_LINES=$(echo "${REPO_DATA_LINES}" | sed -e '/^[[:space:]]*$/d' )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to strip possible empty line out of REPO_DATA_LINES (working page: %s); bailing out\n" \
+               "${t_cur_page}" 1>&2
+        exit 1
+    fi
+
+    if test $t_cur_page -ge $MY_TOTAL_REPO_PAGES; then
+        t_keep_going=false
+    fi
+
+done
+
+
+while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
+
+    : TRACE: repo_name:      "$repo_name"
+    : TRACE: repo_full_name: "$repo_full_name"
+    : TRACE: default_branch: "$default_branch"
+    : TRACE: is_fork:        "$is_fork"
+
+    # Sanity checking
+    if test -z "${repo_name}"; then
+        printf "${PROG} (BUG): 'repo_name' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${repo_full_name}"; then
+        printf "${PROG} (BUG): 'repo_full_name' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${default_branch}"; then
+        printf "${PROG} (BUG): 'default_branch' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${is_fork}"; then
+        printf "${PROG} (BUG): 'is_fork' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if   test "${is_fork}" = 'true';  then :
+    elif test "${is_fork}" = 'false'; then :
+    else
+        printf "${PROG} (BUG): invalid value detected for 'is_fork' (\"%s\"); should be either 'true' or 'false'; bailing out\n" \
+               "${is_fork}" 1>&2
+        exit 1
+    fi
+
+    if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
+
+        t_repo_is_keeper=false
+
+        for expl_repo_name in "${EXPLICITLY_REQUESTED_REPOS[@]}"; do
+
+            if test "${expl_repo_name}" = "${repo_name}"; then
+                t_repo_is_keeper=true
+                break;
+            fi
+        done
+
+        if $t_repo_is_keeper; then :; else
+
+            if $DEBUGGING; then
+                printf "${PROG} (debug): repo \"%s\" is not one of those explicitly requested for operation; skipping (okay)\n" \
+                       "${repo_name}" 1>&2
+            fi
+            continue
+        fi
+    fi
+
+    # The main purpose of this program is to:
+    #
+    #     'git merge upstream/<DEFAULT_BRANCH_NAME>'
+    #
+    # for each of our GitHub repos, but we know that a repo that is not a fork
+    # does not have an 'upstream', so has nothing that we're interested in
+    # merging for our purposes here.
+    #
+    # XXX: You may have other remotes defined, or have a non-github repo that
+    # has a remote named 'upstream', but this tool will not operate on
+    # them. Our purpose here is only to merge the default branch of the
+    # 'upstream' repo for GitHub repos.
+    #
+    if $is_fork; then :; else
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
+        fi
+        continue
+    fi
+
+    # If there's a subdirectory beneath the current location with the
+    # repository name, then it is probably the git working directory for the
+    # project. Note that it is possible to have a project cloned into a
+    # directory that does not exactly match the project name, but I don't do
+    # that with my own repos.
+    #
+    if test -d "${repo_name}"; then :; else
+
+        if $DEBUGGING; then
+            printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+        fi
+
+        continue
+    fi
+
+    if test -d "${repo_name}/.git"; then :; else
+        printf "${PROG} (warning): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+        continue
+    fi
+
+    # subshell exit status codes:
+    #    0 -- success; was able to complete work
+    #   99 -- success(ish); work skipped due to detected changes in the git index
+    #
+    #    1 (or anything else) -- error
+    (
+        unset CDPATH
+
+        cd "${repo_name}" || exit 1  # from subshell
+
+        t_has_remote_origin=$(  f_check_for_git_remote_or_die "${repo_name}" 'origin')
+        t_has_remote_upstream=$(f_check_for_git_remote_or_die "${repo_name}" 'upstream')
+
+        if $t_has_remote_origin; then :; else
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): repo \"%s\" does not have an 'origin' remote; skipping (okay)\n" "${repo_name}" 1>&2
+            fi
+            exit 0  # from subshell
+        fi
+
+        if $t_has_remote_upstream; then :; else
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): repo \"%s\" does not have an 'upstream' remote; skipping (okay)\n" "${repo_name}" 1>&2
+            fi
+            exit 0  # from subshell
+        fi
+
+        t_changes_in_index=$(git status --porcelain --untracked-files=no)
+        if test $? -ne 0; then
+            printf "${PROG} (error): [repo: \"%s\"]: was error while running 'git-status'; bailing out\n" "${repo_name}" 1>&2
+            exit 1  # from subshell
+        fi
+        if test -z "${t_changes_in_index}"; then :; else
+            printf "${PROG} (warning) repo \"%s\" has local changes; skipping\n" "${repo_name}" 1>&2
+            exit 99  # from subshell; status specific to this condition
+        fi
+
+
+        # Recall that the output of 'git branch' shows a '* ' prefix in front
+        # of the branch that is currently checked out. We use to find the name
+        # of the currently checked-out branch.
+        #
+        t_git_branch_orig=$(git branch | sed -n -e 's/^[*][[:space:]]\{1,\}//p')
+        if test $? -ne 0; then
+            printf "${PROG} (error): [repo: \"%s\"] was error while attempting to determine currently checked out branch; bailing out\n" \
+                   "${repo_name}" 1>&2
+            exit 1
+        fi
+
+        # sanity check: ensure default branch name (obtained via the GitHub
+        # API) is the name of a branch that is actually present in our working
+        # copy for both the local repo and the upstream remote (it could have
+        # been deleted, or the repo could otherwise be corrupted)
+        declare -a t_pipestatus_hold
+        git branch | sed -e 's/^[*][[:space:]]\{1,\}//' | grep -q -F --word-regexp --max-count=1 "${default_branch}"
+        t_pipestatus_hold=( ${PIPESTATUS[@]} )                                                                
+        if test "${t_pipestatus_hold[0]}" -eq 0 \
+        && test "${t_pipestatus_hold[1]}" -eq 0; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): [repo: \"%s\"]: found default branch name (\"%s\") amongst local branches\n" "${repo_name}" "${default_branch}" 1>&2
+            fi
+            # keep going
+        elif test "${t_pipestatus_hold[0]}" -eq 0 \
+          && test "${t_pipestatus_hold[1]}" -eq 1; then
+
+            printf "${PROG} (error): [repo: \"%s\"]: did not find default branch name (\"%s\") amongst local branches; bailing out\n" \
+                   "${repo_name}" \
+                   "${default_branch}" 1>&2
+            exit 1  # from subshell
+        else
+            printf "${PROG} (error): [repo: \"%s\"]: was error while reading local branch names; bailing out\n" "${repo_name}" 1>&2
+            exit 1  # from subshell
+        fi
+        #
+        git branch --remotes | sed -e 's/^[[:space:]]\{1,\}//' | grep -q -F --word-regexp --max-count=1 "upstream/${default_branch}"
+        t_pipestatus_hold=( ${PIPESTATUS[@]} )                                                                
+        if test "${t_pipestatus_hold[0]}" -eq 0 \
+        && test "${t_pipestatus_hold[1]}" -eq 0; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): [repo: \"%s\"]: found default branch name (\"%s\") amongst upstream branches\n" "${repo_name}" "${default_branch}" 1>&2
+            fi
+            # keep going
+        elif test "${t_pipestatus_hold[0]}" -eq 0 \
+          && test "${t_pipestatus_hold[1]}" -eq 1; then
+
+            printf "${PROG} (error): [repo: \"%s\"]: did not find default branch name (\"%s\") amongst upstream branches; bailing out\n" \
+                   "${repo_name}" \
+                   "${default_branch}" 1>&2
+            exit 1  # from subshell
+        else
+            printf "${PROG} (error): [repo: \"%s\"]: was error while reading remote branch names; bailing out\n" "${repo_name}" 1>&2
+            exit 1  # from subshell
+        fi
+
+        need_to_restore_orig_branch=true
+        if test "${t_git_branch_orig}" = "${default_branch}"; then
+
+            need_to_restore_orig_branch=false
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [repo: \"%s\"] currently checked-out branch (\"%s\") is the default branch (no need for checkout)\n" \
+                       "${repo_name}" "${default_branch}" 1>&2
+            fi
+        else
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [repo: \"%s\"] currently checked-out branch (\"%s\") is NOT the default branch (\"%s\"); checking out the default branch\n" \
+                       "${repo_name}"         \
+                       "${t_git_branch_orig}" \
+                       "${default_branch}" 1>&2
+            fi
+            git checkout "${default_branch}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): [repo: \"%s\"]: was unable to checkout the default branch (\"%s\"); bailing out\n" \
+                       "${repo_name}"      \
+                       "${default_branch}" 1>&2
+                exit 1
+            fi
+        fi
+
+        # If we're falling through here, then we are in a known git working
+        # directory for a repo that has both 'upstream' and 'origin' remotes
+        # defined and that has no local changes in the git index. We are on
+        # the default branch, ready to merge in any upstream merges.
+
+        git merge --ff-only "upstream/${default_branch}"
+        if test $? -ne 0; then
+            # Since our expectation is that a fast-forward merge would be
+            # possible here, we exit with an error status if that is not the
+            # case.
+            printf "${PROG} (error): [repo: \"%s\"] was error while attempting to merge 'upstream/%s'; bailing out\n" \
+                   "${repo_name}" \
+                   "${default_branch}" 1>&2
+            exit 1
+        fi
+
+        if $DEBUGGING; then
+            printf "${PROG} (debug): [repo: \"%s\"]: successfully invoked 'git merge upstream/%s'\n" "${repo_name}" "${default_branch}" 1>&2
+        fi
+
+        if $DO_PUSH; then
+            # printf "${PROG} (warning): [repo: \"%s\"] FIXME: push operation not yet supported; skipping\n" \
+            #        "${repo_name}" 1>&2
+
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [repo: \"%s\"] '-p' (--push) options specified; attempting to push default branch (\"%s\") changes to origin\n" \
+                       "${repo_name}"         \
+                       "${default_branch}" 1>&2
+            fi
+            git push --tags origin "${default_branch}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): [repo: \"%s\"]: was unable to push default branch (\"%s\") changes to origin; bailing out\n" \
+                       "${repo_name}"      \
+                       "${default_branch}" 1>&2
+                exit 1
+            fi
+        fi
+
+        if $need_to_restore_orig_branch; then
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [repo: \"%s\"] restoring previously checked-out branch (\"%s\")\n" \
+                       "${repo_name}"         \
+                       "${t_git_branch_orig}" 1>&2
+            fi
+            git checkout "${t_git_branch_orig}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previously checked-ou branch (\"%s\"); bailing out\n" \
+                       "${repo_name}"      \
+                       "${t_git_branch_orig}" 1>&2
+                exit 1
+            fi
+        else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): [repo: \"%s\"] no need to restore a previously checked-out branch\n" \
+                       "${repo_name}" 1>&2
+            fi
+        fi
+
+        exit 0  # from subshell
+    )
+
+    if test $? -ne 0; then
+# FIXME: see above note about introducing a "keep going" feature
+
+        # We're expecting that an error message would have already been printed by the subshell
+        exit $?
+    fi
+
+done < <(echo "$REPO_DATA_LINES")
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): completed successfully\n" 1>&2
+fi

@@ -1,7 +1,7 @@
 # ads-github-tools
 For now, just a scratch pad while I get familiar with the GitHub v3 API.
 
-At the moment (2016-05-09) there are three tools:
+At the moment (2016-05-09) there are four tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
@@ -13,8 +13,10 @@ At the moment (2016-05-09) there are three tools:
   uses the SHA-3 512-bit algorithm variant.
 
 * `ads-github-fetch-all-upstreams` - Operates on the working directories of a
-  collection of GitHub-hosted git repositories. Each that is found with an
-  'upstream' remote defined will have `git fetch upstream` invoked in it.
+  collection of GitHub-hosted git repositories. The user can specify one or
+  more repositories explicitly to restrict operations to just those
+  repos. Each that is found with an 'upstream' remote defined will have
+  `git fetch upstream` invoked in it.
   
   * With the `--clone-if-missing` option, any of the user's GitHub repos for
     which there is not a git working directory beneath the current location
@@ -24,6 +26,21 @@ At the moment (2016-05-09) there are three tools:
   * There's also an `--upstream-remote-if-missing` option that will add the
     'upstream' remote on existing project working directories that do not have
     it (only if the project is a fork of another project, of course).
+    
+* `ads-github-merge-all-upstreams` - Operates on the working directories of a
+  collection of GitHub-hosted git repositories. Each that is found with both
+  'origin' and 'upstream' remotes defined will have
+  `git merge upstream/<DEFAULT_BRANCH_NAME>` invoked in it. The user can
+  specify one or more repositories explicitly to restrict operations to just
+  those repos. The program is careful to sanity check the local repository
+  before attempting any operations on it. Also, it will skip any repository
+  for which the git index has any changes recorded. Will (temporarily) check
+  out the default branch before merging (if the working directory happens to
+  have some other branch checked out); will restore the originally checked out
+  branch when done if the temporary switch was necessary.
+
+  * With the `--push` option, will invoke 'git push origin <DEFAULT_BRANCH_NAME>'
+    for each repo.
 
 I'm working on sketching out a caching system for results from the GitHub API
 with the intent of making it easy to use from shell scripts or similar. The
