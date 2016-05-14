@@ -228,8 +228,7 @@ Mandatory arguments to long options are mandatory for short options too.
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
   -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
   -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
-      --                            Signals the end of options and disables further options processing. All
-                                      remaining arguments will be passed through to confget(1)
+      --                            Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
 EOF
