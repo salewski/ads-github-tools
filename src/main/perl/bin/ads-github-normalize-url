@@ -96,8 +96,10 @@ Getopt::Long::Configure(qw( bundling
                             no_require_order
                             permute));
 
-my $BE_VERBOSE   = 0;
-my $DEBUGGING    = 0;
+my $BE_VERBOSE   = 0;  # info-level output; enable with one '-v' opt
+my $DEBUGGING    = 0;  # debug-level output; enable with two '-v' opts
+my $TRACING      = 0;  # trace-level output; enable with three or more '-v' opts
+
 my $SHOW_HELP    = 0;
 my $SHOW_VERSION = 0;
 
@@ -121,12 +123,13 @@ If URL is not provided on the command line, then it is read from stdin.
 
 Options:
 
-  -h, --help            Display this message and then exit
-  -D, --debug           Turn on debugging mode (implies '-v')
-  -v, --verbose         Print program progress messages on stderr
-  -V, --version         Print program version on stdout and then exit
+  -h, --help     Display this message and then exit
+  -V, --version  Print program version on stdout and then exit
 
-  --                    Signals the end of options and disables further options processing.
+  -v, --verbose  Print program progress messages on stderr. Specify multiple
+                   times to increase verbosity; info, debug, and tracing
+
+  --             Signals the end of options and disables further options processing.
 EOH
 }
 
@@ -214,10 +217,12 @@ sub normalize_url {
 
 unless ( GetOptions(
                     q{h|help}          => \$SHOW_HELP,
-                    q{D|debug}         => \$DEBUGGING,
-                    # q{n|take-n=i}      => \$TAKE_N,
                     q{V|version}       => \$SHOW_VERSION,
-                    q{v|verbose}       => \$BE_VERBOSE,
+                    q{v|verbose}       => sub {
+                                              ++$TRACING   if ( $DEBUGGING  && !$TRACING   );
+                                              ++$DEBUGGING if ( $BE_VERBOSE && !$DEBUGGING );
+                                              ++$BE_VERBOSE unless $BE_VERBOSE;
+                                          },
                    ))
 {
     print_usage( \*STDERR );
