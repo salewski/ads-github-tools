@@ -115,8 +115,7 @@ If URL is not provided on the command line, then it is read from stdin.
   -h, --help                        Print this help message on stdout
   -V, --version                     Print the version of the program on stdout
   -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
-      --                            Signals the end of options and disables further options processing. All
-                                      remaining arguments will be passed through to confget(1)
+      --                            Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
 EOF
