@@ -43,10 +43,10 @@ declare -r VERSION='0.0.1'
 # declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 declare -r gl_const_release="${VERSION}"
 
-BE_VERBOSE=false # override with one '-v' opt
+BE_VERBOSE=false # info-level output; override with one '-v' opt
 
 # This one implies BE_VERBOSE, too
-DEBUGGING=false  # override with two '-v' opts
+DEBUGGING=false  # debug-level output; override with two '-v' opts
 
 declare -a NEEDED_EXTERNAL_PROGS=(
     awk
