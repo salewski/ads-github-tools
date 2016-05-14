@@ -228,8 +228,8 @@ Mandatory arguments to long options are mandatory for short options too.
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
   -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
 
-  -v, --verbose                     Tell what is being done. Specify multiple times to increase
-                                      verbosity: info, debug, and tracing (set -x)
+  -v, --verbose                     Print program progress messages on stderr. Specify multiple
+                                      times to increase verbosity: info, debug, and tracing (set -x)
 
       --                            Signals the end of options and disables further options processing.
 
