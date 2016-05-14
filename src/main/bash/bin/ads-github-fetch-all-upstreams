@@ -92,10 +92,10 @@ declare -r VERSION='0.0.1'
 # declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 declare -r gl_const_release="${VERSION}"
 
-BE_VERBOSE=false # override with one '-v' opt
+BE_VERBOSE=false # info-level output; override with one '-v' opt
 
 # This one implies BE_VERBOSE, too
-DEBUGGING=false  # override with two '-v' opts
+DEBUGGING=false  # debug-level output; override with two '-v' opts
 
 
 # If specified, the '--clone-if-missing' command line option directs this
@@ -227,7 +227,10 @@ Mandatory arguments to long options are mandatory for short options too.
   -V, --version                     Print the version of the program on stdout
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
   -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
-  -v, --verbose                     Tell what is being done. Two or more -v options turns on tracing (set -x)
+
+  -v, --verbose                     Tell what is being done. Specify multiple times to increase
+                                      verbosity: info, debug, and tracing (set -x)
+
       --                            Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
@@ -506,10 +509,12 @@ while test $# -gt 0 ; do
 
         --verbose | -v )
             # Accumulating 'verbose' opt. A single -v opt simply turns
-            # BE_VERBOSE on; two or more '-v' opts turns tracing on. Note that
-            # if you intend to turn tracing on, you'll probably want your -v
-            # opts to be the first opts on the command line (so they take
-            # effect earlier).
+            # BE_VERBOSE on (info level output); two '-v' opts turns on
+            # $DEBUGGING (debug level output); three or more '-v' opts turns
+            # tracing on. Note that if you intend to turn tracing on, you'll
+            # probably want your -v opts to be the first opts on the command
+            # line (so they take effect earlier).
+            #
             if $BE_VERBOSE; then
 
                 # We've seen at least one -v opt before; if this is the second
