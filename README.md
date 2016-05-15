@@ -1,7 +1,7 @@
 # ads-github-tools
 For now, just a scratch pad while I get familiar with the GitHub v3 API.
 
-At the moment (2016-05-09) there are four tools:
+At the moment (2016-05-15) there are four tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
