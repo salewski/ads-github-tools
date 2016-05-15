@@ -30,14 +30,15 @@ At the moment (2016-05-09) there are four tools:
 * `ads-github-merge-all-upstreams` - Operates on the working directories of a
   collection of GitHub-hosted git repositories. Each that is found with both
   'origin' and 'upstream' remotes defined will have
-  `git merge upstream/<DEFAULT_BRANCH_NAME>` invoked in it. The user can
-  specify one or more repositories explicitly to restrict operations to just
-  those repos. The program is careful to sanity check the local repository
-  before attempting any operations on it. Also, it will skip any repository
-  for which the git index has any changes recorded. Will (temporarily) check
-  out the default branch before merging (if the working directory happens to
-  have some other branch checked out); will restore the originally checked out
-  branch when done if the temporary switch was necessary.
+  `git merge --ff-only upstream/<DEFAULT_BRANCH_NAME>` invoked in it. The user
+  can specify one or more repositories explicitly to restrict operations to
+  just those repos. The program is careful to sanity check the local
+  repository before attempting any operations on it. Also, it will skip any
+  repository for which the git index has any changes recorded. Will
+  (temporarily) check out the default branch before merging (if the working
+  directory happens to have some other branch checked out); will restore the
+  originally checked out branch when done if the temporary switch was
+  necessary.
 
   * With the `--push` option, will invoke 'git push origin <DEFAULT_BRANCH_NAME>'
     for each repo.
