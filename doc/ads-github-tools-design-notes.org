@@ -1,0 +1,109 @@
+# -*- org -*-
+
+#+STARTUP: hidestars oddeven lognotedone lognoteredeadline lognoterepeat
+
+#+PRIORITIES: 1 2 3 4 5
+
+# Note that "RESCHEDULE" is something of a "meta todo"; it's used for todos
+# that need to be rescheduled - a flag for additional planning work to be done
+# on that particular todo. Typical flow: TODO ==> RESCHEDULE ==> TODO
+
+#+TODO: TODO(t!) IN_PROGRESS(p!) DELEGATED(D@/!) WAITING(w@/!) HOLD(h@/!) REOPENED(r@/!) RESCHEDULE(R@/!) | DONE(d@/!)
+#+TODO: | CANCELED(c@/!)
+#+TODO: | SKIPPED(s@/!)
+
+#+DRAWERS: LOGBOOK PROPERTIES MISCNOTES
+
+#+TAGS: cache github doc build
+
+#+CATEGORY: personal
+
+* ads-github-cache design notes                                :cache:github:
+
+** filesystem based
+
+*** Similar in spirit to the .git/objects/ database
+
+*** Structure consistent with XDG Specification
+
+    I'm actually on the fence with this one, but other users would likely
+    expect it. There's a tradeoff between having a single directory beneath
+    which all program-suite-related config and cache info is written and
+    splitting out the config information and cached data beneath two entirely
+    different subdirectories.
+
+    The first scheme might look something like this:
+
+    :    ~/.ads-github-tools.d/
+    :    ~/.ads-github-tools.d/etc/ads-github-tools.conf
+    :    ~/.ads-github-tools.d/var/cache/github-v3-objects/
+
+    The second (XDG-compliant) might look something like this:
+
+    :    ~/.config/
+    :    ~/.cache/
+
+    For the XDG-related bits, we could use the [[id:75c73633-b997-4f5f-a057-f2440ed8b1ab][xdgdirs]] tool to obtain the XDG
+    base directories (as opposed to having to manually implement the full spec
+    ourselves).
+
+**** XDG-related links
+
+***** XDG-related links general
+
+      https://wiki.debian.org/XDGBaseDirectorySpecification
+
+***** XDG-related links tools/libraries
+
+****** xdgdirs: command line tool; emits output for various langs (lisp, bash, json, others)
+       :PROPERTIES:
+       :ID:       75c73633-b997-4f5f-a057-f2440ed8b1ab
+       :END:
+
+       http://www.gnuvola.org/software/xdgdirs/
+       http://www.gnuvola.org/software/xdgdirs/xdgdirs.html
+       http://www.gnuvola.org/software/xdgdirs/xdgdirs.pdf
+
+
+****** Racket
+
+       https://docs.racket-lang.org/basedir/index.html
+
+       https://github.com/willghatch/racket-basedir
+
+
+****** Rust
+
+       https://github.com/whitequark/rust-xdg
+
+
+* TODO [#2] implement proper autotools-based build for ads-github-tools project :build:
+  :LOGBOOK:
+  - CREATED [2016-05-15 Sun 12:16]
+  :END:
+  :PROPERTIES:
+  :ID:       ecb0580f-246a-49cf-b29e-cba6313c16e5
+  :END:
+
+
+* documentation improvements                                            :doc:
+
+** TODO [#3] introduce man pages
+   :LOGBOOK:
+   - CREATED [2016-05-15 Sun 12:17]
+   :END:
+
+   + Background
+
+     Once we have [[id:ecb0580f-246a-49cf-b29e-cba6313c16e5][a proper build system]] in place, we should use it to generate
+     project-specific man pages. I'm thinking that most of these will be in
+     the form of POD embedded in the Perl and Bash program files.
+
+     We should also provide a top-level =ads-github-tools(7)= into page that
+     provides metadata about the project, overview of the tools, etc.
+
+
+* TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
+  :LOGBOOK:
+  - CREATED [2016-05-15 Sun 12:13]
+  :END:
