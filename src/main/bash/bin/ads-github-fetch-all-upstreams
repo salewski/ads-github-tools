@@ -1110,6 +1110,12 @@ while test $# -gt 0 ; do
     esac
 done
 
+# GitHub issue #1: If there are any explicitly requested repos that we do not
+# process, then we need to let the user know about it.
+#
+# See: https://github.com/salewski/ads-github-tools/issues/1
+declare -a PROCESSED_REPOS=()
+
 declare -a EXPLICITLY_REQUESTED_REPOS=()
 
 # Any remaining arguments are interpretted as the names of repositories that
@@ -1468,6 +1474,14 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         if $BE_VERBOSE; then
             printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
         fi
+
+        # We will treat this as "processed", just with nothing to do. There's
+        # no reason to error out when processing explicitly specified repos
+        # just because one or more of them are not forks of other GitHub
+        # repos.
+        #
+        PROCESSED_REPOS+=( "${repo_name}" )
+
         continue
     fi
 
@@ -1642,7 +1656,31 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         exit $?
     fi
 
+    PROCESSED_REPOS+=( "${repo_name}" )
+
 done < <(echo "$REPO_DATA_LINES")
+
+
+if test ${#EXPLICITLY_REQUESTED_REPOS[@]} -gt 0; then
+
+    for t_requested_repo_name in "${EXPLICITLY_REQUESTED_REPOS[@]}"; do
+
+        t_processed_it=false
+
+        for t_processed_repo_name in "${PROCESSED_REPOS[@]}"; do
+            if test "${t_requested_repo_name}" = "${t_processed_repo_name}"; then
+                t_processed_it=true
+                break
+            fi
+        done
+
+        if $t_processed_it; then :; else
+            printf "${PROG} (error): did not process explicitly requested repo: \"%s\"; bailing out\n" \
+                   "${t_requested_repo_name}" 1>&2
+            exit 1
+        fi
+    done
+fi
 
 if $BE_VERBOSE; then
     printf "${PROG} (info): completed successfully\n" 1>&2
