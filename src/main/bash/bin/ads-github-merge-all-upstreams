@@ -92,6 +92,10 @@
 #       user's available rate limit, but using a cache would be more
 #       efficient.
 #
+#     * Introduce mechanism to keep going once a repo with local changes has
+#       been identified, or maybe just keep going by default in this scenario
+#       (currently the program stops).
+#
 #
 # See Also:
 # =========
