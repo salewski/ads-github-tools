@@ -433,7 +433,7 @@ f_maybe_increase_verbosity () {
 #     $ progname -ffooval -v
 #
 #
-# #NAME: Summary of options preprocessing behavior
+# #+CAPTION: Summary of options preprocessing behavior
 # |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
 # | Opt Form Style                | Recognized? | Bundled? | Outcome                                                                                  |
 # |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
