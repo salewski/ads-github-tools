@@ -113,6 +113,15 @@
 #       user's available rate limit, but using a cache would be more
 #       efficient.
 #
+#     * Allow operation on different groups of repositories to occur in a
+#       specific order. The main motivation here would be to process a user's
+#       own non-forked repos last, as the most recently updated repos show up
+#       first on the GitHub website when browsing "All" repositories (which is
+#       the default view). Processing non-fork repos first would make the
+#       "All" view somewhat like a "Sources" view stacked on top of a "Forks"
+#       view. (The names in quotes here are the names of the links on the
+#       GitHub site's "Repositories" tab.)
+#
 #
 # See Also:
 # =========
