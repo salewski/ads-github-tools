@@ -92,10 +92,6 @@
 #       user's available rate limit, but using a cache would be more
 #       efficient.
 #
-#     * Introduce mechanism to keep going once a repo with local changes has
-#       been identified, or maybe just keep going by default in this scenario
-#       (currently the program stops).
-#
 #
 # See Also:
 # =========
@@ -121,6 +117,15 @@ declare -r VERSION='0.0.1'
 # declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 declare -r gl_const_release="${VERSION}"
 
+
+declare -i gl_const_sigpipe_number=$(builtin kill -l 'SIGPIPE')
+if test $? -ne 0; then
+    printf "${PROG} (error): was unable to determine signal number for SIGPIPE; bailing out\n" 1>&2
+    exit 1
+fi
+declare -r gl_const_sigpipe_number
+
+
 BE_VERBOSE=false # info-level output; override with one '-v' opt
 
 # This one implies BE_VERBOSE, too
@@ -133,6 +138,16 @@ DEBUGGING=false  # debug-level output; override with two '-v' opts
 # the repo has a weirdo default branch name other than 'master').
 #
 DO_PUSH=false
+
+
+# The program will never perform any operations in a local working directory
+# that has uncommitted changes, but the default behavior of the prog is to
+# print a warning message and keep going. The '-L' (--stop-upon-local-mods)
+# option allows the user to request that the program instead stop and exit
+# with status 99 upon the first repo encountered that has a local change in
+# it.
+DO_STOP_UPON_LOCAL_MODS=false
+declare -r -i ESTAT_LOCAL_MODS_FOUND=99
 
 
 # Folks using GitHub Enterprise might access their API at a different
@@ -232,12 +247,13 @@ origin repo.
 
 Mandatory arguments to long options are mandatory for short options too.
 
-  -h, --help     Print this help message on stdout
-  -V, --version  Print the version of the program on stdout
-  -p, --push     Push changes back to the 'origin' remote
+  -h, --help                  Print this help message on stdout
+  -V, --version               Print the version of the program on stdout
+  -L, --stop-upon-local-mods  Exit with status 99 upon finding a locally modified repo
+  -p, --push                  Push changes back to the 'origin' remote
 
-  -v, --verbose  Print program progress messages on stderr. Specify multiple
-                   times to increase verbosity: info, debug, and tracing (set -x)
+  -v, --verbose               Print program progress messages on stderr. Specify multiple
+                                times to increase verbosity: info, debug, and tracing (set -x)
 
       --         Signals the end of options and disables further options processing.
 
@@ -581,6 +597,11 @@ while test $# -gt 0 ; do
                 printf "${PROG} (info): '-p' (--push) option was specified; changes (if any) will be pushed back to 'origin' remotes\n" 1>&2
             fi
             DO_PUSH=true
+            shift
+            ;;
+
+        --stop-upon-local-mods | -L )
+            DO_STOP_UPON_LOCAL_MODS=true
             shift
             ;;
 
@@ -998,7 +1019,14 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             exit 1  # from subshell
         fi
         if test -z "${t_changes_in_index}"; then :; else
-            printf "${PROG} (warning) repo \"%s\" has local changes; skipping\n" "${repo_name}" 1>&2
+            t_skipping_or_blank='; skipping'
+            if $DO_STOP_UPON_LOCAL_MODS; then
+                # The parent shell will exit with a non-zero status, so we
+                # avoid printing the "skipping" note.
+                #
+                t_skipping_or_blank=''
+            fi
+            printf "${PROG} (warning): repo \"%s\" has local changes%s\n" "${repo_name}" "${t_skipping_or_blank}" 1>&2
             exit 99  # from subshell; status specific to this condition
         fi
 
@@ -1041,21 +1069,23 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         #
         git branch --remotes | sed -e 's/^[[:space:]]\{1,\}//' | grep -q -F --word-regexp --max-count=1 "upstream/${default_branch}"
         t_pipestatus_hold=( ${PIPESTATUS[@]} )                                                                
-        if test "${t_pipestatus_hold[0]}" -eq 0 \
-        && test "${t_pipestatus_hold[1]}" -eq 0; then
+        if { test "${t_pipestatus_hold[0]}" -eq 0 || (( t_pipestatus_hold[0] == ( 128 + gl_const_sigpipe_number ) )); } \
+        && { test "${t_pipestatus_hold[1]}" -eq 0 || (( t_pipestatus_hold[1] == ( 128 + gl_const_sigpipe_number ) )); } \
+        &&   test "${t_pipestatus_hold[2]}" -eq 0; then
             if $DEBUGGING; then
                 printf "${PROG} (debug): [repo: \"%s\"]: found default branch name (\"%s\") amongst upstream branches\n" "${repo_name}" "${default_branch}" 1>&2
             fi
             # keep going
-        elif test "${t_pipestatus_hold[0]}" -eq 0 \
-          && test "${t_pipestatus_hold[1]}" -eq 1; then
+        elif { test "${t_pipestatus_hold[0]}" -eq 0 || (( t_pipestatus_hold[0] == ( 128 + gl_const_sigpipe_number ) )); } \
+          && { test "${t_pipestatus_hold[1]}" -eq 0 || (( t_pipestatus_hold[1] == ( 128 + gl_const_sigpipe_number ) )); } \
+          &&   test "${t_pipestatus_hold[2]}" -eq 1; then
 
             printf "${PROG} (error): [repo: \"%s\"]: did not find default branch name (\"%s\") amongst upstream branches; bailing out\n" \
                    "${repo_name}" \
                    "${default_branch}" 1>&2
             exit 1  # from subshell
         else
-            printf "${PROG} (error): [repo: \"%s\"]: was error while reading remote branch names; bailing out\n" "${repo_name}" 1>&2
+            printf "${PROG} (error): [repo: \"%s\"]: was error while reading remote branch names (pipe estats: [0]: %s, [1]: %s, [2]: %s); bailing out\n" "${repo_name}" "${t_pipestatus_hold[@]}" 1>&2
             exit 1  # from subshell
         fi
 
@@ -1147,12 +1177,29 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         exit 0  # from subshell
     )
 
-    if test $? -ne 0; then
-# FIXME: see above note about introducing a "keep going" feature
+    ss_estat=$?
 
-        # We're expecting that an error message would have already been printed by the subshell
-        exit $?
+    if test $ss_estat -eq 0; then
+        continue
     fi
+
+    if test $ss_estat -eq 99; then
+
+        # Subshell exited with status code 99, indicating that a git repo was
+        # found that contains local modifications. Our default behavior will
+        # be to skip it an keep going, but the user may have requested that we
+        # stop processing if we find such a thing.
+        #
+        if $DO_STOP_UPON_LOCAL_MODS; then
+            printf "${PROG} (warning): locally modified repo found and '-L' (--stop-upon-local-mods) specified; exiting with status %s\n" "${ESTAT_LOCAL_MODS_FOUND}" 1>&2
+            exit $ESTAT_LOCAL_MODS_FOUND
+        else
+            continue
+        fi
+    fi
+
+    # We're expecting that an error message would have already been printed by the subshell
+    exit $ss_estat
 
 done < <(echo "$REPO_DATA_LINES")
 
