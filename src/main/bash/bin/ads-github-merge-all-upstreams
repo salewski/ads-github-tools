@@ -83,6 +83,27 @@
 # trees up to date with upstreams can be a chore. This tool performs one piece
 # of automation that can contribute to a solution.
 #
+#
+# Design Notes
+# ============
+#
+#     * Exit status code category ranges:
+#
+#          0 is success.
+#
+#       1-99 are reserved for error codes (1 is the only error code currently
+#            used)
+#
+#    100-120 are reserved for "success-ish" status codes that communicate
+#            something meaningful back to the parent process. Currently there
+#            is only one such code defined:
+#
+#            100 -- Indicates that the program exited upon finding a locally
+#                   modfied repository with uncommitted changes. The user must
+#                   explicitly request this behavior via the '-L'
+#                   (--stop-upon-local-mods) command line option.
+#
+#
 # TODO
 # ====
 #
@@ -144,10 +165,29 @@ DO_PUSH=false
 # that has uncommitted changes, but the default behavior of the prog is to
 # print a warning message and keep going. The '-L' (--stop-upon-local-mods)
 # option allows the user to request that the program instead stop and exit
-# with status 99 upon the first repo encountered that has a local change in
+# with status 100 upon the first repo encountered that has a local change in
 # it.
 DO_STOP_UPON_LOCAL_MODS=false
-declare -r -i ESTAT_LOCAL_MODS_FOUND=99
+declare -r -i ESTAT_LOCAL_MODS_FOUND=100
+
+
+# If we get an error while attempting to perform a fast-forward merge on the
+# repo, the default behavior is to exit with an error message. If you are not
+# expecting the problem with the fast-forward merge, then that is exactly the
+# behavior that you want. If you /are/ expecting it, though, you will be
+# annoyed that the program has stopped instead of just moving onto the next
+# repo. Enter the '-k' option; if specified, the program will stop processing
+# the repo in which it could not perform the fast-forward merge, but will go
+# on to the next repo.
+#
+DO_KEEP_GOING_UPON_ERROR=false  # override with '-k' (--keep-going) opt
+
+# We'll flip this flag to true if we encounter an error that we will continue
+# through due to the '-k' (--keep-going) opt having been specified by the
+# user; we will still want to exit the program with an error status in such a
+# scenario.
+#
+CONTINUED_THROUGH_ERROR=false
 
 
 # Folks using GitHub Enterprise might access their API at a different
@@ -249,7 +289,8 @@ Mandatory arguments to long options are mandatory for short options too.
 
   -h, --help                  Print this help message on stdout
   -V, --version               Print the version of the program on stdout
-  -L, --stop-upon-local-mods  Exit with status 99 upon finding a locally modified repo
+  -k, --keep-going            Keep going when a repo cannot be fast-forward merged
+  -L, --stop-upon-local-mods  Exit with status 100 upon finding a locally modified repo
   -p, --push                  Push changes back to the 'origin' remote
 
   -v, --verbose               Print program progress messages on stderr. Specify multiple
@@ -590,6 +631,11 @@ while test $# -gt 0 ; do
             # print program version info
             f_print_version
             exit 0
+            ;;
+
+        --keep-going | -k )
+            DO_KEEP_GOING_UPON_ERROR=true
+            shift
             ;;
 
         --push | -p )
@@ -988,7 +1034,9 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
     # subshell exit status codes:
     #    0 -- success; was able to complete work
-    #   99 -- success(ish); work skipped due to detected changes in the git index
+    #  100 -- success(ish); work skipped due to detected changes in the git index
+    #
+    #   99 -- error(ish); was unable to perform a fast-forward merge for some reason
     #
     #    1 (or anything else) -- error
     (
@@ -1027,7 +1075,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                 t_skipping_or_blank=''
             fi
             printf "${PROG} (warning): repo \"%s\" has local changes%s\n" "${repo_name}" "${t_skipping_or_blank}" 1>&2
-            exit 99  # from subshell; status specific to this condition
+            exit 100  # from subshell; status specific to this condition
         fi
 
 
@@ -1127,7 +1175,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             printf "${PROG} (error): [repo: \"%s\"] was error while attempting to merge 'upstream/%s'; bailing out\n" \
                    "${repo_name}" \
                    "${default_branch}" 1>&2
-            exit 1
+            exit 99
         fi
 
         if $DEBUGGING; then
@@ -1183,9 +1231,11 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         continue
     fi
 
-    if test $ss_estat -eq 99; then
+    # success-ish conditions
 
-        # Subshell exited with status code 99, indicating that a git repo was
+    if test $ss_estat -eq 100; then
+
+        # Subshell exited with status code 100, indicating that a git repo was
         # found that contains local modifications. Our default behavior will
         # be to skip it an keep going, but the user may have requested that we
         # stop processing if we find such a thing.
@@ -1198,10 +1248,41 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         fi
     fi
 
+    # error-ish conditions (things that will, by default, stop the program
+    # with an error code and notify the user by default).
+
+    if test $ss_estat -eq 99; then
+
+        # Subshell exited with status code 99, indicating that a fast-forward
+        # merge could not be performed in the repo for some reason. There are
+        # lots of perfectly legitimate reasons that this could be the case,
+        # but in case it is unexpected by the user our default behavior is to
+        # stop the program to inform him. Users who expect that this may be
+        # the case for one or more of their repos and are not concerned about
+        # it can pass the '-k' (--keep-going) option to override the default
+        # behavior.
+        #
+        if $DO_KEEP_GOING_UPON_ERROR; then
+            printf "${PROG} (warning): '-k' (--keep-going) specified; continuing\n" 1>&2
+            CONTINUED_THROUGH_ERROR=true
+            continue
+        else
+            # We're expecting that an error message would have already been
+            # printed by the subshell
+            #
+            exit 1
+        fi
+    fi
+
     # We're expecting that an error message would have already been printed by the subshell
     exit $ss_estat
 
 done < <(echo "$REPO_DATA_LINES")
+
+if $DO_KEEP_GOING_UPON_ERROR && $CONTINUED_THROUGH_ERROR; then
+    printf "${PROG} (error): one or more errors encountered with '-k' (--keep-going) specified (see error output above for details); bailing out\n" 1>&2
+    exit 1
+fi
 
 if $BE_VERBOSE; then
     printf "${PROG} (info): completed successfully\n" 1>&2
