@@ -1197,7 +1197,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
 
             if $BE_VERBOSE; then
-                printf "${PROG} (info): [repo: \"%s\"] '-p' (--push) options specified; attempting to push default branch (\"%s\") changes to origin\n" \
+                printf "${PROG} (info): [repo: \"%s\"] '-p' (--push) option specified; attempting to push default branch (\"%s\") changes to origin\n" \
                        "${repo_name}"         \
                        "${default_branch}" 1>&2
             fi
