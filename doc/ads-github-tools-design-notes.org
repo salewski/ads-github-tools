@@ -77,7 +77,7 @@
        https://github.com/whitequark/rust-xdg
 
 
-* TODO [#2] implement proper autotools-based build for ads-github-tools project :build:
+* TODO [#2] implement proper autotools-based build for ads-github-tools project ([[https://github.com/salewski/ads-github-tools/issues/5][issue #5]]) :build:
   :LOGBOOK:
   - CREATED [2016-05-15 Sun 12:16]
   :END:
