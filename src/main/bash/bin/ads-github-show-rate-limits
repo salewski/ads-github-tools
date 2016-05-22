@@ -1,0 +1,1211 @@
+#!/bin/bash -
+
+# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-show-rate-limits: Show user's GitHub API rate limits. Makes an
+# authenticated HTTP 'HEAD' call to the GitHub API (using curl) to obtain the
+# HTTP response headers that contain the service rate limit information. The
+# rate limit information is parsed out of the headers and presented to the
+# user.
+#
+# The default output (whitespace delimited columns of plain text) is suitable
+# for a user working interactively in a shell and for use in a Unix shell
+# pipeline.
+#
+# FIXME: A future version will provide options to allow the user to request
+#        output in some specific formats (edn, json).
+#
+# All requests are made over HTTPS.
+#
+# Authentication
+# ==============
+# No authentication data is used directly; the curl(1) '-n' (--netrc) option
+# is used, so the user is expected to have his GitHub credentials stored in a
+# ~/.netrc file. For details on setting that up, see curl(1) and
+# netrc(5). Note that curl will not use the ~/.netrc file if the permissions
+# allow reading by group or other.
+#
+# HINT: The relevant line ~/.netrc file content should have the form:
+#
+#     machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PASSWORD
+#
+# CAVEAT: Use of the netrc(5) configuration means that this tool is ultimately
+# using username/password with the GitHub API. Though all communication is
+# conducted over HTTPS (so is encrypted "on the wire"), this authentication
+# mechanism allows this tool to access the full power of the GitHub API.
+#
+# DO NOT USE THIS TOOL UNLESS YOU TRUST THAT IT IS NOT ABUSING THIS TRUST.
+#
+# Use of the OAuth mechanisms would allow for the access needed by this
+# program while preventing use of the access it does not need. I'm not
+# worrying about that at the moment though, as I'm the only user, and I expect
+# that anything more elaborate should probably be integrated into a more
+# featureful tool (such as 'git-hub', which already has OAuth support).
+#
+# Motivation
+# ==========
+#
+# When working with the programs provided by the 'ads-github-tools' project
+# (or really any tool that makes calls to the GitHub API) you will want to be
+# able to confirm that you are within your rate limit and how many requests
+# you still have left before you hit your cap.
+#
+# You may also be working on a set of similar tools and just want to confirm
+# that they are working as expected -- not incurring hits against your GitHub
+# API rate limit when you do not expect them to.
+#
+#
+# TODO
+# ====
+#
+#     * Provide an option to allow user to request output in different formats
+#       (edn, json, ...)
+#
+# See Also:
+# =========
+#
+#     * The 'Rate Limiting' section of the GitHub API (v3)
+#       https://developer.github.com/v3/#rate-limiting
+#       https://developer.github.com/v3/rate_limit/
+#
+#     * The 'git-hub' tool:
+#       https://github.com/sociomantic-tsunami/git-hub
+
+declare -r PROG='ads-github-show-rate-limits'
+
+set -o pipefail
+
+
+# FIXME: one day this will be filtered in at build time
+declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+
+# FIXME: one day this will be filtered in at build time
+declare -r VERSION='0.0.1'
+
+# FIXME: one day this will be filtered in at build time
+# This variable is replaced at build time
+# declare -r gl_const_build_date='@BUILD_DATE@'
+# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+declare -r gl_const_release="${VERSION}"
+
+BE_VERBOSE=false # info-level output; override with one '-v' opt
+
+# This one implies BE_VERBOSE, too
+DEBUGGING=false  # debug-level output; override with two '-v' opts
+
+
+HUMAN_READABLE_MODE=false  # override with '-h' (--human-readable) opt
+
+
+declare -r gl_const_re_all_digits='^[[:digit:]]{1,}$'
+
+
+# Folks using GitHub Enterprise might access their API at a different
+# location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
+# URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
+# credentials being transmitted in cleartext!).
+#
+# This is NOT declared read-only here because there is some minor fixup that
+# we attempt so users do not need to be concerned with whether or not the URL
+# ends with a slash. For our purposes we need the value to end with a slash,
+# and will add a slash to the end if it is not specified here.
+#
+declare    gl_const_github_api_base_url='https://api.github.com/'
+
+# We'll help future-proof this program by explicitly requesting version 3 of
+# the GitHub API (although it is the default at the time of writing
+# (2016-04)).
+#
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+# git-hub - command line GitHub API tool; works as 'git' subcommand if found
+#           on PATH
+#           see: https://github.com/sociomantic-tsunami/git-hub
+#                https://www.kernel.org/pub/software/scm/git/docs/howto/new-command.html
+#
+declare -a NEEDED_EXTERNAL_PROGS=(
+    cat
+    curl
+    expr
+    head
+    jq
+    git
+    # git-hub
+    sed
+    tr
+)
+
+
+declare -a F_CLEANUP_HOOK_NAMES=()
+
+function f_add_cleanup_hook_name () {
+    F_CLEANUP_HOOK_NAMES+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#F_CLEANUP_HOOK_NAMES[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#F_CLEANUP_HOOK_NAMES[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${F_CLEANUP_HOOK_NAMES[$idx]}
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): running cleanup hook: [%s]\n" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf "$PROG (warn): HUP signal caught; bailing out\n"  1>&2; f_cleanup_and_die' HUP
+trap 'printf "$PROG (warn): INT signal caught; bailing out\n"  1>&2; f_cleanup_and_die' INT
+trap 'printf "$PROG (warn): QUIT signal caught; bailing out\n" 1>&2; f_cleanup_and_die' QUIT
+trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+
+f_print_help () {
+
+    cat <<EOF
+usage: $PROG [OPTION...] [REPO...]
+Requests user's rate limit information from GitHub and displays it on stdout
+
+      --help            Print this help message on stdout
+  -V, --version         Print the version of the program on stdout
+
+  -h, --human-readable  Print numbers and dates in human readable format (e.g., "4,835")
+
+  -v, --verbose         Print program progress messages on stderr. Specify multiple
+                          times to increase verbosity: info, debug, and tracing (set -x)
+
+      --                Signals the end of options and disables further options processing.
+
+Report bugs to $MAINTAINER.
+EOF
+}
+
+f_print_version () {
+    cat <<EOF
+${PROG} ${gl_const_release}
+Copyright (C) 2016 Alan D. Salewski
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+# Indicates whether or not the provided MAYBE_ARRAY_NAME parameter is the name
+# of a bash array.
+#
+f_is_array () {
+
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __maybe_array_name=$1
+
+    local -r __has_opt_a='declare -[A-Zb-z]*a'
+    if [[ "$(declare -p "${__maybe_array_name}" 2>/dev/null)" =~ ${__has_opt_a} ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Works similarly to bash's built-in 'shift' command, but operates on the
+# named array rather than $@.
+#
+# Usage: f_shift ARRAY_NAME [n]
+#
+# If N is not given, it is assumed to be 1.
+#
+# Returns success unless N is negative or greater than the number of elements
+# in the named array.
+#
+f_shift () {
+
+    local __required_min_count=1
+    local __max_allowed_count=2
+    if test $# -lt ${__required_min_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at least %d required; bailing out\n" \
+               $# ${__required_min_count} 1>&2
+        exit 1
+    fi
+    if test $# -gt ${__max_allowed_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at most %d allowed; bailing out\n" \
+               $# ${__max_allowed_count} 1>&2
+        exit 1
+    fi
+
+    local -r __array_name=$1
+
+    local __shift_count=1  # default
+    if test $# -eq 2; then
+        __shift_count=$2
+    fi
+    local -r __shift_count
+
+    local -r __t_re_positive_integer='^[[:digit:]]{1,}$'
+
+    if [[ "${__shift_count}" =~ ${__t_re_positive_integer} ]]; then :; else
+        printf "${PROG} (error): ${FUNCNAME}() N (shift count) parameter must be a positive integer; got \"%s\"\n" "${__shift_count}" 1>&2
+        return 1
+    fi
+
+    if f_is_array "${__array_name}"; then :; else
+        printf "${PROG} (error): ${FUNCNAME}() value of ARRAY_NAME parameter (\"%s\") does not name an array\n" "${__array_name}" 1>&2
+        return 1
+    fi
+
+    # XXX: This is a hack to work around the bash syntax collision in which
+    #      ${!foo[@]} expands to the index positions of the elements in the
+    #      array rather than an indirect reference (which works for non-array
+    #      types such as ${!foo}). By putting the '[@]' subscript into the
+    #      value of the named array, we /can/ iterate over it's values below
+    #      using the indirect reference syntax.
+    #
+    local __t_arrayref="${__array_name}[@]"
+
+    # for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
+    #     : $PROG \(trace: $LINENO\): [before]: one t_the_array value: $tval
+    # done
+
+    # This loses when command array values contain shell syntax (e.g.,
+    # '--blah$BLAH'), so we do it the long way down below:
+    #
+    # eval "${__array_name}=( ${!__t_arrayref:${__shift_count}} )"
+
+    declare -a __t_new_array=()
+    local __t_cnt=0
+    for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
+        (( ++__t_cnt ))
+
+        if (( ${__t_cnt} <= ${__shift_count} )); then
+            : $PROG \(trace: $LINENO\): shifting off element ${__t_cnt} from array ${__array_name} : val: $tval
+            continue
+        fi
+
+        __t_new_array[$(( ${__t_cnt} - 1 ))]="$tval"
+    done
+
+    for tval in "${__t_new_array[@]}"; do
+        : $PROG \(trace: $LINENO\): [after]: one t_new_array value: $tval
+    done
+
+    eval "${__array_name}=()"  # empty out
+    for t_idx in "${!__t_new_array[@]}"; do
+        eval "${__array_name}[${t_idx}]=\"$(printf '%q' "${__t_new_array[${t_idx}]}")\""
+    done
+
+# # DEBUG go
+#     # This just allows for inspection of the referenced array as it will
+#     # appear to the caller once this function returns.
+#     #
+#     local __t_arrayref2="${__array_name}[@]"
+
+#     for tval in "${!__t_arrayref2}"; do  # iterating over elements of indirectly referenced array
+#         : $PROG \(trace: $LINENO\): [final]: one ${__array_name} value: $tval
+#     done
+# # DEBUG end
+
+    return 0  # success
+}
+
+# Invoked by our accumulating '-v' (--verbose) option. Increases the program
+# output verbosity level by "one stage".
+#
+# If we have not yet increased the verbosity, then enables info-level output
+# ($BE_VERBOSE).
+#
+# If we are currently at info-level verbosity, then enables debug-level output
+# ($DEBUGGING).
+#
+# If we are currently at debug-level verbosity, then enables trace-level
+# output (set -x).
+#
+# If we are already at trace-level verbosity, then this function has no effect
+# (is effectively a NOOP).
+#
+f_maybe_increase_verbosity () {
+
+    if $BE_VERBOSE; then
+
+        # We are (at least) at info-level verbosity currently.
+        if $DEBUGGING; then
+            # We are (at least) at debug-level verbosity currently.
+
+            case $- in
+                *x* )
+                    : $PROG \(trace: $LINENO\): tracing already enabled
+                    ;;
+                * )
+                    printf "${PROG} (debug): additional verbosity requested; enabling trace-level output\n" 1>&2
+                    set -x
+                    ;;
+            esac
+        else
+            printf "${PROG} (info): additional verbosity requested; enabling debug-level output\n" 1>&2
+            DEBUGGING=true
+        fi
+    else
+        printf "${PROG} (info): verbose output requested; enabling info-level output\n" 1>&2
+        BE_VERBOSE=true
+    fi
+}
+
+# Intended to be invoked prior to "the real" command line options processing
+# being done. Modifies the provided OUTPUT_ARRAY_NAME array variable (after
+# emptying it out) to contain elements that are the positional parameters of a
+# rewritten representation of the command line; any /legitimate/ short-form
+# options are expanded to use their long-form option representations.
+#
+# This also allows us to leverage the built-in getopts's ability to parse
+# "bundled" short-form options, both with and without option arguments.
+#
+# The idea is to allow all of the following to work (while not precluding the
+# use of long-form command line options), which is difficult to implement in a
+# general fashion without getopts's help (or by using the external 'getopt'
+# tool, which is both an external dependency we would rather avoid, and is
+# infamously non-portable):
+#
+#     $ progname -v -f fooval
+#     $ progname -v -ffooval
+#     $ progname -vffooval
+#     $ progname -ffooval -v
+#
+#
+# #+CAPTION: Summary of options preprocessing behavior
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | Opt Form Style                | Recognized? | Bundled? | Outcome                                                                                  |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | short-form                    | Y           | Y        | rewritten in long-form                                                                   |
+# | short-form                    | Y           | N        | rewritten in long-form                                                                   |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | short-form                    | N           | Y        | rewritten as unbundled short-form                                                        |
+# | short-form                    | N           | N        | passed through "as is"                                                                   |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | long-form                     | n/a         | n/a      | all are passed through "as is"                                                           |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | non-option arguments          | n/a         | n/a      | all are passed through "as is" (but see next item)                                       |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+# | end-of-options indicator (--) | n/a         | n/a      | (effectively) passed through "as is", though we jump through flaming hoops for the cause |
+# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
+#
+#
+# CAREFUL: Since we special-case verbosity output handling here (to allow it
+#          to occur as early as possible) it is important that this function
+#          be invoked within the same bash process as its caller (as opposed
+#          to being invoked in a subshell). A subprocess would be unable to
+#          directly affect the state of the parent process, so the parent
+#          process would not know whether or not the verbosity levels had been
+#          increased (...at least not without implementing a more complicated
+#          protocol).
+#
+# Usage (XXX: subject to change):
+#
+#     declare -a MY_COMMAND_LINE_OPTIONS=( "$@" )
+#     declare -a MY_COMMAND_LINE_OPTIONS_REWRITTEN=()
+#     f_rewrite_command_line_or_die MY_COMMAND_LINE_OPTIONS_REWRITTEN
+#     set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
+#     <<"Real" command line options processing here>>
+#
+# XXX: Use of the array named MY_COMMAND_LINE_OPTIONS is currently hard-coded.
+#
+# FIXME: Generalize this to work with a provided data map (similar in spirit
+#        to getopts's OPTSTRING parameter). A similar idea expressed here
+#        would need to provide (at least) both the long- and short-form option
+#        names and an indicator as to whether or not they take an argument.
+#
+f_rewrite_command_line_or_die () {
+
+    local __required_min_count=1
+    local __max_allowed_count=1
+    if test $# -lt ${__required_min_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at least %d required; bailing out\n" \
+               $# ${__required_min_count} 1>&2
+        exit 1
+    fi
+    if test $# -gt ${__max_allowed_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at most %d allowed; bailing out\n" \
+               $# ${__max_allowed_count} 1>&2
+        exit 1
+    fi
+
+    local -r __output_array_name=$1
+
+    if f_is_array "${__output_array_name}"; then :; else
+        printf "${PROG} (error): ${FUNCNAME}() value of OUTPUT_ARRAY_NAME parameter (\"%s\") does not name an array\n" "${__output_array_name}" 1>&2
+        return 1
+    fi
+
+
+    # We'll rewrite the command line below to expand (possibly grouped)
+    # short-form options (some of which may have option arguments) into their
+    # respective long-form representations. We'll be using bash's builtin
+    # 'getopts' command for that purpose, which honors the value '--' to mean
+    # "end of options". However, getopts does not provide a mechanism to allow
+    # us to determine if it stopped processing options due to the presence of
+    # that value, and /not/ providing it on our rewritten command line, if
+    # needed, could actually cause an invalid invocation. We therefore make a
+    # note of the index positions at which the value occurs, and use this info
+    # later to determine whether or not we need to add the value back into our
+    # rewritten command line.
+    #
+    # Note that we need to deal with pathological situations here, as getopts
+    # will (legitimately) parse '--' as an option argument value rather than
+    # as "end of options" if it appears in a location where an option is
+    # expecting an argument.
+    #
+    # If getopts has stopped parsing due to the presence of a '--' value, then
+    # we can detect that scenario by counting the the number of '--' values
+    # still available in the combined options values and the remaining
+    # unparsed portion of the command line. If getopts stopped processing due
+    # to '--', the count will be off by one.
+    #
+    # Note that we record the position numbers mainly for debugging purposes;
+    # what we are really interested in are the counts of the items in each
+    # of the __t_end_of_options_* arrays.
+    #
+    local -a __t_end_of_options_positions=()
+    local __t_pos=0
+    for __t_posval in "${MY_COMMAND_LINE_OPTIONS[@]}"; do
+        (( ++__t_pos ))
+        if test "${__t_posval}" = '--'; then
+            __t_end_of_options_positions+=( $__t_pos )
+        fi
+    done
+
+    local -a __t_end_of_options_seen_as_optargs=()
+    local -a __t_end_of_options_seen_unprocessed=()
+
+    local -a __t_expanded_command_line=()
+    if test ${#MY_COMMAND_LINE_OPTIONS[@]} -gt 0; then
+        # Re-write the command line to expand (perhaps grouped) short-form
+        # options into their respective long-form variants.
+
+        # These allow us to stop looking at a positional token once we've
+        # consumed it. When getopts sees a long-form option, it attempts to
+        # parse each character of it as short form options. While it is doing
+        # this, it sets the variable, OPTARG, and OPTIND normal but we
+        # interpret them differently until we detect that getopts has parsed
+        # the entire token.
+        #
+        local __t_toskip_value=
+        local __t_toskip_parsed=
+
+        # Any arguments not recognized based on the specification provided
+        # here are simply ignored by 'getopts' operating in "silent mode".
+
+        while builtin getopts ':hVv' __t_opt "${MY_COMMAND_LINE_OPTIONS[@]}"; do
+
+            : $PROG \(trace: $LINENO\): total-args: ${#MY_COMMAND_LINE_OPTIONS[@]},  OPTIND: $OPTIND,  __t_opt: ${__t_opt}, OPTARG: $OPTARG
+
+            if test -n "${__t_toskip_value}"; then
+                : $PROG \(trace: $LINENO\): OPTIND is $OPTIND,  __t_toskip_value: ${__t_toskip_value},  __t_toskip_parsed "before: ${__t_toskip_parsed}"
+
+                # If we're falling through here, then getopt will consider
+                # /most/ of what it is parsing as an invalid option, but by
+                # coincidence the single character it is parsing (out of the
+                # probably larger string) may happen to be the same as one of
+                # the legit short-form option chars. We'll handle both
+                # scenarios.
+
+                case ${__t_opt} in
+                    '?' )
+                        # no collision with declared single char opts
+                        __t_toskip_parsed="${__t_toskip_parsed}${OPTARG}" ;;
+
+                    * )
+
+                        # collision with declared single char opt, so we will
+                        # collect all getopts-parsed pieces.
+                        
+                        # XXX: This is inherently fragile because an option
+                        #      that is declared to take an argument will be
+                        #      parsed by getopts differently than one that
+                        #      does not. We'll capture both pieces here, but
+                        #      know that that OPTARG may or may not be the
+                        #      empty string.
+
+                        __t_toskip_parsed="${__t_toskip_parsed}${__t_opt}${OPTARG}" ;;
+                esac
+
+                : $PROG \(trace: $LINENO\): OPTIND is $OPTIND,  __t_toskip_value: ${__t_toskip_value},  __t_toskip_parsed "after:  ${__t_toskip_parsed}"
+
+                if test "${__t_toskip_parsed}" = "${__t_toskip_value}"; then
+                    : $PROG \(trace: $LINENO\): full toskip value has been parsed -- skipping and resetting
+
+                    __t_toskip_value=   # reset
+                    __t_toskip_parsed=  # reset
+                else
+                    : $PROG \(trace: $LINENO\): full toskip value not yet parsed -- skipping
+                fi
+                continue
+            fi
+
+            case ${__t_opt} in
+
+                'V' ) __t_expanded_command_line+=( '--version' ) ;;
+
+                'h' ) __t_expanded_command_line+=( '--human-readable') ;;
+
+                'v' )
+                    # As a special case, we will process our accumulating '-v'
+                    # options in this section directly (as opposed to simply
+                    # adding them to our rewritten command line). For
+                    # debugging purposes, we want to be able to increase the
+                    # verbosity as early as possible.
+                    #
+                    # A single -v opt simply turns BE_VERBOSE on (info level
+                    # output); two '-v' opts turns on $DEBUGGING (debug level
+                    # output); three or more '-v' opts turns tracing on.
+                    #
+                    # Note that if you intend to turn tracing on, you'll
+                    # probably want your -v opts to be the first opts on the
+                    # command line (so they take effect earlier).
+                    #
+                    f_maybe_increase_verbosity
+                    ;;
+
+                ':')  # getopts put : in ${__t_opt}
+                    printf "${PROG} (ERROR): missing argument for option -${OPTARG}\n" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                    ;;
+
+                '?')  # getopts put ? in ${__t_opt}
+
+                    # If an "invalid" option is seen, 'getopts' places the
+                    # option character found into OPTARG. So a short- or
+                    # long-form option was encountered that is not recognized
+                    # by our deliberately limited optstring above.
+                    #
+                    # We will simply restore the '-' character that 'getopts'
+                    # has stripped off, and add the option to our rewritten
+                    # command line (so a '-Z' option is seen below as '-z'
+                    # rather than just 'z', and a '--foo' option is see as
+                    # '--foo' rather than '-foo')
+                    #
+                    # Note that this could leave invalid short-form options on
+                    # the command line, but they will be "standalone" (not
+                    # "bundled"); the caller will handle that scenario
+                    # downstream from this function invocation.
+                    #
+                    : $PROG \(trace: $LINENO\): preliminarily unrecognized opt: -$OPTARG
+                    if test "${OPTARG}" = '-'; then
+
+                        # getopts has started parsing a long-form command line
+                        # option. It sliced off the first '-', and has
+                        # interpretted the second as the name of the option.
+                        #
+                        # Recall that OPTIND contains the index of the /next/
+                        # argument to be processed, so we need to subtract one
+                        # to get the index of the argument that it getopts is
+                        # /currently/ parsing.
+                        #
+                        # We'll take the entire positional value to pass
+                        # through...
+                        #
+                        __t_expanded_command_line[${#__t_expanded_command_line[@]}]=${MY_COMMAND_LINE_OPTIONS[$(( $OPTIND - 1))]}
+                        #
+                        # ...and ignore output from getopts until it moves on
+                        # to parsing the next positional element (if any):
+                        #
+                        __t_skip_until=$(( $OPTIND + 1 ))
+                        # (( ++OPTIND ))
+
+                        __t_toskip_value="${MY_COMMAND_LINE_OPTIONS[$(( $OPTIND - 1 ))]}"
+                        __t_toskip_parsed='--' # we will append to this as getops hands us the pieces
+
+                    else
+                        # Just a run-of-the-mill short-form option parse for
+                        # an unrecognized opt. Restore the hyphen character
+                        # before the option character before adding it to our
+                        # collection.
+                        #
+                        __t_expanded_command_line+=( '-'"$OPTARG" )
+                    fi
+                    ;;
+
+                * ) # Anything we would want to avoid consuming, but since
+                    # getopts stops processing upon encountering non-option
+                    # command line arguments, we should never fall through
+                    # here.
+                    #
+                    printf "$PROG (BUG): unaccounted for command line options processing; option is \"%s\", OPTARG is \"%s\", OPTIND is \"%s\"; bailing out\n" \
+                           "${__t_opt}" "${OPTARG}" "${OPTIND}" 1>&2
+                    exit 1
+                    ;;
+            esac
+
+            : $PROG \(trace: $LINENO\): __t_expanded_command_line element count: ${#__t_expanded_command_line[@]}
+            for traceidx in ${!__t_expanded_command_line[@]}; do
+                : $PROG \(trace: $LINENO\): __t_expanded_command_line[${traceidx}]:  ${__t_expanded_command_line[${traceidx}]}
+            done
+        done
+    fi
+
+    # shift off all options and arguments already handled
+    local __t_ii
+    let __t_ii=1
+    while (( __t_ii < ${OPTIND} )); do
+        f_shift 'MY_COMMAND_LINE_OPTIONS'
+        (( ++__t_ii ))
+    done
+    # subtract one because OPTIND is now one beyond last index handled
+    (( --OPTIND ))
+
+    # Determine whether or not we need to add a '--' end-of-options string back
+    # into the command line.
+    #
+    __t_pos=0  # reset
+    for __t_posval in "${__t_expanded_command_line[@]}"; do
+        (( ++__t_pos ))
+        if test "${__t_posval}" = '--'; then
+            __t_end_of_options_seen_as_optargs+=( $__t_pos )
+        fi
+    done
+
+    __t_pos=0  # reset
+    for __t_posval in "${MY_COMMAND_LINE_OPTIONS[@]}"; do
+        (( ++__t_pos ))
+        if test "${__t_posval}" = '--'; then
+            __t_end_of_options_seen_unprocessed+=( $__t_pos )
+        fi
+    done
+    unset __t_pos
+
+    t_need_end_of_options_separator_reinstated=false
+    if test ${#__t_end_of_options_positions[@]} -gt 0; then
+
+        t_need_cnt=${#__t_end_of_options_positions[@]}
+
+        t_have_cnt=$((   ${#__t_end_of_options_seen_as_optargs[@]}  \
+                       + ${#__t_end_of_options_seen_unprocessed[@]} \
+                    ))
+
+        # Sanity check
+        if test $t_have_cnt = $t_need_cnt; then :; else
+
+            if test $t_have_cnt -gt $t_need_cnt; then
+                printf "${PROG} (BUG): invalid state: t_have_cnt (%s) is greater than t_need_cnt (%s); bailing out\n" \
+                       "${t_have_cnt}" "${t_need_cnt}" 1>&2
+                exit 1
+            fi
+
+            t_difference=$(( $t_need_cnt - $t_have_cnt ))
+
+            if test $t_difference -gt 1; then
+                printf "${PROG} (BUG): invalid state: difference (%s) of t_need_cnt (%s) and t_have_cnt is greater than 1; bailing out\n" \
+                       "${t_difference}" "${t_need_cnt}" "${t_have_cnt}" 1>&2
+                exit 1
+            fi
+        fi
+
+        if test $t_have_cnt -lt $t_need_cnt; then
+            t_need_end_of_options_separator_reinstated=true
+        fi
+    fi
+
+    # if test $# -gt 0; then
+    if test ${#MY_COMMAND_LINE_OPTIONS[@]} -gt 0; then
+
+        if $t_need_end_of_options_separator_reinstated; then
+            # Our getopts processing was stopped due to the presence of '--',
+            # and consumed that positional value. We'll add it back in at the
+            # correct location.
+            #
+            __t_expanded_command_line+=( '--' )
+        fi
+
+        # __t_expanded_command_line+=( "$@" )
+        # __t_expanded_command_line+=( "${MY_COMMAND_LINE_OPTIONS[@]}" )
+
+        t_target_idx=${#__t_expanded_command_line[@]}
+        for t_source_idx in "${!MY_COMMAND_LINE_OPTIONS[@]}"; do
+            __t_expanded_command_line[${t_target_idx}]=${MY_COMMAND_LINE_OPTIONS[${t_source_idx}]}
+
+            (( ++t_target_idx ))
+        done
+    fi
+
+    unset t_need_end_of_options_separator_reinstated
+    unset __t_end_of_options_seen_unprocessed
+    unset __t_end_of_options_seen_as_optargs
+    unset __t_end_of_options_positions
+
+    for tidx in "${!__t_expanded_command_line[@]}"; do
+        : $PROG \(trace: $LINENO\): __t_expanded_command_line[${tidx}]: ${__t_expanded_command_line[${tidx}]}
+    done
+
+    # echo "${__t_expanded_command_line[@]}"
+    # printf '%q ' "${__t_expanded_command_line[@]}"
+
+    # Rather than emit a value on stdout (which requires callers to invoke us
+    # in a subshell where we cannot trigger permanantly the useful side-effect
+    # of enabling verbose output early on), we will instead update the
+    # caller's named array variable in-place with the values we would have
+    # otherwise emitted on stdout.
+    #
+    eval "${__output_array_name}=()"  # empty out
+    for t_idx in "${!__t_expanded_command_line[@]}"; do
+        eval "${__output_array_name}[${t_idx}]=\"$(printf '%q' "${__t_expanded_command_line[${t_idx}]}")\""
+    done
+
+# # DEBUG go
+#     # This just allows for inspection of the referenced array as it will
+#     # appear to the caller once this function returns.
+#     #
+#     local __t_arrayref="${__output_array_name}[@]"
+
+#     for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
+#         : $PROG \(trace: $LINENO\): one ${__output_array_name} value: $tval
+#     done
+# # DEBUG end
+
+    return 0  # success
+
+# set -- "${__t_expanded_command_line[@]}"
+# if test $? -ne 0; then
+#     printf "${PROG} (error): was unable to force use of rewritten (expanded) command line; bailing out\n" 1>&2
+#     exit 1
+# fi
+# : $PROG \(trace: $LINENO\): expanded command line: "$@"
+
+}
+
+
+# Note: We do not want to enable 'extdebug' just to get $BASH_ARGV defined, so
+# we'll jam the command line options into a global array variable that we can
+# manipulate from within shell functions (f_rewrite_command_line_or_die() and
+# friends)
+#
+declare -a MY_COMMAND_LINE_OPTIONS=( "$@" )
+
+if $DEBUGGING; then
+    printf "${PROG} (debug): command line options preprocessing: rewriting to expand bundled short-form opts\n" 1>&2
+fi
+# set -x
+# f_rewrite_command_line_or_die
+# set -- $( f_rewrite_command_line_or_die )
+# if test $? -ne 0; then
+#     printf "${PROG} (error): was unable to force use of rewritten (expanded) command line; bailing out\n" 1>&2
+#     exit 1
+# fi
+declare -a MY_COMMAND_LINE_OPTIONS_REWRITTEN=()
+f_rewrite_command_line_or_die MY_COMMAND_LINE_OPTIONS_REWRITTEN
+: $PROG \(trace: $LINENO\): expanded command line: "$@"
+if $DEBUGGING; then
+    printf "${PROG} (debug): command line options preprocessing: successfully rewrote to expand bundled short-form opts\n" 1>&2
+fi
+
+set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
+
+while test $# -gt 0 ; do
+
+    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
+                  "x$1" : 'x\(-.*\)'     \| \
+                  "x$1" : 'x\(.*\)')
+
+    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
+                  "x$1" : 'x-.\(.*\)')
+
+    case $1 in
+
+        --help )
+            # print help message
+            f_print_help
+            exit 0
+            ;;
+
+        --version | -V )
+            # print program version info
+            f_print_version
+            exit 0
+            ;;
+
+        --human-readable | -h )
+            HUMAN_READABLE_MODE=true
+            shift
+            ;;
+
+        --verbose | -v )
+            # Accumulating 'verbose' opt. A single -v opt simply turns
+            # BE_VERBOSE on (info level output); two '-v' opts turns on
+            # $DEBUGGING (debug level output); three or more '-v' opts turns
+            # tracing on. Note that if you intend to turn tracing on, you'll
+            # probably want your -v opts to be the first opts on the command
+            # line (so they take effect earlier).
+            #
+            f_maybe_increase_verbosity
+            shift
+            ;;
+
+        -- ) # Stop option processing
+            shift
+            break
+            ;;
+
+        --* | -* )
+            # Unrecognized option
+            printf "${PROG} (error): unrecognized option \`%s'\n" "${option}" 1>&2
+            f_print_help 1>&2
+            exit 1
+            ;;
+
+        * ) # Unrecognized non-option
+
+            # We'll treat the first non-option and all remaining arguments as
+            # names of git repositories that the user specifically wants to
+            # operate on; note that we DO NOT shift off the first, but merely
+            # stop processing command line options when we see it.
+            break
+            ;;
+    esac
+done
+
+if test $# -gt 0; then
+    printf "${PROG} (error): unrecognized command line parameters: \"%s\"; bailing out\n" "$*" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+
+
+# Refuse to run if we do not recognize the URL as something that will be
+# encrypted on the wire. This is intended to help prevent accidentally
+# transmitting HTTP Basic Auth credentials in cleartext.
+#
+re_starts_with_https='^https://'
+if test -z "${gl_const_github_api_base_url}"; then
+    printf "${PROG} (error): GitHub API base URL is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_github_api_base_url}" =~ $re_starts_with_https ]]; then :; else
+    printf "${PROG} (error): configured GitHub API base URL (\"%s\") does not start with 'https://'; bailing out\n" "${gl_const_github_api_base_url}" 1>&2
+    exit 1
+fi
+#
+re_ends_with_slash='.*[/]$'
+if [[ "${gl_const_github_api_base_url}" =~ $re_ends_with_slash ]]; then :; else
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (\"%s\") does not end with a slash; appending slash character\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+    gl_const_github_api_base_url="${gl_const_github_api_base_url}/"
+    declare -r gl_const_github_api_base_url
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (modified) is now: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+fi
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured GitHub API base URL: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+fi
+
+
+re_starts_with_accept='Accept:[[:space:]]'
+if test -z "${gl_const_http_accept_github_version}"; then
+    printf "${PROG} (error): HTTP 'Accept:' header for GitHub API version is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_http_accept_github_version}" =~ $re_starts_with_accept ]]; then :; else
+    printf "${PROG} (error): configured HTTP 'Accept:' header (\"%s\") for GitHub API version does not start with 'Accept: '; bailing out\n" "${gl_const_http_accept_github_version}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured HTTP 'Accept:' header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
+fi
+
+
+# Note that the gl_const_http_accept_github_version value is known to always
+# end with a slash character.
+#
+MY_GITHUB_RATE_LIMIT_URL="${gl_const_github_api_base_url}rate_limit"
+
+
+# Common global options for use in every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify this array.
+#
+declare -a MY_CURL_OPTS=()
+
+# This disables output of curl's progress meter /and/ output of error messages...
+MY_CURL_OPTS+=( '--silent' )
+# ...but this re-enables output of the error messages.
+MY_CURL_OPTS+=( '--show-error' )
+
+
+# Force use of TLS 1.2. Writing in 2016, all previous versions are known to be
+# broken and susceptible to known attacks. Note that the '--tlsv1.2' option
+# was added in curl 7.34.0
+#
+# This is absolutely essential since we're using HTTP Basic Auth (see below).
+#
+MY_CURL_OPTS+=( '--tlsv1.2' )
+
+# Allow ONLY https, for both the initial request and for redirects
+MY_CURL_OPTS+=( '--proto')
+MY_CURL_OPTS+=( 'https')
+MY_CURL_OPTS+=( '--proto-redir')
+MY_CURL_OPTS+=( 'https')
+
+
+# Tell curl to use HTTP Basic Authentication. This is the curl default, but
+# we're explicit about what we expect (and want to avoid any surprises from
+# weirdo ~/.curlrc files).
+#
+# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+#
+MY_CURL_OPTS+=( '--basic' )
+
+
+# User's authentication credentials will be obtained from the user's ~/.netrc
+# file. See curl(1) and netrc(5)
+#
+MY_CURL_OPTS+=( '--netrc'  )
+
+MY_CURL_OPTS+=( '--user-agent' )
+MY_CURL_OPTS+=( "$PROG"        )
+
+
+# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+# 2016, v3 is the default, but some newer version may become the default in
+# the future.
+#
+MY_CURL_OPTS+=( '--header' )
+MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): requesting /rate_limit\n" 1>&2
+fi
+
+t_gh_json_service_response=$( curl "${MY_CURL_OPTS[@]}" \
+                                   --get                \
+                                   "${MY_GITHUB_RATE_LIMIT_URL}" )
+if test $? -ne 0; then
+    # Hopefully 'curl' emitted a meaningful error message, too...
+    printf "${PROG} (error): was unable to obtain GitHub rate limit; bailing out\n" 1>&2
+    exit 1
+fi
+
+# The json structure we're parsing looks like this:
+#
+#     {
+#       "resources": {
+#         "core": {
+#           "limit": 5000,
+#           "remaining": 5000,
+#           "reset": 1463918358
+#         },
+#         "search": {
+#           "limit": 30,
+#           "remaining": 30,
+#           "reset": 1463914818
+#         }
+#       },
+#       "rate": {
+#         "limit": 5000,
+#         "remaining": 5000,
+#         "reset": 1463918358
+#       }
+#     }
+#
+# Note that the top-level "rate" object is flagged as deprecated in the GitHub
+# API documentation, so we operate only on the "resources" object here. Note,
+# too, that we structure things so that the upstream service can add new
+# resources member objects without breaking our code; we'll just report on
+# whatever is found in the data.
+#
+#     $ jq -r '.resources | ( keys[] as $k | "\( $k ):\( .[$k].limit ):\( .[$k].remaining ):\( .[$k].reset )" )' < rate-limit.json
+#     core:5000:5000:1463918358
+#     search:30:30:1463914818
+#
+# HINT: The 'reset' date value is presented in seconds since the Unix
+#       epoch. To see its human-readable value do something like this:
+#
+#           $ date --date='@1463918358'
+#           Sun May 22 07:59:18 EDT 2016
+#
+#           $ date --date='@1463918358' --rfc-3339=seconds
+#           2016-05-22 07:59:18-04:00
+#
+#           $ date --date='@1463918358' --rfc-3339=seconds --utc
+#           2016-05-22 11:59:18+00:00
+#
+RATE_LIMIT_DATA_LINES=$(echo "${t_gh_json_service_response}"  \
+                        | jq -r '.resources | ( keys[] as $k | "\( $k ):\( .[$k].limit ):\( .[$k].remaining ):\( .[$k].reset )" )' )
+if test $? -ne 0; then
+    printf "${PROG} (error): was unable to extract rate limit data from GitHub service response; bailing out\n" 1>&2
+    exit 1
+fi
+
+
+# The elements in these arrays correspond positionally (identical index values
+# are part of the same output line.
+declare -a FORMATTED_RESOURCE_NAMES=()
+declare -a FORMATTED_LIMIT_COUNTS=()
+declare -a FORMATTED_REMAINING_COUNTS=()
+declare -a FORMATTED_RESET_DATES=()
+
+
+# For now, we'll simply display all fields on the screen in columns whose
+# widths are sized to accomodate the longest value that will be dipsplayed in
+# the column. To do that we need to obtain those string length values before
+# we emit the first line out output; the values here, of course, will be based
+# on the values of the strings that have been formatted for ouput.
+#
+COL_WIDTH_RESOURCE_NAME=0
+COL_WIDTH_LIMIT_COUNT=0
+COL_WIDTH_REMAINING_COUNT=0
+COL_WIDTH_RESET_DATE=0
+
+while IFS=':' read -r resource_name limit_count remaining_count reset_date_from_epoch_secs; do
+
+    : $PROG \(trace: $LINENO\): resource_name:   "${resource_name}"
+    : $PROG \(trace: $LINENO\): limit_count:     "${limit_count}"
+    : $PROG \(trace: $LINENO\): remaining_count: "${remaining_count}"
+    : $PROG \(trace: $LINENO\): reset_date_from_epoch_secs: "${reset_date_from_epoch_secs}"
+
+    # Sanity checking
+    if test -z "${resource_name}"; then
+        printf "${PROG} (BUG): 'resource_name' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${limit_count}"; then
+        printf "${PROG} (BUG): 'limit_count' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${remaining_count}"; then
+        printf "${PROG} (BUG): 'remaining_count' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${reset_date_from_epoch_secs}"; then
+        printf "${PROG} (BUG): 'reset_date_from_epoch_secs' value is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if [[ "${limit_count}" =~ $gl_const_re_all_digits ]]; then :; else
+        printf "${PROG} (BUG): invalid value detected for 'limit_count' (\"%s\"); should be all digits; bailing out\n" "${limit_count}" 1>&2
+        exit 1
+    fi
+    if [[ "${remaining_count}" =~ $gl_const_re_all_digits ]]; then :; else
+        printf "${PROG} (BUG): invalid value detected for 'remaining_count' (\"%s\"); should be all digits; bailing out\n" "${remaining_count}" 1>&2
+        exit 1
+    fi
+
+    # Resource names will just be displayed "as is"; there's no special formatting to apply
+    if test ${#resource_name} -gt $COL_WIDTH_RESOURCE_NAME; then
+        COL_WIDTH_RESOURCE_NAME=${#resource_name}
+    fi
+    FORMATTED_RESOURCE_NAMES+=( "${resource_name}" )
+
+
+    if $HUMAN_READABLE_MODE; then
+        printf -v t_formatted_limit_count "%'d" "${limit_count}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): [github resource: %s]: was unable to format limit count value (\"%s\"); bailing out\n" "${resource_name}" "${limit_count}" 1>&2
+            exit 1
+        fi
+    else
+        t_formatted_limit_count=${limit_count}
+    fi
+    if test ${#t_formatted_limit_count} -gt $COL_WIDTH_LIMIT_COUNT; then
+        COL_WIDTH_LIMIT_COUNT=${#t_formatted_limit_count}
+    fi
+    FORMATTED_LIMIT_COUNTS+=( "${t_formatted_limit_count}" )
+
+
+    if $HUMAN_READABLE_MODE; then
+        printf -v t_formatted_remaining_count "%'d" "${remaining_count}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): [github resource: %s]: was unable to format remaining count value (\"%s\"); bailing out\n" "${resource_name}" "${remaining_count}" 1>&2
+            exit 1
+        fi
+    else
+        t_formatted_remaining_count=${remaining_count}
+    fi
+    if test ${#t_formatted_remaining_count} -gt $COL_WIDTH_REMAINING_COUNT; then
+        COL_WIDTH_REMAINING_COUNT=${#t_formatted_remaining_count}
+    fi
+    FORMATTED_REMAINING_COUNTS+=( "${t_formatted_remaining_count}" )
+
+
+    if $HUMAN_READABLE_MODE; then
+# FIXME (PORTABILITY): maybe provide workarounds if 'date' from GNU coreutils is not available.
+# FIXME: add option to allow user to request UTC
+        t_formatted_reset_date="$(date --date="@${reset_date_from_epoch_secs}" --rfc-3339=seconds)"
+        if test $? -ne 0; then
+            printf "${PROG} (error): [github resource: %s]: was unable to format reset date value (\"%s\"); bailing out\n" "${resource_name}" "${reset_date_from_epoch_secs}" 1>&2
+            exit 1
+        fi
+    else
+        t_formatted_reset_date=${reset_date_from_epoch_secs}
+    fi
+    if test ${#t_formatted_reset_date} -gt $COL_WIDTH_RESET_DATE; then
+        COL_WIDTH_RESET_DATE=${#t_formatted_reset_date}
+    fi
+    FORMATTED_RESET_DATES+=( "${t_formatted_reset_date}" )
+
+done < <(echo "${RATE_LIMIT_DATA_LINES}")
+
+
+# FIXME: Allow user to request that column headers be printed
+
+for idx in $(eval echo "{0..$(( ${#FORMATTED_RESOURCE_NAMES[@]} - 1 ))}"); do
+
+    printf '%*s  %*s  %*s  %*s\n' \
+           "${COL_WIDTH_RESOURCE_NAME}"    "${FORMATTED_RESOURCE_NAMES[$idx]}"   \
+           "${COL_WIDTH_LIMIT_COUNT}"      "${FORMATTED_LIMIT_COUNTS[$idx]}"     \
+           "${COL_WIDTH_REMAINING_COUNT}"  "${FORMATTED_REMAINING_COUNTS[$idx]}" \
+           "${COL_WIDTH_RESET_DATE}"       "${FORMATTED_RESET_DATES[$idx]}"
+done
+
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): completed successfully\n" 1>&2
+fi

@@ -1,7 +1,7 @@
 # ads-github-tools
 For now, just a scratch pad while I get familiar with the GitHub v3 API.
 
-At the moment (2016-05-15) there are four tools:
+At the moment (2016-05-22) there are five tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
@@ -11,6 +11,9 @@ At the moment (2016-05-15) there are four tools:
 * `ads-github-hash-url` - similar in spirit to `git-hash-object(1)`, this tool
   takes a (presumably normalized) URL and emits a checksum for it. Currently
   uses the SHA-3 512-bit algorithm variant.
+  
+* `ads-github-show-rate-limits` - Show user's GitHub API rate limits ("core"
+  and "search").
 
 * `ads-github-fetch-all-upstreams` - Operates on the working directories of a
   collection of GitHub-hosted git repositories. The user can specify one or
@@ -70,6 +73,7 @@ My current thinking is that there will be three levels of tools:
    * `...`
 
 3. high-level tools the build upon the first two levels above
+   * `ads-github-show-rate-limits`
    * `ads-github-fetch-all-upstreams`
    * `ads-github-merge-all-upstreams`
    * `...`
