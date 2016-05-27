@@ -24,7 +24,15 @@
 
 *** Similar in spirit to the .git/objects/ database
 
-*** Structure consistent with XDG Specification
+    The 'git' source code is much better structured than what I envision the
+    first iteration or three of these tools being. For the moment, I'm really
+    just looking for the scrappiest caching mechanism that can work in the
+    common case, without worrying too much about corner cases or otherwise
+    making it rock solid or perfect. Our strategy in the short term will be:
+    if in doubt, invalidate the cache and pull the data from upstream.
+
+
+*** Structure consistent with XDG Specification (maybe, or optional)
 
     I'm actually on the fence with this one, but other users would likely
     expect it. There's a tradeoff between having a single directory beneath
