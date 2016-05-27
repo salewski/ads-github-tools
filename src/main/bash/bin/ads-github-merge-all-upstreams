@@ -1016,7 +1016,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     #
     if $is_fork; then :; else
         if $BE_VERBOSE; then
-            printf "${PROG} (info): repo \"%s\" is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
+            printf "${PROG} (info): [repo: \"%s\"] is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
         fi
         continue
     fi
