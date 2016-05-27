@@ -265,8 +265,9 @@ for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
 done
 
 
-t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 512 | awk '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 512 | awk '{print $1}' )
 # t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 384 | awk '{print $1}' )
+t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 256 | awk '{print $1}' )
 # t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 224 | awk '{print $1}' )
 if test $? -ne 0; then
     printf "${PROG} (error): was error while attempting to compute the hash of url \"%s\"; bailing out\n" "${INPUT_URL}" 1>&2

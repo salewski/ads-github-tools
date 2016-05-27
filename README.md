@@ -10,7 +10,7 @@ At the moment (2016-05-22) there are five tools:
 
 * `ads-github-hash-url` - similar in spirit to `git-hash-object(1)`, this tool
   takes a (presumably normalized) URL and emits a checksum for it. Currently
-  uses the SHA-3 512-bit algorithm variant.
+  uses the SHA-3 256-bit algorithm variant.
   
 * `ads-github-show-rate-limits` - Show user's GitHub API rate limits ("core"
   and "search").
