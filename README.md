@@ -65,6 +65,10 @@ My current thinking is that there will be three levels of tools:
    * `ads-github-cache get KEY`
    * `ads-github-normalize-url`
    * `ads-github-hash-url`
+   
+   In the above list, '`KEY`' is likey a "normalized" url, or perhaps just
+   _any_ url (and the tools would normalize the url behind the scenes to
+   produce the "key").
 
 2. mid-level tools that make use of the caching tools
    * `ads-github-user-repos [--owner] [--repo] [--per-page=N] [--page=N]`
