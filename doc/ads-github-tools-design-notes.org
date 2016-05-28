@@ -85,6 +85,22 @@
        https://github.com/whitequark/rust-xdg
 
 
+
+*** Structure if we ignore the XDG thing (for now)
+
+    :     ~/.ads-github-tools.d/var/cache/github-v3-objects/xx/.....
+
+    If the checksum names the directory, then the file objects inside it would
+    be:
+
+    :    .../url-normalized   (single-line file with normalized url as content)
+    :    .../data-blob        (whatever was contained in the payload of the http response body)
+    :    .../etag             (the Etag value (duh!))
+    :
+    :    .../http-response-headers (the raw response headers received when the date was obtained.
+    :                               Probably only useful for debugging, but who knows...)
+
+
 * TODO [#2] implement proper autotools-based build for ads-github-tools project ([[https://github.com/salewski/ads-github-tools/issues/5][issue #5]]) :build:
   :LOGBOOK:
   - CREATED [2016-05-15 Sun 12:16]
