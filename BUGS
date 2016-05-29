@@ -1,0 +1,45 @@
+This is the 'BUGS' file for the 'ads-github-tools' project.
+
+The preferred way to report bugs (and suggest new features) is via the GitHub
+issues page for the project:
+
+    https://github.com/salewski/ads-github-tools/issues
+
+On that page, simply click on the "New issue" button and then type in the
+issue description as described below.
+
+Alternatively, you can also send bug reports to the author via email at:
+
+    salewski@att.net
+
+Be sure to indicate 'ads-github-tools' in the email subject line.
+
+Please note that the author confesses to being hopelessly behind his email and
+under-motivated to rectify the situation. He does read all of it eventually,
+but it might be years before he sees your message and longer still before he
+decides whether or not to act on it.
+
+When reporting a bug, please include as much information as possible,
+including (but not limited to):
+
+    * host operating system (and version)
+
+    * version of 'ads-github-tools' project you are using
+
+    * name of the program, file, or whatever that contains the bug
+
+    * what the observed behavior was
+
+    * what the expected behavior was
+
+    * any specific steps that need to be performed in sequence in order
+      to produce the bug
+
+    * file(s) of the input that causes the buggy behavior
+
+    * file(s) of any broken output
+
+In short, include anything that will help us to reproduce the bug, as this
+will /greatly increase/ the likelyhood of the bug getting fixed and will
+/greatly decrease/ the amount of time before we can make a new release with
+the bug fix.

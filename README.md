@@ -1,5 +1,38 @@
 # ads-github-tools
-For now, just a scratch pad while I get familiar with the GitHub v3 API.
+
+These tools are still in their early days, having been under casual
+development only since the end of April 2016. Nevertheless, the tools that
+exists currently provide a useful core and are used by the author on a daily
+basis.
+
+The `ads-github-tools` project provides command line tools for managing a
+large number of GitHub repositories, motivated by the following two related
+use cases:
+
+    1. When you work on multiple computers, keeping your local clones of the
+       repos in synch can be a chore.
+       
+    2. Similarly, when you have a large number of GitHub repos that are mostly
+       forks of other repos, keeping your forks in synch with the upstream
+       changes can be a chore.
+
+Enter the `ads-github-tools`.
+
+Typical invocation involves only one or two commands. The author typcially
+runs these three commands once daily:
+
+```
+    $ ads-github-fetch-all-upstreams -v -c
+
+    $ ads-github-merge-all-upstreams -v -k
+
+    $ ads-github-merge-all-upstreams -v -k --push
+```
+
+Many users would prefer to run those commands from a crontab (or similar), in
+which case the second invocation could be omitted; the author runs them
+manually because he's actively hacking on the tools and wants to inspect the
+output.
 
 At the moment (2016-05-22) there are five tools:
 

@@ -1,0 +1,90 @@
+#! /bin/bash -
+
+# Usage:
+#   bootstrap [ AUTORECONF_ARG ... ]
+#
+# Example 1:
+# ----------
+#   $ ./bootstrap
+#
+# Example 2:
+# ----------
+#   $ ./bootstrap --verbose
+#
+# Example 3:
+# ----------
+#   $ ./bootstrap --debug
+#
+# Example 4:
+# ----------
+#   $ ./bootstrap --force
+#
+# Example 5:
+# ----------
+# This invocation is useful when upgrading to a newer supported version of one
+# of the GNU autotools (especially autoconf). The old versions of the
+# copied-in programs (in the 'build-aux/' subdir) can be deleted, and newer
+# versions pulled into the source tree by using this invocation.
+#
+#   $ ./bootstrap --install
+#
+# Example 6:
+# ----------
+# This is how the author invokes it on a new autotools-based project:
+#
+#   $ ./bootstrap --force --install
+#
+
+declare -r PROG='bootstrap'
+
+declare -r OUR_SUPPORTED_AUTOMAKE_VERSION='1.14'
+declare -r OUR_SUPPORTED_AUTOCONF_VERSION='2.64'
+
+_run_on_dir="$(readlink -f "$(dirname "${0}")")"
+if test $? -ne 0; then
+    printf "${PROG} (ERROR): was unable to determine realpath of prog \"%s\"\n" \
+      "$0" 1>&2
+    exit 1
+fi
+
+# sanity check that our configure.ac file exists
+_configure_ac="${_run_on_dir}/configure.ac"
+if test -f "${_configure_ac}"; then :; else
+    printf "${PROG} (ERROR): file does not exist: \"%s\"\n" "${_configure_ac}" 1>&2
+    exit 1
+fi
+
+# sanity check that our include dir exists
+_include_dir="${_run_on_dir}/autotools"
+if test -d "${_include_dir}"; then :; else
+    printf "${PROG} (ERROR): m4 macro include directory does not exist: \"%s\"\n" \
+           "${_include_dir}" 1>&2
+    exit 1
+fi
+
+set -x
+
+# From autoreconf(1):
+#   "The environment  variables  AUTOCONF,  AUTOHEADER,  AUTOMAKE,  ACLOCAL,
+#    AUTOPOINT, LIBTOOLIZE are honored."
+#
+
+# We use these to allow us to easily use the correct versions of the GNU
+# autotools. Note: On some systems, the tools are /only/ installed with their
+# version number suffixes, so the default names, such as 'aclocal' won't work.
+export ACLOCAL="aclocal-${OUR_SUPPORTED_AUTOMAKE_VERSION}"
+export AUTOMAKE="automake-${OUR_SUPPORTED_AUTOMAKE_VERSION}"
+
+
+# export AUTOCONF="autoconf${OUR_SUPPORTED_AUTOCONF_VERSION}"
+# export AUTORECONF="autoreconf${OUR_SUPPORTED_AUTOCONF_VERSION}"
+export AUTOCONF='autoconf'
+export AUTORECONF='autoreconf'
+
+
+# --force: consider all files obsolete (ignores timestamps)
+# --warnings=all
+"${AUTORECONF}" \
+           "--include=${_include_dir}" \
+           "$@" \
+           "${_configure_ac}"

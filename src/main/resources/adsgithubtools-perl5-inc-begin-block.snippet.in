@@ -1,0 +1,34 @@
+## -*-perl-*-
+##
+## Because this Perl snippet requires the "expanded" version of autoconf
+## variables, we filter it manually at build time via rules in Makefile.am
+## (rather than automatically at configure time)
+#
+# This BEGIN block inserted at build time -- Do not edit directly
+# (changes will be overwritten)
+#
+# @configure_input@
+#
+# build date: @BUILD_DATE@
+#
+BEGIN {
+    # $ads_perl5_extra_includes contains zero or more paths specified at
+    # configure time to locate Perl modules already installed on the system in
+    # non-standard locations.
+    #
+    my $ads_perl5_extra_includes = '@ads_perl5_extra_includes@';
+    unshift @INC, (split '@PATH_SEPARATOR@', $ads_perl5_extra_includes)
+        if length $ads_perl5_extra_includes;
+
+    # $perl5_pkgvdatadir: value provided at build time (not configure time)
+    # time by GNU Autotools; versioned package-specific data location into
+    # which Perl 5 modules are installed.
+    #
+    my $perl5_pkgvdatadir = '@perl5_pkgvdatadir@';
+    eval "use lib '${perl5_pkgvdatadir}'";
+    $@ and die (__PACKAGE__ . q{: was unable to 'use lib' (}
+                . (defined $perl5_pkgvdatadir
+                   ? qq{"$perl5_pkgvdatadir"}
+                   : 'undef')
+                . "): $@");
+}
