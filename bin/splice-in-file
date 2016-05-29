@@ -1,0 +1,151 @@
+#!/bin/sh
+
+# splice-in-file: scrappy build tool to splice file contents from a
+# specified source into a given file at the location(s) indicated by a
+# given text string.
+#
+# The spliced file will be written to stdout.
+#
+# Exits with zero status on success, non-zero on error. Note that
+# since this is a build script, we assume that you always expect that
+# your provided text string will be present in the input file, and
+# signal an error if this is not the case.
+#
+# The wonkiest part of this interface is the
+# 'FILTER_OUT_DOUBLE_COMMENTS'. This optional param, if specified,
+# must be either 'filter' or 'no-filter'. This kludge simply allows
+# the developer to include comments in the replacement text file that
+# will not be part of the replacement in the output; any line whose
+# first two characters are '##' will be filtered out.
+#
+# Usage:
+#     splice-in-file IN_FILE MATCH_STRING REPLACEMENT_TEXT_FILE [FILTER_OUT_DOUBLE_COMMENTS]
+#
+# Example:
+#
+#     $ splice-in-file my-file.template '@@@TIMESTAMP@@@'  <( date )
+
+PROG='splice-in-file'
+
+trap 'printf "$PROG (WARN): HUP signal caught; bailing out\n"; exit 1' HUP
+trap 'printf "$PROG (WARN): INT signal caught; bailing out\n"; exit 1' INT
+trap 'printf "$PROG (WARN): QUIT signal caught; bailing out\n"; exit 1' QUIT
+trap 'printf "$PROG (WARN): TERM signal caught; bailing out\n"; exit 1' TERM
+
+
+_exp_min=3    # expected minimum
+_got=$#   # actual
+if test ${_got} -lt ${_exp_min}; then
+    printf "${PROG} (ERROR): Expected at least %d args, but got %d; bailing out\n" ${_exp_min} ${_got} 1>&2
+    printf "Usage:\n    splice-in-file IN_FILE MATCH_STRING REPLACEMENT_TEXT_FILE [FILTER_OUT_DOUBLE_COMMENTS]\n" 1>&2
+    exit 1
+fi
+
+IN_FILE="$1"
+MATCH_STRING="$2"
+REPL_FILE="$3"
+
+DO_FILTER="${4:-no-filter}"  # must be either 'filter' or 'no-filter'
+
+for paramname in IN_FILE MATCH_STRING REPL_FILE; do
+    test -n "$(eval 'echo ${'${paramname}'}')" || {
+        printf "${PROG} (ERROR): no value provided for required param: \"%s\"\n" \
+          "${paramname}" 1>&2
+        exit 1
+    }
+done
+
+for paramname in IN_FILE REPL_FILE; do
+    # Note that we check -e, but not -f. That's because it is
+    # legitimate for the user to specify /dev/stdin, which would
+    # return true for -c, but not -f
+    test -e "$(eval 'echo ${'${paramname}'}')" || {
+        printf "${PROG} (ERROR): '%s' param must be the name of an existing file; bailing out\n" \
+          "${paramname}" 1>&2
+        exit 1
+    }
+
+    test -r "$(eval 'echo ${'${paramname}'}')" || {
+        printf "${PROG} (ERROR): file named by '%s' param is not readable: \"%s\"\n" \
+          "${paramname}" "$(eval 'echo ${'${paramname}'}')" 1>&2
+        exit 1
+    }
+done
+
+if test "${DO_FILTER}" = 'filter' ||
+   test "${DO_FILTER}" = 'no-filter'; then :; else
+    printf "${PROG} (ERROR): Value of FILTER_OUT_DOUBLE_COMMENTS param must be either 'filter' or 'no-filter' (got: \"%s\"); bailing out\n" \
+      "${DO_FILTER}" 1>&2
+    exit 1
+fi
+
+# Sanitize MATCH_STRING for sed consumption (will be used on the regex side
+# of sed 's' command, so we need to clean it up accordingly to escape all
+# "special" characters):
+MATCH_STRING_SEDSANITIZED=$(echo "${MATCH_STRING}" | \
+                              sed -e 's!\([]^\*\$\/&[]\)!\\\1!g' \
+                                  -e 's![-]![-]!g')
+
+
+_must_remove_tmp_repl_file='no'
+REPL_FILE_TO_USE=${REPL_FILE}
+if test "${DO_FILTER}" = 'filter'; then
+    # mktemp(1) is non-portable (even between GNU/Linux distros) so we do our
+    # own poor-man's version here...
+    #
+#     REPL_FILE_TO_USE="$(mktemp -q -t "${PROG}.XXXXXX")"
+#     if test $? -ne 0; then
+#         printf "$PROG (ERROR): Unable to create temporary file\n" 1>&2
+#         exit 1
+#     fi
+    test -z "${TMP}" && TMP='/tmp'
+    t_found=false
+    t_tried=''
+    tryname="${TMP}/${PROG}"
+    for n in 0 1 2 3 4 5 6 7 8 9; do
+        tryname="${tryname}.$$"
+        t_tried="${t_tried} ${tryname}"
+        test -e "${tryname}" && continue
+        touch "${tryname}" && chmod 0600 "${tryname}" || continue
+        REPL_FILE_TO_USE=$tryname
+        t_found=true
+        break
+    done
+    if $t_found; then :; else
+        # This would seem to indicate that someone was attempting a DOS attack
+        printf "$PROG (ERROR): Unable to create temporary file. Tried: ${t_tried}\n" 1>&2
+        exit 1
+    fi
+    unset t_found
+    unset t_tried
+    unset tryname
+
+    _must_remove_tmp_repl_file='yes'
+    sed -e '/^##/d' < "${REPL_FILE}" > "${REPL_FILE_TO_USE}"
+    if test $? -ne 0; then
+        printf "${PROG} (ERROR): error while attempting to filter double comments from file: \"%s\"\n" \
+          "${REPL_FILE}" 1>&2
+        exit 1
+    fi
+fi
+
+# This is a crude splice -- the replacement string merely needs to be
+# present /somewhere/ on the line, but the entire line will be
+# replaced by the contents of REPL_FILE contents. In particular, if
+# the match string exists in some particular column, do not expect
+# that the REPL_FILE contents will start at that column (they won't).
+sed -e "/${MATCH_STRING_SEDSANITIZED}/r ${REPL_FILE_TO_USE}
+        /${MATCH_STRING_SEDSANITIZED}/d" < "${IN_FILE}"
+
+if test $? -ne 0; then
+    printf "${PROG} (ERROR): was unable to complete file splice (IN_FILE: \"%s\";  MATCH_STRING: \"%s\";  REPLACEMENT_TEXT_FILE: \"%s\"\n" \
+      "${IN_FILE}" "${MATCH_STRING}" "${REPL_FILE}" 1>&2
+    if test "${_must_remove_tmp_repl_file}" = 'yes'; then
+        rm -f "${REPL_FILE_TO_USE}"
+    fi
+    exit 1
+fi
+
+if test "${_must_remove_tmp_repl_file}" = 'yes'; then
+    rm -f "${REPL_FILE_TO_USE}"
+fi

@@ -125,6 +125,7 @@ ads_PERL_MODULE([Carp])
 dnl ads_PERL_MODULE([File::Basename])
 dnl ads_PERL_MODULE([File::Spec])
 ads_PERL_MODULE([Getopt::Long])
+ads_PERL_MODULE([URL::Normalize], [REQUIRED], [0.33])
 
 
 dnl +----------------------+
@@ -286,8 +287,11 @@ dnl      strings. Region is already set up because we set the mark above.
 dnl Declare our output Makefiles
 AC_CONFIG_FILES(
     [Makefile]
+    [bin/Makefile]
     [src/Makefile]
     [src/main/Makefile]
+    [src/main/perl/Makefile]
+    [src/main/perl/bin/Makefile]
     [src/main/resources/Makefile]
 )
 

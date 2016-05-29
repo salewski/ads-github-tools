@@ -1,4 +1,6 @@
-#!/usr/bin/perl
+#! @PERL@
+# -*- perl -*-
+# @configure_input@
 
 # Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
 #
@@ -25,6 +27,7 @@
 #
 # Motivation
 # ==========
+#
 # There are many different and legitimate ways to represent URLs; while
 # variations of a given URL may represent the same logical resource, the text
 # representations of the URLs themselves can vary. For the purposes to
@@ -60,6 +63,9 @@ package _PROG_ADS_GITHUB_NORMALIZE_URL;
 use strict;
 use warnings;
 
+# Fixup @INC so that all Perl mods needed by the prog can be found
+# ___REPLACE_ME__BEGIN_BLOCK__CONFIGURED_PERL_INC___
+
 use Carp qw( confess cluck );
 
 use Getopt::Long   qw( GetOptions );
@@ -76,9 +82,12 @@ use warnings FATAL => q{utf8};
 # and STDERR:
 use open qw( :encoding(UTF-8) :std );
 
-my $PROG = q{ads-github-normalize-url};
+our $VERSION = '@VERSION@';  # filtered in at build time
 
-our $VERSION = q{0.01};
+my $PROG = q{ads-github-normalize-url};
+my $BUILD_DATE = '@BUILD_DATE@';  # filtered in at build time
+my $PROJECT_NAME = '@PACKAGE@';   # filtered in at build time
+
 
 my $ESTAT_SUCCESS = 0;
 my $ESTAT_ERROR   = 1;
@@ -267,3 +276,163 @@ else {
 my $normalized_url = normalize_url( URL => $URL );
 
 print STDOUT qq{$normalized_url\n};
+
+exit 0;
+
+__END__
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.1.0' \
+#               --section='1' \
+#               > /outputdir/ads-github-normalize-url.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=head1 NAME
+
+  ads-github-normalize-url - Normalize the URL provided on the command line
+
+
+=head1 SYNOPSIS
+
+  ads-github-normalize-url --help
+  ads-github-normalize-url --version
+
+  ads-github-normalize-url [OPTION...] [URL]
+
+
+=head1 DESCRIPTION
+
+C<ads-github-normalize-url> is part of the C<ads-github-tools> project.
+
+The C<ads-github-normalize-url> program normalizes the URL provided on the
+command line. The normalized representation of the URL is written to stdout.
+
+
+=head2 Motivation
+
+There are many different and legitimate ways to represent URLs; while
+variations of a given URL may represent the same logical resource, the text
+representations of the URLs themselves can vary. For the purposes to
+generating identifiers for a given logical URL (e.g., for use in a cache) or
+when comparing two URLs directly, the textual variations need to be put into
+a "normalized" form to allow their textual representations to be
+meaningfully compared. For example, among other transformations, the query
+parameters will be put into alphabetical order.
+
+
+=head1 OPTIONS
+
+Below are the command line options currently accepted by
+C<ads-github-normalize-url>.
+
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing. This is
+useful in the pathological scenario in which the URL parameter would otherwise
+be interpretted as a command line option.
+
+=back
+
+
+=head1 DIAGNOSTICS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 BUGS
+
+=over 4
+
+=item Not (currently) compliant with RFC 3986
+
+The current implementation is not compliant with RFC 3986, and may produce
+URLs that are actually broken. In particular, the normalization performed here
+may be incomplete with reference to that spec, and we explicitly remove both
+C<.> and C<..> path segments from the URL. This is likely to change in the
+future, so please do not write any code that depends on the precise output
+emitted here overly much.
+
+
+=item Probably others
+
+If you find any, please report them as described in the C<BUGS> file.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item git-hash-object(1)
+
+This program is intended to be similar in spirit to L<git-hash-object(1)>,
+only for use by the C<ads-github-tools>.
+
+
+=item RFC 3986
+
+Documents algorithm to "normalize" URLs for comparison (i.e., for use with
+HTTP proxy servers)
+
+=back
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <salewski@att.net>
+
+=back
+
+
+=head1 COPYRIGHT
+
+Copyright 2016 Alan D. Salewski
+
+=cut
+
