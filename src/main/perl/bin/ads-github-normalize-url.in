@@ -82,11 +82,15 @@ use warnings FATAL => q{utf8};
 # and STDERR:
 use open qw( :encoding(UTF-8) :std );
 
-our $VERSION = '@VERSION@';  # filtered in at build time
+my $MAINTAINER = q{@PACKAGE_BUGREPORT@};  # filtered-in at build time
+
+our $VERSION = q{@VERSION@};  # filtered-in at build time
 
 my $PROG = q{ads-github-normalize-url};
-my $BUILD_DATE = '@BUILD_DATE@';  # filtered in at build time
-my $PROJECT_NAME = '@PACKAGE@';   # filtered in at build time
+my $BUILD_DATE   = q{@BUILD_DATE@};  # filtered-in at build time
+my $PROJECT_NAME = q{@PACKAGE@};     # filtered-in at build time
+
+my $RELEASE_STRING = qq{$VERSION  (built: $BUILD_DATE)};
 
 
 my $ESTAT_SUCCESS = 0;
@@ -139,13 +143,15 @@ Options:
                    times to increase verbosity; info, debug, and tracing
 
   --             Signals the end of options and disables further options processing.
+
+Report bugs to $MAINTAINER.
 EOH
 }
 
 # Prints program version info on stdout
 sub print_version {
     print <<"EOV";
-$PROG  $VERSION
+$PROG $RELEASE_STRING
 Copyright (C) 2016 Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
