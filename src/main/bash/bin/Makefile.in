@@ -648,6 +648,8 @@ $(G1MANPAGES): %.1: %
 	\
 	if $${topic_name_is_exempt_from_munging}; then :; else \
 	    for one_pfx in '' $(MANPAGE_PREFIXES_TO_REMOVE); do \
+	        if test -z "$${one_pfx}"; then continue; fi ;\
+	\
 	        t_one_pfx_sedsanitized=$$(echo "$${one_pfx}" | $(sed_slsanitize)) ;\
 	        t_new_topic_name=$$(echo "$${topic_name}" | sed -e 's/^'"$${t_one_pfx_sedsanitized}"'//') || exit 1 ;\
 	\
