@@ -1,6 +1,7 @@
 ## Process this file with automake to produce Makefile.in -*-Makefile-*-
 
-SUBDIRS = src \
+SUBDIRS = bin \
+          src \
           .
 
 # The ACLOCAL_AMFLAGS are used by 'autoreconf' and by the Makefile rebuild
