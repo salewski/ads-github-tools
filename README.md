@@ -34,7 +34,7 @@ which case the second invocation could be omitted; the author runs them
 manually because he's actively hacking on the tools and wants to inspect the
 output.
 
-At the moment (2016-05-22) there are five tools:
+At the moment (2016-06-03) there are five tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
