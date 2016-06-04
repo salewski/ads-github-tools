@@ -136,16 +136,19 @@ set -o pipefail
 
 
 # FIXME: one day this will be filtered in at build time
-declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'
 
 # FIXME: one day this will be filtered in at build time
-declare -r VERSION='0.0.1'
+# declare -r VERSION='0.0.1'
+declare -r VERSION='@VERSION@'
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
-# declare -r gl_const_build_date='@BUILD_DATE@'
-# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
-declare -r gl_const_release="${VERSION}"
+declare -r gl_const_build_date='@BUILD_DATE@'
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
 
 
 declare -i gl_const_sigpipe_number=$(builtin kill -l 'SIGPIPE')
@@ -286,10 +289,10 @@ f_print_help () {
 
     cat <<EOF
 usage: $PROG [OPTION...] [REPO...]
-Invokes 'git merge upstream' for all of the user's GitHub repos that are
-present or those explicitly specified (only if the git index has no changes
-recorded, and only after temporarily checking out the default branch in the
-git working directory).
+Invokes 'git merge --ff-only upstream/<DEFAULT_BRANCH_NAME>' for all of the
+user's GitHub repos that are present or those explicitly specified (only if
+the git index has no changes recorded, and only after temporarily checking out
+the default branch in the git working directory).
 
 With appropriate option, will also push the default branch changes back to the
 origin repo.
@@ -1296,3 +1299,199 @@ fi
 if $BE_VERBOSE; then
     printf "${PROG} (info): completed successfully\n" 1>&2
 fi
+
+exit 0
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.1.0' \
+#               --section='1' \
+#               > /outputdir/ads-github-merge-all-upstreams.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=head1 NAME
+
+  ads-github-merge-all-upstreams - Fast-forward-merge all of user's GitHub repos, if needed
+
+
+=head1 SYNOPSIS
+
+  ads-github-merge-all-upstreams --help
+  ads-github-merge-all-upstreams --version
+
+  ads-github-merge-all-upstreams [OPTION...] [REPO...]
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-merge-all-upstreams> program is part of the
+C<ads-github-tools> project.
+
+For all of the user's GitHub repos that are present (or those explicitly
+specified by the user) the C<ads-github-merge-all-upstreams> program
+(temporarily) switches to the repository's default branch and invokes:
+
+    git merge --ff-only upstream/<DEFAULT_BRANCH_NAME>
+
+(but only if the git index has no changes recorded).
+
+If the user has specified the C<--push> option, the program will also push the
+default branch changes back to the origin repo.
+
+FIXME: docs still a wip
+
+
+=head1 OPTIONS
+
+Below are the command line options currently accepted by
+C<ads-github-merge-all-upstreams>.
+
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -k, --keep-going
+
+Keep going when a repo cannot be fast-forward merged.
+
+Because the condition may not be expected by the user, the default behavior of
+the program is to stop processing and exit with an error status when a repo
+cannot be fast-forward merged.
+
+However, when the condition I<is> expected for one or more particular repos,
+then this option allows the user to force the program to continue -- to move
+on to the remaining repositories and accomplish as much work as possible.
+
+
+=item -L, --stop-upon-local-mods
+
+This option causes the program to exit with status C<100> upon finding a
+locally modified repository with uncommitted changes. This option is useful if
+the user expects that none of his repos have any outstanding uncommitted
+changes and wants to be notified if this is found to not be the case.
+
+The default behavior of the program is to print a warning message but
+otherwise skip over any repository that is found to have uncommitted local
+changes.
+
+
+=item -p, --push
+
+Push changes back to the 'origin' remote.
+
+This options causes the newly merged default branch content to be pushed back
+up to GitHub. E.g., causes invocation of the command:
+
+    git push --tags origin master
+
+(or whatever the equivalent analogue is if the repo has a weirdo default
+branch name other than 'master').
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing. This is
+useful in the pathological scenario in which a REPO parameter would otherwise
+be interpretted as a command line option.
+
+=back
+
+
+=head1 DIAGNOSTICS
+
+Exits with zero on success, non-zero on error.
+
+Exit status code category ranges:
+
+          0 is success.
+
+    1 -  99 are reserved for error codes (1 is the only error code currently used)
+
+
+  100 - 120 are reserved for "success-ish" status codes that communicate
+            something meaningful back to the parent process. Currently there
+            is only one such code defined:
+
+            100 -- Indicates that the program exited upon finding a locally
+                   modfied repository with uncommitted changes. The user must
+                   explicitly request this behavior via the '-L'
+                   (--stop-upon-local-mods) command line option.
+
+
+
+=head1 BUGS
+
+=over 4
+
+=item Probably tons
+
+If you find any, please report them as described in the C<BUGS> file.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item ads-github-tools(7)
+
+=item ads-github-fetch-all-upstreams(1)
+
+=back
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <salewski@att.net>
+
+=back
+
+
+=head1 COPYRIGHT
+
+Copyright 2016 Alan D. Salewski
+
+=cut
+

@@ -10,6 +10,7 @@ INPUT_TEMPLATES = \
 SSCRIPTS =
 # "generated" scripts (filtered here by do_subst)
 GSCRIPTS = $(INPUT_TEMPLATES:.in=-$(VERSION))
+# GSCRIPTS = $(INPUT_TEMPLATES:.in=)
 
 
 # "static" section 1 man pages

@@ -32,16 +32,19 @@ set -o pipefail
 
 
 # FIXME: one day this will be filtered in at build time
-declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'
 
 # FIXME: one day this will be filtered in at build time
-declare -r VERSION='0.0.1'
+# declare -r VERSION='0.0.1'
+declare -r VERSION='@VERSION@'
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
-# declare -r gl_const_build_date='@BUILD_DATE@'
-# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
-declare -r gl_const_release="${VERSION}"
+declare -r gl_const_build_date='@BUILD_DATE@'
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
 
 BE_VERBOSE=false # info-level output; override with one '-v' opt
 
@@ -280,3 +283,144 @@ if test -z "${t_hash_value}"; then
 fi
 
 printf '%s\n' "${t_hash_value}"
+
+exit 0;
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.1.0' \
+#               --section='1' \
+#               > /outputdir/ads-github-hash-url.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=head1 NAME
+
+  ads-github-hash-url - Compute an ID for a given URL (after normalizing it)
+
+
+=head1 SYNOPSIS
+
+  ads-github-hash-url --help
+  ads-github-hash-url --version
+
+  ads-github-hash-url [OPTION...] [URL]
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-hash-url> program is part of the C<ads-github-tools> project.
+
+The C<ads-github-hash-url> program computes an ID for a given URL (after
+normalizing it). If URL is not provided on the command line, then it is read
+from stdin.
+
+The ID is currently computed using the SHA-3 512 bit algorithm variant.
+
+Since there are many textual representation for the resource indicated by a
+particular URL, a typical caller would "normalize" the URL (using
+L<ads-github-normalize-url(1)>, or similar) before requesting that an ID be
+made out of it.
+
+
+FIXME: docs still a wip
+
+
+=head1 OPTIONS
+
+Below are the command line options currently accepted by
+C<ads-github-hash-url>.
+
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing. This is
+useful in the pathological scenario in which the URL parameter would otherwise
+be interpretted as a command line option.
+
+=back
+
+
+=head1 DIAGNOSTICS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 BUGS
+
+=over 4
+
+=item Probably tons
+
+If you find any, please report them as described in the C<BUGS> file.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item ads-github-tools(7)
+
+=item ads-github-normalize-url(1)
+
+=back
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <salewski@att.net>
+
+=back
+
+
+=head1 COPYRIGHT
+
+Copyright 2016 Alan D. Salewski
+
+=cut
+

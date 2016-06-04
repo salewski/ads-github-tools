@@ -7,7 +7,21 @@ dnl +-------------------------+
 dnl Ensure that a recent-enough version of Autoconf is being used
 AC_PREREQ([2.69])
 
-AC_INIT([ADS GitHub Tools], [0.1.0-snapshot], [salewski@att.net], [ads-github-tools], [https://github.com/salewski/ads-github-tools])
+dnl Defines the following m4 macros, output variables, and preprocessor
+dnl symbols. Only the m4 macros have the 'AC_' prefix:
+dnl
+dnl     [AC_] PACKAGE_NAME
+dnl     [AC_]PACKAGE_TARNAME
+dnl     [AC_]PACKAGE_VERSION
+dnl     [AC_]PACKAGE_STRING     ("<PACKAGE> <VERSION>")
+dnl     [AC_]PACKAGE_BUGREPORT
+dnl     [AC_]PACKAGE_URL
+dnl
+AC_INIT([[ADS GitHub Tools]],
+        [[0.1.0-snapshot]],
+        [[Alan D. Salewski <salewski@att.net>]],
+        [[ads-github-tools]],
+        [[https://github.com/salewski/ads-github-tools]])
 
 AC_CONFIG_AUX_DIR([build-aux])
 
@@ -19,8 +33,10 @@ dnl Turn on all Automake warnings and report them as errors
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 
 
-# DFLT_MAINTAINER="salewski@att.net"
-# AC_SUBST([DFLT_MAINTAINER])
+dnl AC_SUBST([DFLT_MAINTAINER_NAME])
+dnl AC_SUBST([DFLT_MAINTAINER_EMAIL])
+dnl AC_SUBST([DFLT_MAINTAINER_FULL])
+
 
 dnl +------------------------+
 dnl |  Checks for programs.  |
@@ -178,6 +194,13 @@ AC_SUBST([perl5_pkgvlibdir],  ["\${libdir}/${PACKAGE}-${VERSION}/perl5"])
 [
 do_subst_command='do_subst = sed \
   -e '"'"'s,[@]PACKAGE[@],$(PACKAGE),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_NAME[@],$(PACKAGE_NAME),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_TARNAME[@],$(PACKAGE_TARNAME),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_VERSION[@],$(PACKAGE_VERSION),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_STRING[@],$(PACKAGE_STRING),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_BUGREPORT[@],$(PACKAGE_BUGREPORT),g'"'"' \
+  -e '"'"'s,[@]PACKAGE_URL[@],$(PACKAGE_URL),g'"'"' \
+  \
   -e '"'"'s,[@]VERSION[@],$(VERSION),g'"'"' \
   -e '"'"'s,[@]PATH_SEPARATOR[@],$(PATH_SEPARATOR),g'"'"' \
   -e '"'"'s,[@]configure_input[@],Generated from $@.in; do not edit by hand.,g'"'"' \
@@ -290,6 +313,8 @@ AC_CONFIG_FILES(
     [bin/Makefile]
     [src/Makefile]
     [src/main/Makefile]
+    [src/main/bash/Makefile]
+    [src/main/bash/bin/Makefile]
     [src/main/perl/Makefile]
     [src/main/perl/bin/Makefile]
     [src/main/resources/Makefile]

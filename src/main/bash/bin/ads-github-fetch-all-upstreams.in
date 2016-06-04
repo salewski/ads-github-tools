@@ -81,16 +81,19 @@ set -o pipefail
 
 
 # FIXME: one day this will be filtered in at build time
-declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'
 
 # FIXME: one day this will be filtered in at build time
-declare -r VERSION='0.0.1'
+# declare -r VERSION='0.0.1'
+declare -r VERSION='@VERSION@'
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
-# declare -r gl_const_build_date='@BUILD_DATE@'
-# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
-declare -r gl_const_release="${VERSION}"
+declare -r gl_const_build_date='@BUILD_DATE@'
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
 
 BE_VERBOSE=false # info-level output; override with one '-v' opt
 
@@ -1685,3 +1688,157 @@ fi
 if $BE_VERBOSE; then
     printf "${PROG} (info): completed successfully\n" 1>&2
 fi
+
+exit 0;
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.1.0' \
+#               --section='1' \
+#               > /outputdir/ads-github-fetch-all-upstreams.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=head1 NAME
+
+  ads-github-fetch-all-upstreams - Fetch all of user's GitHub repos, if needed
+
+
+=head1 SYNOPSIS
+
+  ads-github-fetch-all-upstreams --help
+  ads-github-fetch-all-upstreams --version
+
+  ads-github-fetch-all-upstreams [OPTION...] [REPO...]
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-fetch-all-upstreams> program is part of the
+C<ads-github-tools> project.
+
+The C<ads-github-fetch-all-upstreams> program invokes C<git fetch upstream>
+for all of the user's GitHub repos that are present (in repository working
+directories beneath the current location). With appropriate options, will
+clone some or all missing repos and set up the 'upstream' remote.
+
+FIXME: docs still a wip
+
+
+=head1 OPTIONS
+
+Below are the command line options currently accepted by
+C<ads-github-fetch-all-upstreams>.
+
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -c, --clone-if-missing
+
+Use L<git-hub(1)> to clone your missing repos from GitHub.
+
+
+=item -u, --upstream-remote-if-missing
+
+Setup 'upstream' remote in existing repo working dirs, if missing
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing. This is
+useful in the pathological scenario in which a REPO parameter would otherwise
+be interpretted as a command line option.
+
+=back
+
+
+=head1 DIAGNOSTICS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 BUGS
+
+=over 4
+
+=item Results from calls to the GitHub API are not currently cached
+
+At the time of writing (2016-05) the author is still working on the
+'ads-github-tools' cache implementation, so any information needed from the
+upstream GitHub service is requested directly. This may incur unnecessary hits
+against the user's GitHub API rate limit. Don't worry, in the typical case we
+are only talking about a handful of requests even if the user has a very large
+number of repositories (i.e., several hundred).
+
+=item Probably others
+
+If you find any, please report them as described in the C<BUGS> file.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item ads-github-tools(7)
+
+=item ads-github-merge-all-upstreams(1)
+
+=back
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <salewski@att.net>
+
+=back
+
+
+=head1 COPYRIGHT
+
+Copyright 2016 Alan D. Salewski
+
+=cut
+

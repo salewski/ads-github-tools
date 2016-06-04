@@ -91,16 +91,19 @@ set -o pipefail
 
 
 # FIXME: one day this will be filtered in at build time
-declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'
 
 # FIXME: one day this will be filtered in at build time
-declare -r VERSION='0.0.1'
+# declare -r VERSION='0.0.1'
+declare -r VERSION='@VERSION@'
 
 # FIXME: one day this will be filtered in at build time
 # This variable is replaced at build time
-# declare -r gl_const_build_date='@BUILD_DATE@'
-# declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
-declare -r gl_const_release="${VERSION}"
+declare -r gl_const_build_date='@BUILD_DATE@'
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
 
 BE_VERBOSE=false # info-level output; override with one '-v' opt
 
@@ -206,7 +209,7 @@ trap 'f_cleanup' EXIT
 f_print_help () {
 
     cat <<EOF
-usage: $PROG [OPTION...] [REPO...]
+usage: $PROG [OPTION...]
 Requests user's rate limit information from GitHub and displays it on stdout
 
       --help            Print this help message on stdout
@@ -1209,3 +1212,180 @@ done
 if $BE_VERBOSE; then
     printf "${PROG} (info): completed successfully\n" 1>&2
 fi
+
+exit 0
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.1.0' \
+#               --section='1' \
+#               > /outputdir/ads-github-show-rate-limits.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=head1 NAME
+
+  ads-github-show-rate-limits - Show user's GitHub API rate limits
+
+
+=head1 SYNOPSIS
+
+  ads-github-show-rate-limits --help
+  ads-github-show-rate-limits --version
+
+  ads-github-show-rate-limits [OPTION...]
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-show-rate-limits> program is part of the C<ads-github-tools>
+project.
+
+The C<ads-github-show-rate-liimits> program requests the user's rate limit
+information from GitHub and displays it on stdout.
+
+The program makes an authenticated HTTP 'HEAD' call to the GitHub API (using
+C<curl(1)>) to obtain the HTTP response headers that contain the service rate
+limit information. The rate limit information is parsed out of the headers and
+presented to the user.
+
+The default output (whitespace delimited columns of plain text) is suitable
+for a user working interactively in a shell and for use in a Unix shell
+pipeline.
+
+A future version will provide options to allow the user to request output in
+some specific formats (edn, json).
+
+All requests are made over HTTPS.
+
+FIXME: docs still a wip
+
+
+=head2 Motivation
+
+When working with the programs provided by the C<ads-github-tools> project (or
+really any tool that makes calls to the GitHub API) you will want to be able
+to confirm that you are within your rate limit and how many requests you still
+have left before you hit your cap.
+
+You may also be working on a set of similar tools and just want to confirm
+that they are working as expected -- not incurring hits against your GitHub
+API rate limit when you do not expect them to.
+
+
+=head1 OPTIONS
+
+Below are the command line options currently accepted by
+C<ads-github-show-rate-limits>.
+
+
+=over 4
+
+=item --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -h, --human-readable
+
+Causes numbers and dates to be printed in human readable format, for example:
+
+    "1,324,835" rather than "1324835"
+
+and:
+
+    "2016-05-22 07:59:18-04:00" rather than "1463918358"
+
+By default, numbers and dates are presented in the same format as they are
+returned by the upstream GitHub service; this allows downstream tools to
+process them without having to parse some (more complicated) human-readable
+format. In this format, dates are represented as seconds since the Unix epoch.
+
+When the C<-h> (C<--human-readable>) option is is specified, then numbers will
+be presented in a locale-aware format, and dates will be formatted to the
+second in RFC 3339 format.
+
+A future version will allow dates to be presented in UTC.
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing.
+
+=back
+
+
+=head1 DIAGNOSTICS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 BUGS
+
+=over 4
+
+=item Probably tons
+
+If you find any, please report them as described in the C<BUGS> file.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item ads-github-tools(7)
+
+=back
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <salewski@att.net>
+
+=back
+
+
+=head1 COPYRIGHT
+
+Copyright 2016 Alan D. Salewski
+
+=cut
+
