@@ -135,24 +135,27 @@ declare    gl_const_github_api_base_url='https://api.github.com/'
 #
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
 
+
+# By default we'll use the external programs found at configure-time. But we
+# allow the user to override any particular tool by setting an environment
+# variable named after the tool (with hyphen chars changed to underscores).
+
+CAT_PROG="${CAT:-@CAT@}"
+
+CURL_PROG="${CURL:-@CURL_PROG@}"
+
+EXPR_PROG="${EXPR:-@EXPR_PROG@}"
+
 # jq - command line JSON parser and manipulation language
 #      see: https://github.com/stedolan/jq
 #
-# git-hub - command line GitHub API tool; works as 'git' subcommand if found
-#           on PATH
-#           see: https://github.com/sociomantic-tsunami/git-hub
-#                https://www.kernel.org/pub/software/scm/git/docs/howto/new-command.html
-#
+JQ_PROG="${JQ:-@JQ_PROG@}"
+
 declare -a NEEDED_EXTERNAL_PROGS=(
-    cat
-    curl
-    expr
-    head
-    jq
-    git
-    # git-hub
-    sed
-    tr
+    "${CAT_PROG}"
+    "${CURL_PROG}"
+    "${EXPR_PROG}"
+    "${JQ_PROG}"
 )
 
 
@@ -208,7 +211,7 @@ trap 'f_cleanup' EXIT
 
 f_print_help () {
 
-    cat <<EOF
+    "${CAT_PROG}" <<EOF
 usage: $PROG [OPTION...]
 Requests user's rate limit information from GitHub and displays it on stdout
 
@@ -227,7 +230,7 @@ EOF
 }
 
 f_print_version () {
-    cat <<EOF
+    "${CAT_PROG}" <<EOF
 ${PROG} ${gl_const_release}
 Copyright (C) 2016 Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
@@ -851,12 +854,12 @@ set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
 
 while test $# -gt 0 ; do
 
-    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
-                  "x$1" : 'x\(-.*\)'     \| \
-                  "x$1" : 'x\(.*\)')
+    option=$("${EXPR_PROG}" "x$1" : 'x\(--[^=]*\)' \| \
+                            "x$1" : 'x\(-.*\)'     \| \
+                            "x$1" : 'x\(.*\)')
 
-    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
-                  "x$1" : 'x-.\(.*\)')
+    optarg=$("${EXPR_PROG}" "x$1" : 'x--[^=]*=\(.*\)' \| \
+                            "x$1" : 'x-.\(.*\)')
 
     case $1 in
 
@@ -1027,9 +1030,9 @@ if $BE_VERBOSE; then
     printf "${PROG} (info): requesting /rate_limit\n" 1>&2
 fi
 
-t_gh_json_service_response=$( curl "${MY_CURL_OPTS[@]}" \
-                                   --get                \
-                                   "${MY_GITHUB_RATE_LIMIT_URL}" )
+t_gh_json_service_response=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+                                             --get                \
+                                             "${MY_GITHUB_RATE_LIMIT_URL}" )
 if test $? -ne 0; then
     # Hopefully 'curl' emitted a meaningful error message, too...
     printf "${PROG} (error): was unable to obtain GitHub rate limit; bailing out\n" 1>&2
@@ -1081,7 +1084,7 @@ fi
 #           2016-05-22 11:59:18+00:00
 #
 RATE_LIMIT_DATA_LINES=$(echo "${t_gh_json_service_response}"  \
-                        | jq -r '.resources | ( keys[] as $k | "\( $k ):\( .[$k].limit ):\( .[$k].remaining ):\( .[$k].reset )" )' )
+                        | "${JQ_PROG}" -r '.resources | ( keys[] as $k | "\( $k ):\( .[$k].limit ):\( .[$k].remaining ):\( .[$k].reset )" )' )
 if test $? -ne 0; then
     printf "${PROG} (error): was unable to extract rate limit data from GitHub service response; bailing out\n" 1>&2
     exit 1
