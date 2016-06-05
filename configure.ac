@@ -45,6 +45,11 @@ dnl +------------------------+
 dnl makes $(LN_S) available in our Makefile.am files
 AC_PROG_LN_S
 
+AC_PATH_PROG(AWK_PROG, awk)
+if test -z "$AWK_PROG"; then
+    AC_MSG_ERROR([awk not found])
+fi
+
 # We've only tested with bash 4.x, but are we really likely to encounter
 # versions older than that on a developer's workstation these days? If we need
 # to be more specific, please let the author know!
@@ -144,6 +149,16 @@ fi
 AC_PATH_PROG([RMDIR], [rmdir])
 if test -z "$RMDIR"; then
     AC_MSG_ERROR([rmdir not found])
+fi
+
+
+# See: https://metacpan.org/release/Digest-SHA3
+#      https://packages.debian.org/jessie/libdigest-sha3-perl
+#      https://packages.debian.org/stretch/libdigest-sha3-perl
+#
+AC_PATH_PROG([SHA3SUM_PROG], [sha3sum])
+if test -z "$SHA3SUM_PROG"; then
+    AC_MSG_ERROR([sha3sum not found])
 fi
 
 AC_PATH_PROG([TR_PROG], [tr])
@@ -286,6 +301,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]ads_perl5_extra_includes[@],$(ads_perl5_extra_includes),g'"'"' \
   -e '"'"'s,[@]perl5_pkgvdatadir[@],$(perl5_pkgvdatadir),g'"'"' \
   \
+  -e '"'"'s,[@]AWK_PROG[@],$(AWK_PROG),g'"'"' \
   -e '"'"'s,[@]BASH_SH[@],$(BASH_SH),g'"'"' \
   -e '"'"'s,[@]CAT[@],$(CAT),g'"'"' \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
@@ -303,6 +319,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
+  -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \

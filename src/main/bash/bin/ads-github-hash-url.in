@@ -51,10 +51,22 @@ BE_VERBOSE=false # info-level output; override with one '-v' opt
 # This one implies BE_VERBOSE, too
 DEBUGGING=false  # debug-level output; override with two '-v' opts
 
+
+# By default we'll use the external programs found at configure-time. But we
+# allow the user to override any particular tool by setting an environment
+# variable named after the tool (with hyphen chars changed to underscores).
+
+AWK_PROG="${AWK:-@AWK_PROG@}"
+
+EXPR_PROG="${EXPR:-@EXPR_PROG@}"
+
+SHA3SUM_PROG="${SHA3SUM:-@SHA3SUM_PROG@}"
+
+
 declare -a NEEDED_EXTERNAL_PROGS=(
-    awk
-    expr
-    sha3sum
+    "${AWK_PROG}"
+    "${EXPR_PROG}"
+    "${SHA3SUM_PROG}"
 )
 
 
@@ -141,12 +153,12 @@ EOF
 
 while test $# -gt 0 ; do
 
-    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
-                  "x$1" : 'x\(-.\)'      \| \
-                  "x$1" : 'x\(.*\)')
+    option=$("${EXPR_PROG}" "x$1" : 'x\(--[^=]*\)' \| \
+                            "x$1" : 'x\(-.\)'      \| \
+                            "x$1" : 'x\(.*\)')
 
-    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
-                  "x$1" : 'x-.\(.*\)')
+    optarg=$("${EXPR_PROG}" "x$1" : 'x--[^=]*=\(.*\)' \| \
+                            "x$1" : 'x-.\(.*\)')
 
     case $1 in
 
@@ -268,10 +280,10 @@ for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
 done
 
 
-# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 512 | awk '{print $1}' )
-# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 384 | awk '{print $1}' )
-t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 256 | awk '{print $1}' )
-# t_hash_value=$(echo "${INPUT_URL}" | sha3sum --algorithm 224 | awk '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | "${SHA3SUM_PROG}" --algorithm 512 | "${AWK_PROG}" '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | "${SHA3SUM_PROG}" --algorithm 384 | "${AWK_PROG}" '{print $1}' )
+t_hash_value=$(echo "${INPUT_URL}" | "${SHA3SUM_PROG}" --algorithm 256 | "${AWK_PROG}" '{print $1}' )
+# t_hash_value=$(echo "${INPUT_URL}" | "${SHA3SUM_PROG}" --algorithm 224 | "${AWK_PROG}" '{print $1}' )
 if test $? -ne 0; then
     printf "${PROG} (error): was error while attempting to compute the hash of url \"%s\"; bailing out\n" "${INPUT_URL}" 1>&2
     exit 1
