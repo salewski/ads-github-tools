@@ -68,9 +68,44 @@ if test -z "$CHOWN"; then
     AC_MSG_ERROR([chown not found])
 fi
 
+# See: https://en.wikipedia.org/wiki/CURL
+#      https://curl.haxx.se/
+#      https://github.com/curl/curl
+#
+AC_PATH_PROG([CURL_PROG], [curl])
+if test -z "$CURL_PROG"; then
+    AC_MSG_ERROR([curl not found])
+fi
+
+AC_PATH_PROG([EXPR_PROG], [expr])
+if test -z "EXPR_PROG"; then
+    AC_MSG_ERROR([expr not found])
+fi
+
 AC_PATH_PROG([FIND], [find])
 if test -z "$FIND"; then
     AC_MSG_ERROR([find not found]);dnl Ha!
+fi
+
+# git version control system
+#
+# See: https://git-scm.com/
+#      https://en.wikipedia.org/wiki/Git_(software)
+#      https://www.kernel.org/pub/software/scm/git/
+#
+AC_PATH_PROG([GIT_PROG], [git])
+if test -z "$GIT_PROG"; then
+    AC_MSG_ERROR([git not found])
+fi
+
+# git-hub - command line GitHub API tool; works as 'git' subcommand if found
+#           on PATH
+#           see: https://github.com/sociomantic-tsunami/git-hub
+#                https://www.kernel.org/pub/software/scm/git/docs/howto/new-command.html
+#
+AC_PATH_PROG([GIT_HUB_PROG], [git-hub])
+if test -z "$GIT_HUB_PROG"; then
+    AC_MSG_ERROR([git-hub not found])
 fi
 
 AC_PATH_PROG([GREP], [grep])
@@ -78,9 +113,22 @@ if test -z "$GREP"; then
     AC_MSG_ERROR([grep not found])
 fi
 
+AC_PATH_PROG([HEAD_PROG], [head])
+if test -z "$HEAD_PROG"; then
+    AC_MSG_ERROR([head not found])
+fi
+
 AC_PATH_PROG([ID_PROG], [id])
 if test -z "$ID_PROG"; then
     AC_MSG_ERROR([id program not found])
+fi
+
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+AC_PATH_PROG([JQ_PROG], [jq])
+if test -z "$JQ_PROG"; then
+    AC_MSG_ERROR([jq program not found])
 fi
 
 AC_PATH_PROG([SED], [sed])
@@ -96,6 +144,11 @@ fi
 AC_PATH_PROG([RMDIR], [rmdir])
 if test -z "$RMDIR"; then
     AC_MSG_ERROR([rmdir not found])
+fi
+
+AC_PATH_PROG([TR_PROG], [tr])
+if test -z "$TR_PROG"; then
+    AC_MSG_ERROR([tr not found])
 fi
 
 AC_PATH_PROG([GROUPADD], [groupadd])
@@ -237,13 +290,20 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]CAT[@],$(CAT),g'"'"' \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
+  -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
+  -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \
+  -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
+  -e '"'"'s,[@]GIT_HUB_PROG[@],$(GIT_HUB_PROG),g'"'"' \
   -e '"'"'s,[@]GREP[@],$(GREP),g'"'"' \
   -e '"'"'s,[@]GROUPADD[@],$(GROUPADD),g'"'"' \
+  -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
+  -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
+  -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
 '

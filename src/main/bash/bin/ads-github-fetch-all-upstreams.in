@@ -145,24 +145,52 @@ declare    gl_const_github_api_base_url='https://api.github.com/'
 #
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
 
-# jq - command line JSON parser and manipulation language
-#      see: https://github.com/stedolan/jq
+
+# By default we'll use the external programs found at configure-time. But we
+# allow the user to override any particular tool by setting an environment
+# variable named after the tool (with hyphen chars changed to underscores).
+
+CAT_PROG="${CAT:-@CAT@}"
+
+CURL_PROG="${CURL:-@CURL_PROG@}"
+
+EXPR_PROG="${EXPR:-@EXPR_PROG@}"
+
+GIT_PROG="${GIT:-@GIT_PROG@}"
+
+# FIXME: How to make this selectable? Would need to influence git's search
+#        path to find the specified version of the tool, but how to do that
+#        without changing PATH?
 #
 # git-hub - command line GitHub API tool; works as 'git' subcommand if found
 #           on PATH
 #           see: https://github.com/sociomantic-tsunami/git-hub
 #                https://www.kernel.org/pub/software/scm/git/docs/howto/new-command.html
 #
+# GIT_HUB_PROG="${GIT_HUB:-@GIT_HUB_PROG@}"
+GIT_HUB_PROG='git-hub'
+
+HEAD_PROG="${HEAD:-@HEAD_PROG@}"
+
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+JQ_PROG="${JQ:-@JQ_PROG@}"
+
+SED_PROG="${SED:-@SED@}"
+
+TR_PROG="${TR:-@TR_PROG@}"
+
 declare -a NEEDED_EXTERNAL_PROGS=(
-    cat
-    curl
-    expr
-    head
-    jq
-    git
-    git-hub
-    sed
-    tr
+    "${CAT_PROG}"
+    "${CURL_PROG}"
+    "${EXPR_PROG}"
+    "${HEAD_PROG}"
+    "${JQ_PROG}"
+    "${GIT_PROG}"
+    "${GIT_HUB_PROG}"
+    "${SED_PROG}"
+    "${TR_PROG}"
 )
 
 
@@ -218,7 +246,7 @@ trap 'f_cleanup' EXIT
 
 f_print_help () {
 
-    cat <<EOF
+    "${CAT_PROG}" <<EOF
 usage: $PROG [OPTION...] [REPO...]
 Invokes 'git fetch upstream' for all of the user's GitHub repos that are
 present. With appropriate options, will clone some or all missing repos and
@@ -241,7 +269,7 @@ EOF
 }
 
 f_print_version () {
-    cat <<EOF
+    "${CAT_PROG}" <<EOF
 ${PROG} ${gl_const_release}
 Copyright (C) 2016 Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
@@ -811,10 +839,10 @@ f_get_gh_user_repos_pagination_count_or_die () {
     # ...
     # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
 
-    t_head_response=$( curl "${MY_CURL_OPTS[@]}" \
+    t_head_response=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
                             --head               \
                             "${MY_GITHUB_REPOS_URL}" \
-                       | tr -d '\r' )
+                       | "${TR_PROG}" -d '\r' )
 
     if test $? -ne 0; then
         # Hopefully curl printed something meaningful to stderr here...
@@ -857,10 +885,10 @@ f_get_gh_user_repos_pagination_count_or_die () {
     # lenient about whether or not there is more than a single whitespace
     # token between fields.
     #
-    t_http_head_stat_and_label=$(echo "${t_head_response}" | head -n 1 | sed -n -e '/^HTTP[/]/ { s#^HTTP/[^[:space:]]\{1,\}[[:space:]]\{1,\}\([[:digit:]]\{3\}[[:space:]]\{1,\}.*\)#\1#p;q }')
+    t_http_head_stat_and_label=$(echo "${t_head_response}" | "${HEAD_PROG}" -n 1 | "${SED_PROG}" -n -e '/^HTTP[/]/ { s#^HTTP/[^[:space:]]\{1,\}[[:space:]]\{1,\}\([[:digit:]]\{3\}[[:space:]]\{1,\}.*\)#\1#p;q }')
     if test -z "${t_http_head_stat_and_label}"; then
         printf "${PROG} (error): was unable to extract HTTP status code from responses; bailing out\n    Full HTTP response headers:\n%s\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -868,8 +896,8 @@ f_get_gh_user_repos_pagination_count_or_die () {
         printf "${PROG} (debug): HTTP status and label for pagination info: %s\n" "${t_http_head_stat_and_label}" 1>&2
     fi
 
-    t_http_head_stat=$(  echo "${t_http_head_stat_and_label}" | sed -e 's#^\([[:digit:]]\{3\}\)[[:space:]]\{1,\}.*#\1#')
-    t_http_head_label=$( echo "${t_http_head_stat_and_label}" | sed -e 's#^[[:digit:]]\{3\}[[:space:]]\{1,\}\([[:space:][:alnum:][:punct:]]*\)$#\1#')
+    t_http_head_stat=$(  echo "${t_http_head_stat_and_label}" | "${SED_PROG}" -e 's#^\([[:digit:]]\{3\}\)[[:space:]]\{1,\}.*#\1#')
+    t_http_head_label=$( echo "${t_http_head_stat_and_label}" | "${SED_PROG}" -e 's#^[[:digit:]]\{3\}[[:space:]]\{1,\}\([[:space:][:alnum:][:punct:]]*\)$#\1#')
 
     if $DEBUGGING; then
         printf "${PROG} (debug): HTTP status for pagination info: %s\n" "${t_http_head_stat}"  1>&2
@@ -905,7 +933,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
     if test $t_http_head_stat -ge 100 \
     && test $t_http_head_stat -lt 200; then
         printf "${PROG} (error): program does not directly grok HTTP 1xx \"Informational\" status codes; bailing out\n    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -914,7 +942,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
         printf "${PROG} (error): program does not directly grok HTTP 3xx \"Redirection\" status codes; bailing out\n"\
 "    If you encounter this error, please submit a bug report; real-world need is likely to get it fixed.\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -924,7 +952,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
 "    If you encounter this error, please submit a bug report; it suggests there is a problem with the\n"\
 "    way in which the program is formulating requests to the upstream GitHub service.\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -934,7 +962,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
 "    If you encounter this error, it suggests there is a problem with the upstream GitHub service;\n"\
 "    please wait a while and try your request later.\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -944,7 +972,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
         printf "${PROG} (bug): internal check failed. Expected that we received a 2xx \"Successful\" HTTP status code, but really have: \"%s\"; bailing out.\n"\
 "    If you encounter this error, there is a serious bug with this program; please submit a bug report.\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -978,7 +1006,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
 
         printf "${PROG} (error): was error while attempting to locate HTTP \"Link:\" header in HEAD response; no pagination data available; bailing out\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -998,18 +1026,18 @@ f_get_gh_user_repos_pagination_count_or_die () {
     # parameter.
     #
     t_last_page_number=$( echo "${t_http_head_link}" \
-                          | sed -n -e 's#.*\([<][^>]\{1,\}[>]\)[[:space:]]*[;][^,]*rel="last"#\1#p' \
-                          | sed -n -e 's#.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]]#\1#p' )
+                          | "${SED_PROG}" -n -e 's#.*\([<][^>]\{1,\}[>]\)[[:space:]]*[;][^,]*rel="last"#\1#p' \
+                          | "${SED_PROG}" -n -e 's#.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]]#\1#p' )
     if test $? -ne 0; then
         printf "${PROG} (error): was error while attempting to parse last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
     if test -z "${t_last_page_number}"; then
         printf "${PROG} (error): extracted empty value for last page number from HTTP \"Link:\" header in HEAD response; bailing out\n"\
 "    Full HTTP response headers:\n%n\n" \
-               "$(echo "${t_head_response}" | sed -e 's/^/        /')" 1>&2
+               "$(echo "${t_head_response}" | "${SED_PROG}" -e 's/^/        /')" 1>&2
         exit 1
     fi
 
@@ -1047,12 +1075,12 @@ set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
 
 while test $# -gt 0 ; do
 
-    option=$(expr "x$1" : 'x\(--[^=]*\)' \| \
-                  "x$1" : 'x\(-.*\)'     \| \
-                  "x$1" : 'x\(.*\)')
+    option=$("${EXPR_PROG}" "x$1" : 'x\(--[^=]*\)' \| \
+                            "x$1" : 'x\(-.*\)'     \| \
+                            "x$1" : 'x\(.*\)')
 
-    optarg=$(expr "x$1" : 'x--[^=]*=\(.*\)' \| \
-                  "x$1" : 'x-.\(.*\)')
+    optarg=$("${EXPR_PROG}" "x$1" : 'x--[^=]*=\(.*\)' \| \
+                            "x$1" : 'x-.\(.*\)')
 
     case $1 in
 
@@ -1335,10 +1363,10 @@ while $t_keep_going; do
     #
     REPO_DATA_LINES=${REPO_DATA_LINES}\
 $'\n'\
-$( curl "${MY_CURL_OPTS[@]}" \
+$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
         --get                \
         "${t_gh_url_for_page}" \
-        | jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
+        | "${JQ_PROG}" -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
 
     # The newline embedded between our existing and new REPO_DATA_LINES
     # instances is intended to ensure that the concatenation of the two does
@@ -1346,7 +1374,7 @@ $( curl "${MY_CURL_OPTS[@]}" \
     # possible, though, that we may have just introduced a spurious blank
     # line; we'll strip it out if so.
     #
-    REPO_DATA_LINES=$(echo "${REPO_DATA_LINES}" | sed -e '/^[[:space:]]*$/d' )
+    REPO_DATA_LINES=$(echo "${REPO_DATA_LINES}" | "${SED_PROG}" -e '/^[[:space:]]*$/d' )
     if test $? -ne 0; then
         printf "${PROG} (error): was unable to strip possible empty line out of REPO_DATA_LINES (working page: %s); bailing out\n" \
                "${t_cur_page}" 1>&2
@@ -1431,7 +1459,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             declare t_v_opts=()
             if $BE_VERBOSE; then t_v_opts+=( '--verbose' ); fi
             if $DEBUGGING;  then t_v_opts+=( '--verbose' ); fi
-            git hub "${t_v_opts[@]}" clone "${repo_name}"
+            "${GIT_PROG}" hub "${t_v_opts[@]}" clone "${repo_name}"
 
             if test $? -ne 0; then
                 printf "${PROG} (error): was error while attempting to clone repo \"%s\" from GitHub; bailing out\n" "${repo_name}" 1>&2
@@ -1496,7 +1524,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
         declare -a t_pipestatus_hold
 
-        git remote | grep -q --max-count=1 '^upstream$'
+        "${GIT_PROG}" remote | grep -q --max-count=1 '^upstream$'
 
         t_pipestatus_hold=( ${PIPESTATUS[@]} )
 
@@ -1594,10 +1622,10 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                     printf "${PROG} (info): querying GitHub service to obtain parent clone url for repo \"%s\"\n" "${repo_name}" 1>&2
                 fi
 
-                t_parent_clone_url=$( curl "${MY_CURL_OPTS[@]}" \
+                t_parent_clone_url=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
                                       --get                \
                                       "${t_gh_url_for_this_repo}" \
-                                      | jq -r '.clone_url' )
+                                      | "${JQ_PROG}" -r '.clone_url' )
                 if test $? -ne 0; then
                     printf "${PROG} (error): was unable to query GitHub service to obtain clone url for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
                     exit 1  # from subshell
@@ -1611,7 +1639,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                     printf "${PROG} (info): setting up \"upstream\" remote for repo \"%s\" to: %s\n" "${repo_name}" "${t_parent_clone_url}" 1>&2
                 fi
 
-                git remote add upstream "${t_parent_clone_url}"
+                "${GIT_PROG}" remote add upstream "${t_parent_clone_url}"
 
                 if test $? -ne 0; then
                     printf "${PROG} (error): was unable to establish \"upstream\" remote for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
@@ -1641,7 +1669,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             printf "${PROG} (info): invoking 'git fetch upstream' for repo \"%s\"\n" "${repo_name}" 1>&2
         fi
 
-        git fetch upstream
+        "${GIT_PROG}" fetch upstream
         if test $? -ne 0; then
             printf "${PROG} (error): was error while attempting to 'git fetch upstream' for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
             exit 1
