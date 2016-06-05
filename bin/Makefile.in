@@ -80,7 +80,10 @@ subdir = bin
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(dist_noinst_SCRIPTS)
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/configure.ac
+am__aclocal_m4_deps = $(top_srcdir)/autotools/ads_PERL_INCLUDES.m4 \
+	$(top_srcdir)/autotools/ads_PERL_MODULE.m4 \
+	$(top_srcdir)/autotools/ads_PROG_PERL.m4 \
+	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
 mkinstalldirs = $(install_sh) -d
@@ -115,24 +118,31 @@ AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
 AWK = @AWK@
+AWK_PROG = @AWK_PROG@
 BASH_SH = @BASH_SH@
 CAT = @CAT@
 CHGRP = @CHGRP@
 CHOWN = @CHOWN@
+CURL_PROG = @CURL_PROG@
 CYGPATH_W = @CYGPATH_W@
 DEFS = @DEFS@
 ECHO_C = @ECHO_C@
 ECHO_N = @ECHO_N@
 ECHO_T = @ECHO_T@
+EXPR_PROG = @EXPR_PROG@
 FIND = @FIND@
+GIT_HUB_PROG = @GIT_HUB_PROG@
+GIT_PROG = @GIT_PROG@
 GREP = @GREP@
 GROUPADD = @GROUPADD@
+HEAD_PROG = @HEAD_PROG@
 ID_PROG = @ID_PROG@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
 INSTALL_STRIP_PROGRAM = @INSTALL_STRIP_PROGRAM@
+JQ_PROG = @JQ_PROG@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LN_S = @LN_S@
@@ -153,8 +163,10 @@ RM = @RM@
 RMDIR = @RMDIR@
 SED = @SED@
 SET_MAKE = @SET_MAKE@
+SHA3SUM_PROG = @SHA3SUM_PROG@
 SHELL = @SHELL@
 STRIP = @STRIP@
+TR_PROG = @TR_PROG@
 USERADD = @USERADD@
 USERMOD = @USERMOD@
 VERSION = @VERSION@
