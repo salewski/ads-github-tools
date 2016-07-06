@@ -947,12 +947,31 @@ while $t_keep_going; do
     #     ac-nrepl:salewski/ac-nrepl:master:true
     #     ack2:salewski/ack2:dev:true
     #
+    # UPDATE (2016-07-06): [issue #12] Note that we are working only with
+    # repos with owner type 'User' (we are ignoring those with owner type
+    # 'Organization'). This is to work around the previously unrealized issue
+    # that the /user/repos/ data can include repos that that user (as a member
+    # of a particular organization) merely has access to, regardless of
+    # whether he also has a personal fork of those repos. The authenticated
+    # user's personal fork of such a repo, if he has one, is presented
+    # separately.
+    #
+    # XXX: This has the undesirable effect of preventing this program from
+    #      working directly on organization-owned repos. The author needs to
+    #      further review how those are intended to work, but if this turns
+    #      out to be an artificial limitation is interested in having it
+    #      fixed. Patches/pull requests welcome!
+    #
+    # See also: https://github.com/salewski/ads-github-tools/issues/12
+    #
     REPO_DATA_LINES=${REPO_DATA_LINES}\
 $'\n'\
 $( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
         --get                \
         "${t_gh_url_for_page}" \
-        | "${JQ_PROG}" -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
+        | "${JQ_PROG}" -r '.[] '\
+'| select( .owner.type == "User" ) '\
+'| .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
 
     # The newline embedded between our existing and new REPO_DATA_LINES
     # instances is intended to ensure that the concatenation of the two does
