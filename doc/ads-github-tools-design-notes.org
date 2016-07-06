@@ -101,6 +101,31 @@
     :                               Probably only useful for debugging, but who knows...)
 
 
+** /user/repos lists more than just your forks and owned repos
+
+   I learned over the weekend that the data returned from =/user/repos/=
+   includes not only the repositories for which the authenticated user is an
+   owner and his personal forks of other repos, but also all
+   organization-owned repos that the user has access to (regardless of whether
+   or not he has a personal fork of them).
+
+   This means that a fundamental assumption that the '*-fetch-all-upstreams'
+   and '*-merge-all-upstreams' program was making about the repositories list
+   obtained from that endpoint -- namely that it represented repos that the
+   user either owned or had forked from others -- is incorrect. The data
+   returned is (potentially) a superset of that data.
+
+   Users who are not part of any organizations would not be affected, as the
+   author was not prior to becoming a member of an organization and tripping
+   over the bug. The behavior of the '*-fetch-all-upstreams' tool was to treat
+   a personal fork of an organization repo as a non-fork, and to attempt to
+   fetch the org repos that the user had available to him for forking, but for
+   which he had no personal fork actually created.
+
+   I'm experimenting with getting this buttoned up; just wanted to record
+   information about the issue.
+
+
 * TODO [#2] implement proper autotools-based build for ads-github-tools project ([[https://github.com/salewski/ads-github-tools/issues/5][issue #5]]) :build:
   :LOGBOOK:
   - CREATED [2016-05-15 Sun 12:16]
