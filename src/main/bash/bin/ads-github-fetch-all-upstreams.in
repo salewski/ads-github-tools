@@ -79,19 +79,12 @@ declare -r PROG='ads-github-fetch-all-upstreams'
 
 set -o pipefail
 
-
-# FIXME: one day this will be filtered in at build time
-# declare -r MAINTAINER='Alan D. Salewski <salewski@att.net>'
 # declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
-declare -r MAINTAINER='@PACKAGE_BUGREPORT@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
 
-# FIXME: one day this will be filtered in at build time
-# declare -r VERSION='0.0.1'
-declare -r VERSION='@VERSION@'
+declare -r VERSION='@VERSION@'  # value filtered-in at build time
 
-# FIXME: one day this will be filtered in at build time
-# This variable is replaced at build time
-declare -r gl_const_build_date='@BUILD_DATE@'
+declare -r gl_const_build_date='@BUILD_DATE@'  # value filtered-in at build time
 declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 # declare -r gl_const_release="${VERSION}"
 
@@ -146,9 +139,10 @@ declare    gl_const_github_api_base_url='https://api.github.com/'
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
 
 
-# By default we'll use the external programs found at configure-time. But we
-# allow the user to override any particular tool by setting an environment
-# variable named after the tool (with hyphen chars changed to underscores).
+# By default we'll use the external programs found at configure-time (values
+# are filtered-in here at build time). But we allow the user to override any
+# particular tool by setting an environment variable named after the tool
+# (with hyphen chars changed to underscores).
 
 CAT_PROG="${CAT:-@CAT@}"
 
