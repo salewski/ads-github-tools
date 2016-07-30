@@ -50,13 +50,15 @@ if test -z "$AWK_PROG"; then
     AC_MSG_ERROR([awk not found])
 fi
 
-# We've only tested with bash 4.x, but are we really likely to encounter
-# versions older than that on a developer's workstation these days? If we need
-# to be more specific, please let the author know!
+## We need bash >= 4.x (associative arrays were added in bash-4.0)
+## See also: GitHub issue #6:
+##     https://github.com/salewski/ads-github-tools/issues/6
+##
 AC_PATH_PROG(BASH_SH, bash)
-if test -z "$BASH_SH"; then
-    AC_MSG_ERROR([bash not found])
-fi
+AS_IF([test -z "$BASH_SH"], [AC_MSG_ERROR([bash not found])],
+      [["${BASH_SH}" -c 'test -n "${BASH_VERSINFO@<:@0@:>@:+set}" && test ${BASH_VERSINFO@<:@0@:>@]} -ge 4 && exit 0'], [:],
+      [AC_MSG_ERROR([found version of bash is not new enough; bash 4.0 or newer is required])
+])
 
 AC_PATH_PROG([CAT], [cat])
 if test -z "$CAT"; then

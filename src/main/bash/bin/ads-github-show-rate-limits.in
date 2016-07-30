@@ -241,127 +241,6 @@ Written by Alan D. Salewski.
 EOF
 }
 
-# Indicates whether or not the provided MAYBE_ARRAY_NAME parameter is the name
-# of a bash array.
-#
-f_is_array () {
-
-    local __required_count=1
-    if test $# -ne ${__required_count}; then
-        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
-            $# ${__required_count} 1>&2
-        exit 1
-    fi
-
-    local -r __maybe_array_name=$1
-
-    local -r __has_opt_a='declare -[A-Zb-z]*a'
-    if [[ "$(declare -p "${__maybe_array_name}" 2>/dev/null)" =~ ${__has_opt_a} ]]; then
-        return 0
-    fi
-
-    return 1
-}
-
-# Works similarly to bash's built-in 'shift' command, but operates on the
-# named array rather than $@.
-#
-# Usage: f_shift ARRAY_NAME [n]
-#
-# If N is not given, it is assumed to be 1.
-#
-# Returns success unless N is negative or greater than the number of elements
-# in the named array.
-#
-f_shift () {
-
-    local __required_min_count=1
-    local __max_allowed_count=2
-    if test $# -lt ${__required_min_count}; then
-        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at least %d required; bailing out\n" \
-               $# ${__required_min_count} 1>&2
-        exit 1
-    fi
-    if test $# -gt ${__max_allowed_count}; then
-        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at most %d allowed; bailing out\n" \
-               $# ${__max_allowed_count} 1>&2
-        exit 1
-    fi
-
-    local -r __array_name=$1
-
-    local __shift_count=1  # default
-    if test $# -eq 2; then
-        __shift_count=$2
-    fi
-    local -r __shift_count
-
-    local -r __t_re_positive_integer='^[[:digit:]]{1,}$'
-
-    if [[ "${__shift_count}" =~ ${__t_re_positive_integer} ]]; then :; else
-        printf "${PROG} (error): ${FUNCNAME}() N (shift count) parameter must be a positive integer; got \"%s\"\n" "${__shift_count}" 1>&2
-        return 1
-    fi
-
-    if f_is_array "${__array_name}"; then :; else
-        printf "${PROG} (error): ${FUNCNAME}() value of ARRAY_NAME parameter (\"%s\") does not name an array\n" "${__array_name}" 1>&2
-        return 1
-    fi
-
-    # XXX: This is a hack to work around the bash syntax collision in which
-    #      ${!foo[@]} expands to the index positions of the elements in the
-    #      array rather than an indirect reference (which works for non-array
-    #      types such as ${!foo}). By putting the '[@]' subscript into the
-    #      value of the named array, we /can/ iterate over it's values below
-    #      using the indirect reference syntax.
-    #
-    local __t_arrayref="${__array_name}[@]"
-
-    # for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
-    #     : $PROG \(trace: $LINENO\): [before]: one t_the_array value: $tval
-    # done
-
-    # This loses when command array values contain shell syntax (e.g.,
-    # '--blah$BLAH'), so we do it the long way down below:
-    #
-    # eval "${__array_name}=( ${!__t_arrayref:${__shift_count}} )"
-
-    declare -a __t_new_array=()
-    local __t_cnt=0
-    for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
-        (( ++__t_cnt ))
-
-        if (( ${__t_cnt} <= ${__shift_count} )); then
-            : $PROG \(trace: $LINENO\): shifting off element ${__t_cnt} from array ${__array_name} : val: $tval
-            continue
-        fi
-
-        __t_new_array[$(( ${__t_cnt} - 1 ))]="$tval"
-    done
-
-    for tval in "${__t_new_array[@]}"; do
-        : $PROG \(trace: $LINENO\): [after]: one t_new_array value: $tval
-    done
-
-    eval "${__array_name}=()"  # empty out
-    for t_idx in "${!__t_new_array[@]}"; do
-        eval "${__array_name}[${t_idx}]=\"$(printf '%q' "${__t_new_array[${t_idx}]}")\""
-    done
-
-# # DEBUG go
-#     # This just allows for inspection of the referenced array as it will
-#     # appear to the caller once this function returns.
-#     #
-#     local __t_arrayref2="${__array_name}[@]"
-
-#     for tval in "${!__t_arrayref2}"; do  # iterating over elements of indirectly referenced array
-#         : $PROG \(trace: $LINENO\): [final]: one ${__array_name} value: $tval
-#     done
-# # DEBUG end
-
-    return 0  # success
-}
-
 # Invoked by our accumulating '-v' (--verbose) option. Increases the program
 # output verbosity level by "one stage".
 #
@@ -404,515 +283,236 @@ f_maybe_increase_verbosity () {
     fi
 }
 
-# Intended to be invoked prior to "the real" command line options processing
-# being done. Modifies the provided OUTPUT_ARRAY_NAME array variable (after
-# emptying it out) to contain elements that are the positional parameters of a
-# rewritten representation of the command line; any /legitimate/ short-form
-# options are expanded to use their long-form option representations.
-#
-# This also allows us to leverage the built-in getopts's ability to parse
-# "bundled" short-form options, both with and without option arguments.
-#
-# The idea is to allow all of the following to work (while not precluding the
-# use of long-form command line options), which is difficult to implement in a
-# general fashion without getopts's help (or by using the external 'getopt'
-# tool, which is both an external dependency we would rather avoid, and is
-# infamously non-portable):
-#
-#     $ progname -v -f fooval
-#     $ progname -v -ffooval
-#     $ progname -vffooval
-#     $ progname -ffooval -v
-#
-#
-# #+CAPTION: Summary of options preprocessing behavior
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | Opt Form Style                | Recognized? | Bundled? | Outcome                                                                                  |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | short-form                    | Y           | Y        | rewritten in long-form                                                                   |
-# | short-form                    | Y           | N        | rewritten in long-form                                                                   |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | short-form                    | N           | Y        | rewritten as unbundled short-form                                                        |
-# | short-form                    | N           | N        | passed through "as is"                                                                   |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | long-form                     | n/a         | n/a      | all are passed through "as is"                                                           |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | non-option arguments          | n/a         | n/a      | all are passed through "as is" (but see next item)                                       |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-# | end-of-options indicator (--) | n/a         | n/a      | (effectively) passed through "as is", though we jump through flaming hoops for the cause |
-# |-------------------------------+-------------+----------+------------------------------------------------------------------------------------------|
-#
-#
-# CAREFUL: Since we special-case verbosity output handling here (to allow it
-#          to occur as early as possible) it is important that this function
-#          be invoked within the same bash process as its caller (as opposed
-#          to being invoked in a subshell). A subprocess would be unable to
-#          directly affect the state of the parent process, so the parent
-#          process would not know whether or not the verbosity levels had been
-#          increased (...at least not without implementing a more complicated
-#          protocol).
-#
-# Usage (XXX: subject to change):
-#
-#     declare -a MY_COMMAND_LINE_OPTIONS=( "$@" )
-#     declare -a MY_COMMAND_LINE_OPTIONS_REWRITTEN=()
-#     f_rewrite_command_line_or_die MY_COMMAND_LINE_OPTIONS_REWRITTEN
-#     set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
-#     <<"Real" command line options processing here>>
-#
-# XXX: Use of the array named MY_COMMAND_LINE_OPTIONS is currently hard-coded.
-#
-# FIXME: Generalize this to work with a provided data map (similar in spirit
-#        to getopts's OPTSTRING parameter). A similar idea expressed here
-#        would need to provide (at least) both the long- and short-form option
-#        names and an indicator as to whether or not they take an argument.
-#
-f_rewrite_command_line_or_die () {
+pos_last_plus_one=$(( $# + 1 ))
 
-    local __required_min_count=1
-    local __max_allowed_count=1
-    if test $# -lt ${__required_min_count}; then
-        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at least %d required; bailing out\n" \
-               $# ${__required_min_count} 1>&2
+# Each value is one or zero, which indicates whether or not the option is
+# expected to have an argument.
+#
+declare -A longopt_spec=(
+    ['help']=0      # (no short-form equivalent)
+    ['version']=0   # -V
+    ['verbose']=0   # -v
+
+    ['human-readable']=0  # -h
+)
+
+# internal sanity check
+for one_key in "${!longopt_spec[@]}"; do
+    one_val=${longopt_spec[${one_key}]}
+    if [[ $one_val =~ ^[01]$ ]]; then :; else
+        printf "${PROG} (BUG) [line $LINENO]: value (%s) for longopt key '%s' must be either 0 or 1; bailing out\n" \
+               "${one_val}" "${one_key}" 1>&2
         exit 1
     fi
-    if test $# -gt ${__max_allowed_count}; then
-        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; at most %d allowed; bailing out\n" \
-               $# ${__max_allowed_count} 1>&2
-        exit 1
-    fi
+done
 
-    local -r __output_array_name=$1
+if test $# -gt 0; then
 
-    if f_is_array "${__output_array_name}"; then :; else
-        printf "${PROG} (error): ${FUNCNAME}() value of OUTPUT_ARRAY_NAME parameter (\"%s\") does not name an array\n" "${__output_array_name}" 1>&2
-        return 1
-    fi
-
-
-    # We'll rewrite the command line below to expand (possibly grouped)
-    # short-form options (some of which may have option arguments) into their
-    # respective long-form representations. We'll be using bash's builtin
-    # 'getopts' command for that purpose, which honors the value '--' to mean
-    # "end of options". However, getopts does not provide a mechanism to allow
-    # us to determine if it stopped processing options due to the presence of
-    # that value, and /not/ providing it on our rewritten command line, if
-    # needed, could actually cause an invalid invocation. We therefore make a
-    # note of the index positions at which the value occurs, and use this info
-    # later to determine whether or not we need to add the value back into our
-    # rewritten command line.
+    # Using getopts in "silent mode". Note that adding '-' to the optstring allows us to
+    # process GNU-style long-form options; that option is specified to take an argument to
+    # cause getopts to place whatever follows the second '-' character into OPTARG.
     #
-    # Note that we need to deal with pathological situations here, as getopts
-    # will (legitimately) parse '--' as an option argument value rather than
-    # as "end of options" if it appears in a location where an option is
-    # expecting an argument.
+    # Note that getopts will automatically stop processsing options upon encountering
+    # '--', but we still need to deal with the pathological form --=BLAH (no option name,
+    # just a value using the equals-sign syntax).
     #
-    # If getopts has stopped parsing due to the presence of a '--' value, then
-    # we can detect that scenario by counting the the number of '--' values
-    # still available in the combined options values and the remaining
-    # unparsed portion of the command line. If getopts stopped processing due
-    # to '--', the count will be off by one.
-    #
-    # Note that we record the position numbers mainly for debugging purposes;
-    # what we are really interested in are the counts of the items in each
-    # of the __t_end_of_options_* arrays.
-    #
-    local -a __t_end_of_options_positions=()
-    local __t_pos=0
-    for __t_posval in "${MY_COMMAND_LINE_OPTIONS[@]}"; do
-        (( ++__t_pos ))
-        if test "${__t_posval}" = '--'; then
-            __t_end_of_options_positions+=( $__t_pos )
-        fi
-    done
+    while getopts ':-:hVv' opt
+    do
+        : $PROG \(trace: $LINENO\): opt is: $opt
 
-    local -a __t_end_of_options_seen_as_optargs=()
-    local -a __t_end_of_options_seen_unprocessed=()
+        if test "${opt}" = '-'; then
 
-    local -a __t_expanded_command_line=()
-    if test ${#MY_COMMAND_LINE_OPTIONS[@]} -gt 0; then
-        # Re-write the command line to expand (perhaps grouped) short-form
-        # options into their respective long-form variants.
+            # Intercepting processing of long-form option. This conditional
+            # block will set up the 'opt', 'OPTARG', and 'OPTIND' variables for
+            # the code that follows, just as if getopts had the capability to
+            # process long-form options.
 
-        # These allow us to stop looking at a positional token once we've
-        # consumed it. When getopts sees a long-form option, it attempts to
-        # parse each character of it as short form options. While it is doing
-        # this, it sets the variable, OPTARG, and OPTIND normal but we
-        # interpret them differently until we detect that getopts has parsed
-        # the entire token.
-        #
-        local __t_toskip_value=
-        local __t_toskip_parsed=
+            # OPTARG here is one of:
+            #
+            #     =BLAH    (which means user specified '--=BLAH')
+            # or:
+            #     foo
+            # or:
+            #     foo=FOOVAL
 
-        # Any arguments not recognized based on the specification provided
-        # here are simply ignored by 'getopts' operating in "silent mode".
+            if [[ ${OPTARG} =~ .*=.* ]]; then
 
-        while builtin getopts ':hVv' __t_opt "${MY_COMMAND_LINE_OPTIONS[@]}"; do
+                : $PROG \(trace: $LINENO\): OPTARG is name=value style
 
-            : $PROG \(trace: $LINENO\): total-args: ${#MY_COMMAND_LINE_OPTIONS[@]},  OPTIND: $OPTIND,  __t_opt: ${__t_opt}, OPTARG: $OPTARG
+                # Keep everything up to the first '=' sign. Note that if the
+                # option was specified as: --foo=FOOVAL, then $opt here will be
+                # 'foo' (no hyphen chars).
+                opt=${OPTARG/=*/}
+                : $PROG \(trace: $LINENO\): opt is: $opt
 
-            if test -n "${__t_toskip_value}"; then
-                : $PROG \(trace: $LINENO\): OPTIND is $OPTIND,  __t_toskip_value: ${__t_toskip_value},  __t_toskip_parsed "before: ${__t_toskip_parsed}"
-
-                # If we're falling through here, then getopt will consider
-                # /most/ of what it is parsing as an invalid option, but by
-                # coincidence the single character it is parsing (out of the
-                # probably larger string) may happen to be the same as one of
-                # the legit short-form option chars. We'll handle both
-                # scenarios.
-
-                case ${__t_opt} in
-                    '?' )
-                        # no collision with declared single char opts
-                        __t_toskip_parsed="${__t_toskip_parsed}${OPTARG}" ;;
-
-                    * )
-
-                        # collision with declared single char opt, so we will
-                        # collect all getopts-parsed pieces.
-                        
-                        # XXX: This is inherently fragile because an option
-                        #      that is declared to take an argument will be
-                        #      parsed by getopts differently than one that
-                        #      does not. We'll capture both pieces here, but
-                        #      know that that OPTARG may or may not be the
-                        #      empty string.
-
-                        __t_toskip_parsed="${__t_toskip_parsed}${__t_opt}${OPTARG}" ;;
-                esac
-
-                : $PROG \(trace: $LINENO\): OPTIND is $OPTIND,  __t_toskip_value: ${__t_toskip_value},  __t_toskip_parsed "after:  ${__t_toskip_parsed}"
-
-                if test "${__t_toskip_parsed}" = "${__t_toskip_value}"; then
-                    : $PROG \(trace: $LINENO\): full toskip value has been parsed -- skipping and resetting
-
-                    __t_toskip_value=   # reset
-                    __t_toskip_parsed=  # reset
-                else
-                    : $PROG \(trace: $LINENO\): full toskip value not yet parsed -- skipping
-                fi
-                continue
-            fi
-
-            case ${__t_opt} in
-
-                'V' ) __t_expanded_command_line+=( '--version' ) ;;
-
-                'h' ) __t_expanded_command_line+=( '--human-readable') ;;
-
-                'v' )
-                    # As a special case, we will process our accumulating '-v'
-                    # options in this section directly (as opposed to simply
-                    # adding them to our rewritten command line). For
-                    # debugging purposes, we want to be able to increase the
-                    # verbosity as early as possible.
-                    #
-                    # A single -v opt simply turns BE_VERBOSE on (info level
-                    # output); two '-v' opts turns on $DEBUGGING (debug level
-                    # output); three or more '-v' opts turns tracing on.
-                    #
-                    # Note that if you intend to turn tracing on, you'll
-                    # probably want your -v opts to be the first opts on the
-                    # command line (so they take effect earlier).
-                    #
-                    f_maybe_increase_verbosity
-                    ;;
-
-                ':')  # getopts put : in ${__t_opt}
-                    printf "${PROG} (ERROR): missing argument for option -${OPTARG}\n" 1>&2
+                : $PROG \(trace: $LINENO\): a long option name must be at least two characters in length
+                if test ${#opt} -le 1; then
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
                     f_print_help 1>&2
                     exit 1
-                    ;;
+                fi
 
-                '?')  # getopts put ? in ${__t_opt}
-
-                    # If an "invalid" option is seen, 'getopts' places the
-                    # option character found into OPTARG. So a short- or
-                    # long-form option was encountered that is not recognized
-                    # by our deliberately limited optstring above.
-                    #
-                    # We will simply restore the '-' character that 'getopts'
-                    # has stripped off, and add the option to our rewritten
-                    # command line (so a '-Z' option is seen below as '-z'
-                    # rather than just 'z', and a '--foo' option is see as
-                    # '--foo' rather than '-foo')
-                    #
-                    # Note that this could leave invalid short-form options on
-                    # the command line, but they will be "standalone" (not
-                    # "bundled"); the caller will handle that scenario
-                    # downstream from this function invocation.
-                    #
-                    : $PROG \(trace: $LINENO\): preliminarily unrecognized opt: -$OPTARG
-                    if test "${OPTARG}" = '-'; then
-
-                        # getopts has started parsing a long-form command line
-                        # option. It sliced off the first '-', and has
-                        # interpretted the second as the name of the option.
-                        #
-                        # Recall that OPTIND contains the index of the /next/
-                        # argument to be processed, so we need to subtract one
-                        # to get the index of the argument that it getopts is
-                        # /currently/ parsing.
-                        #
-                        # We'll take the entire positional value to pass
-                        # through...
-                        #
-                        __t_expanded_command_line[${#__t_expanded_command_line[@]}]=${MY_COMMAND_LINE_OPTIONS[$(( $OPTIND - 1))]}
-                        #
-                        # ...and ignore output from getopts until it moves on
-                        # to parsing the next positional element (if any):
-                        #
-                        __t_skip_until=$(( $OPTIND + 1 ))
-                        # (( ++OPTIND ))
-
-                        __t_toskip_value="${MY_COMMAND_LINE_OPTIONS[$(( $OPTIND - 1 ))]}"
-                        __t_toskip_parsed='--' # we will append to this as getops hands us the pieces
-
-                    else
-                        # Just a run-of-the-mill short-form option parse for
-                        # an unrecognized opt. Restore the hyphen character
-                        # before the option character before adding it to our
-                        # collection.
-                        #
-                        __t_expanded_command_line+=( '-'"$OPTARG" )
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
                     fi
-                    ;;
+                done
 
-                * ) # Anything we would want to avoid consuming, but since
-                    # getopts stops processing upon encountering non-option
-                    # command line arguments, we should never fall through
-                    # here.
-                    #
-                    printf "$PROG (BUG): unaccounted for command line options processing; option is \"%s\", OPTARG is \"%s\", OPTIND is \"%s\"; bailing out\n" \
-                           "${__t_opt}" "${OPTARG}" "${OPTIND}" 1>&2
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
                     exit 1
-                    ;;
-            esac
+                fi
 
-            : $PROG \(trace: $LINENO\): __t_expanded_command_line element count: ${#__t_expanded_command_line[@]}
-            for traceidx in ${!__t_expanded_command_line[@]}; do
-                : $PROG \(trace: $LINENO\): __t_expanded_command_line[${traceidx}]:  ${__t_expanded_command_line[${traceidx}]}
-            done
-        done
-    fi
+                # Since we know the option was specified in --foo=BAR form, the
+                # option was specified erroneously unless the option's long-form
+                # spec indicates that it can accept an argument.
+                #
+                if test ${longopt_spec[${opt}]} -ne 1; then
+                    printf "${PROG} (error): option '%s' does not take an argument; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
 
-    # shift off all options and arguments already handled
-    local __t_ii
-    let __t_ii=1
-    while (( __t_ii < ${OPTIND} )); do
-        f_shift 'MY_COMMAND_LINE_OPTIONS'
-        (( ++__t_ii ))
-    done
-    # subtract one because OPTIND is now one beyond last index handled
-    (( --OPTIND ))
+                OPTARG=${OPTARG#*=}  # keep everything after the first '=' sign
+                : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
 
-    # Determine whether or not we need to add a '--' end-of-options string back
-    # into the command line.
-    #
-    __t_pos=0  # reset
-    for __t_posval in "${__t_expanded_command_line[@]}"; do
-        (( ++__t_pos ))
-        if test "${__t_posval}" = '--'; then
-            __t_end_of_options_seen_as_optargs+=( $__t_pos )
-        fi
-    done
+            else
+                : $PROG \(trace: $LINENO\): OPTARG is name-only style
 
-    __t_pos=0  # reset
-    for __t_posval in "${MY_COMMAND_LINE_OPTIONS[@]}"; do
-        (( ++__t_pos ))
-        if test "${__t_posval}" = '--'; then
-            __t_end_of_options_seen_unprocessed+=( $__t_pos )
-        fi
-    done
-    unset __t_pos
+                opt="$OPTARG"
+                : $PROG \(trace: $LINENO\): opt is: $opt
 
-    t_need_end_of_options_separator_reinstated=false
-    if test ${#__t_end_of_options_positions[@]} -gt 0; then
+                if test -z "${opt}"; then
 
-        t_need_cnt=${#__t_end_of_options_positions[@]}
+                    # This should be a "can't happen" scenario; since bash's 'getopts'
+                    # implementation should directly handle the magic '--' token, we
+                    # should never fall through here.
 
-        t_have_cnt=$((   ${#__t_end_of_options_seen_as_optargs[@]}  \
-                       + ${#__t_end_of_options_seen_unprocessed[@]} \
-                    ))
+                    printf "${PROG} (BUG) [line $LINENO]: received empty OPTARG, which means getopts did not handle the stand-alone '--' token; bailing out\n" 1>&2
+                    exit 1
+                fi
 
-        # Sanity check
-        if test $t_have_cnt = $t_need_cnt; then :; else
+                : $PROG \(trace: $LINENO\): a non-empty long option name must be at least two characters in length
+                if test ${#opt} -lt 2; then
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
 
-            if test $t_have_cnt -gt $t_need_cnt; then
-                printf "${PROG} (BUG): invalid state: t_have_cnt (%s) is greater than t_need_cnt (%s); bailing out\n" \
-                       "${t_have_cnt}" "${t_need_cnt}" 1>&2
-                exit 1
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # We know the option was specified in one of the following forms:
+                #
+                #     --foo
+                # or:
+                #     --foo FOOVAL
+                #
+                # The option's long-form spec will tell us whether or not an argument is
+                # expected for the option.
+                #
+                if test ${longopt_spec[${opt}]} -eq 1; then
+
+                    # If bumping OPTIND would put us more than one beyond the "last pos
+                    # plus one", then there is no argument provided at position OPTIND for
+                    # us to consume.
+                    #
+                    if (( $(( $OPTIND + 1 )) > pos_last_plus_one )); then
+
+                        printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+
+                    OPTARG=${@:${OPTIND}:1}
+                    (( ++OPTIND ))
+                    : $PROG \(trace: $LINENO\): manually incremented OPTIND to: $OPTIND
+                fi
             fi
-
-            t_difference=$(( $t_need_cnt - $t_have_cnt ))
-
-            if test $t_difference -gt 1; then
-                printf "${PROG} (BUG): invalid state: difference (%s) of t_need_cnt (%s) and t_have_cnt is greater than 1; bailing out\n" \
-                       "${t_difference}" "${t_need_cnt}" "${t_have_cnt}" 1>&2
-                exit 1
-            fi
         fi
 
-        if test $t_have_cnt -lt $t_need_cnt; then
-            t_need_end_of_options_separator_reinstated=true
-        fi
-    fi
+        # Normal getopts style processing happens beneath here, with the slight
+        # twist that 'opt' may contain a long-form option name.
 
-    # if test $# -gt 0; then
-    if test ${#MY_COMMAND_LINE_OPTIONS[@]} -gt 0; then
+        case $opt in
 
-        if $t_need_end_of_options_separator_reinstated; then
-            # Our getopts processing was stopped due to the presence of '--',
-            # and consumed that positional value. We'll add it back in at the
-            # correct location.
+            # Note that 'h' here means '--human-readable', not '--help'; see below.
             #
-            __t_expanded_command_line+=( '--' )
-        fi
+            'help' )
+                # print help message
+                f_print_help
+                exit 0
+                ;;
 
-        # __t_expanded_command_line+=( "$@" )
-        # __t_expanded_command_line+=( "${MY_COMMAND_LINE_OPTIONS[@]}" )
+            'V' | 'version' )
+                # print program version info
+                f_print_version
+                exit 0
+                ;;
+            'v' | 'verbose' )
+                # Accumulating 'verbose' opt. A single -v opt simply turns
+                # BE_VERBOSE on (info level output); two '-v' opts turns on
+                # $DEBUGGING (debug level output); three or more '-v' opts turns
+                # tracing on. Note that if you intend to turn tracing on, you'll
+                # probably want your -v opts to be the first opts on the command
+                # line (so they take effect earlier).
+                #
+                f_maybe_increase_verbosity
+                ;;
 
-        t_target_idx=${#__t_expanded_command_line[@]}
-        for t_source_idx in "${!MY_COMMAND_LINE_OPTIONS[@]}"; do
-            __t_expanded_command_line[${t_target_idx}]=${MY_COMMAND_LINE_OPTIONS[${t_source_idx}]}
 
-            (( ++t_target_idx ))
-        done
-    fi
+            'h' | 'human-readable' )
+                HUMAN_READABLE_MODE=true
+                ;;
 
-    unset t_need_end_of_options_separator_reinstated
-    unset __t_end_of_options_seen_unprocessed
-    unset __t_end_of_options_seen_as_optargs
-    unset __t_end_of_options_positions
 
-    for tidx in "${!__t_expanded_command_line[@]}"; do
-        : $PROG \(trace: $LINENO\): __t_expanded_command_line[${tidx}]: ${__t_expanded_command_line[${tidx}]}
+            ':')  # getopts put : in opt
+                  # Note that we need to restore the leading '-' that getopts
+                  # has sliced off.
+                  printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            '?')  # getopts put ? in opt
+                  # Unrecognized option. Note that we need to restore the
+                  # leading '-' that getopts has sliced off.
+                  printf "${PROG} (error): unrecognized option '-%s'; bailing out\n" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            * )   printf "${PROG} (BUG) [line $LINENO]: unhandled option case; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                  ;;
+
+        esac
     done
-
-    # echo "${__t_expanded_command_line[@]}"
-    # printf '%q ' "${__t_expanded_command_line[@]}"
-
-    # Rather than emit a value on stdout (which requires callers to invoke us
-    # in a subshell where we cannot trigger permanantly the useful side-effect
-    # of enabling verbose output early on), we will instead update the
-    # caller's named array variable in-place with the values we would have
-    # otherwise emitted on stdout.
-    #
-    eval "${__output_array_name}=()"  # empty out
-    for t_idx in "${!__t_expanded_command_line[@]}"; do
-        eval "${__output_array_name}[${t_idx}]=\"$(printf '%q' "${__t_expanded_command_line[${t_idx}]}")\""
-    done
-
-# # DEBUG go
-#     # This just allows for inspection of the referenced array as it will
-#     # appear to the caller once this function returns.
-#     #
-#     local __t_arrayref="${__output_array_name}[@]"
-
-#     for tval in "${!__t_arrayref}"; do  # iterating over elements of indirectly referenced array
-#         : $PROG \(trace: $LINENO\): one ${__output_array_name} value: $tval
-#     done
-# # DEBUG end
-
-    return 0  # success
-
-# set -- "${__t_expanded_command_line[@]}"
-# if test $? -ne 0; then
-#     printf "${PROG} (error): was unable to force use of rewritten (expanded) command line; bailing out\n" 1>&2
-#     exit 1
-# fi
-# : $PROG \(trace: $LINENO\): expanded command line: "$@"
-
-}
-
-
-# Note: We do not want to enable 'extdebug' just to get $BASH_ARGV defined, so
-# we'll jam the command line options into a global array variable that we can
-# manipulate from within shell functions (f_rewrite_command_line_or_die() and
-# friends)
-#
-declare -a MY_COMMAND_LINE_OPTIONS=( "$@" )
-
-if $DEBUGGING; then
-    printf "${PROG} (debug): command line options preprocessing: rewriting to expand bundled short-form opts\n" 1>&2
-fi
-# set -x
-# f_rewrite_command_line_or_die
-# set -- $( f_rewrite_command_line_or_die )
-# if test $? -ne 0; then
-#     printf "${PROG} (error): was unable to force use of rewritten (expanded) command line; bailing out\n" 1>&2
-#     exit 1
-# fi
-declare -a MY_COMMAND_LINE_OPTIONS_REWRITTEN=()
-f_rewrite_command_line_or_die MY_COMMAND_LINE_OPTIONS_REWRITTEN
-: $PROG \(trace: $LINENO\): expanded command line: "$@"
-if $DEBUGGING; then
-    printf "${PROG} (debug): command line options preprocessing: successfully rewrote to expand bundled short-form opts\n" 1>&2
 fi
 
-set -- "${MY_COMMAND_LINE_OPTIONS_REWRITTEN[@]}"
-
-while test $# -gt 0 ; do
-
-    option=$("${EXPR_PROG}" "x$1" : 'x\(--[^=]*\)' \| \
-                            "x$1" : 'x\(-.*\)'     \| \
-                            "x$1" : 'x\(.*\)')
-
-    optarg=$("${EXPR_PROG}" "x$1" : 'x--[^=]*=\(.*\)' \| \
-                            "x$1" : 'x-.\(.*\)')
-
-    case $1 in
-
-        --help )
-            # print help message
-            f_print_help
-            exit 0
-            ;;
-
-        --version | -V )
-            # print program version info
-            f_print_version
-            exit 0
-            ;;
-
-        --human-readable | -h )
-            HUMAN_READABLE_MODE=true
-            shift
-            ;;
-
-        --verbose | -v )
-            # Accumulating 'verbose' opt. A single -v opt simply turns
-            # BE_VERBOSE on (info level output); two '-v' opts turns on
-            # $DEBUGGING (debug level output); three or more '-v' opts turns
-            # tracing on. Note that if you intend to turn tracing on, you'll
-            # probably want your -v opts to be the first opts on the command
-            # line (so they take effect earlier).
-            #
-            f_maybe_increase_verbosity
-            shift
-            ;;
-
-        -- ) # Stop option processing
-            shift
-            break
-            ;;
-
-        --* | -* )
-            # Unrecognized option
-            printf "${PROG} (error): unrecognized option \`%s'\n" "${option}" 1>&2
-            f_print_help 1>&2
-            exit 1
-            ;;
-
-        * ) # Unrecognized non-option
-
-            # We'll treat the first non-option and all remaining arguments as
-            # names of git repositories that the user specifically wants to
-            # operate on; note that we DO NOT shift off the first, but merely
-            # stop processing command line options when we see it.
-            break
-            ;;
-    esac
+# shift off all arguments already handled
+let ii=1;  # shell OPTIND index starts at 1
+while (( ii < ${OPTIND} )); do
+    shift
+    (( ++ii ))
+    : $PROG \(trace: $LINENO\): ii is now: $ii
 done
 
 if test $# -gt 0; then

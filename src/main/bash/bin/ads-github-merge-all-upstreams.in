@@ -350,6 +350,47 @@ Written by Alan D. Salewski.
 EOF
 }
 
+# Invoked by our accumulating '-v' (--verbose) option. Increases the program
+# output verbosity level by "one stage".
+#
+# If we have not yet increased the verbosity, then enables info-level output
+# ($BE_VERBOSE).
+#
+# If we are currently at info-level verbosity, then enables debug-level output
+# ($DEBUGGING).
+#
+# If we are currently at debug-level verbosity, then enables trace-level
+# output (set -x).
+#
+# If we are already at trace-level verbosity, then this function has no effect
+# (is effectively a NOOP).
+#
+f_maybe_increase_verbosity () {
+
+    if $BE_VERBOSE; then
+
+        # We are (at least) at info-level verbosity currently.
+        if $DEBUGGING; then
+            # We are (at least) at debug-level verbosity currently.
+
+            case $- in
+                *x* )
+                    : $PROG \(trace: $LINENO\): tracing already enabled
+                    ;;
+                * )
+                    printf "${PROG} (debug): additional verbosity requested; enabling trace-level output\n" 1>&2
+                    set -x
+                    ;;
+            esac
+        else
+            printf "${PROG} (info): additional verbosity requested; enabling debug-level output\n" 1>&2
+            DEBUGGING=true
+        fi
+    else
+        printf "${PROG} (info): verbose output requested; enabling info-level output\n" 1>&2
+        BE_VERBOSE=true
+    fi
+}
 
 # Makes a HTTP HEAD request to the GitHub service to obtain pagination
 # information for pulling all /user/repos data in the minimal number of
@@ -646,95 +687,248 @@ f_check_for_git_remote_or_die () {
     exit 1
 }
 
-while test $# -gt 0 ; do
+pos_last_plus_one=$(( $# + 1 ))
 
-    option=$("${EXPR_PROG}" "x$1" : 'x\(--[^=]*\)' \| \
-                            "x$1" : 'x\(-.\)'      \| \
-                            "x$1" : 'x\(.*\)')
+# Each value is one or zero, which indicates whether or not the option is
+# expected to have an argument.
+#
+declare -A longopt_spec=(
+    ['help']=0      # -h
+    ['version']=0   # -V
+    ['verbose']=0   # -v
 
-    optarg=$("${EXPR_PROG}" "x$1" : 'x--[^=]*=\(.*\)' \| \
-                            "x$1" : 'x-.\(.*\)')
+    ['keep-going']=0  # -k
+    ['push']=0        # -p
+    ['stop-upon-local-mods']=0  # -L
+)
 
-    case $1 in
+# internal sanity check
+for one_key in "${!longopt_spec[@]}"; do
+    one_val=${longopt_spec[${one_key}]}
+    if [[ $one_val =~ ^[01]$ ]]; then :; else
+        printf "${PROG} (BUG) [line $LINENO]: value (%s) for longopt key '%s' must be either 0 or 1; bailing out\n" \
+               "${one_val}" "${one_key}" 1>&2
+        exit 1
+    fi
+done
 
-        --help | -h )
-            # print help message
-            f_print_help
-            exit 0
-            ;;
+if test $# -gt 0; then
 
-        --version | -V )
-            # print program version info
-            f_print_version
-            exit 0
-            ;;
+    # Using getopts in "silent mode". Note that adding '-' to the optstring allows us to
+    # process GNU-style long-form options; that option is specified to take an argument to
+    # cause getopts to place whatever follows the second '-' character into OPTARG.
+    #
+    # Note that getopts will automatically stop processsing options upon encountering
+    # '--', but we still need to deal with the pathological form --=BLAH (no option name,
+    # just a value using the equals-sign syntax).
+    #
+    while getopts ':-:hVvkpL' opt
+    do
+        : $PROG \(trace: $LINENO\): opt is: $opt
 
-        --keep-going | -k )
-            DO_KEEP_GOING_UPON_ERROR=true
-            shift
-            ;;
+        if test "${opt}" = '-'; then
 
-        --push | -p )
-            if $BE_VERBOSE; then
-                printf "${PROG} (info): '-p' (--push) option was specified; changes (if any) will be pushed back to 'origin' remotes\n" 1>&2
-            fi
-            DO_PUSH=true
-            shift
-            ;;
+            # Intercepting processing of long-form option. This conditional
+            # block will set up the 'opt', 'OPTARG', and 'OPTIND' variables for
+            # the code that follows, just as if getopts had the capability to
+            # process long-form options.
 
-        --stop-upon-local-mods | -L )
-            DO_STOP_UPON_LOCAL_MODS=true
-            shift
-            ;;
-
-        --verbose | -v )
-            # Accumulating 'verbose' opt. A single -v opt simply turns
-            # BE_VERBOSE on (info level output); two '-v' opts turns on
-            # $DEBUGGING (debug level output); three or more '-v' opts turns
-            # tracing on. Note that if you intend to turn tracing on, you'll
-            # probably want your -v opts to be the first opts on the command
-            # line (so they take effect earlier).
+            # OPTARG here is one of:
             #
-            if $BE_VERBOSE; then
+            #     =BLAH    (which means user specified '--=BLAH')
+            # or:
+            #     foo
+            # or:
+            #     foo=FOOVAL
 
-                # We've seen at least one -v opt before; if this is the second
-                # we'll turn on debugging mode, but if it's the third or
-                # greater then we'll turn tracing on
-                if $DEBUGGING; then
-                    # We've seen at least two -v opts before, so now we're turning tracing on
-                    set -x
-                else
-                    # Second -v opt we're seeing
-                    DEBUGGING=true
+            if [[ ${OPTARG} =~ .*=.* ]]; then
+
+                : $PROG \(trace: $LINENO\): OPTARG is name=value style
+
+                # Keep everything up to the first '=' sign. Note that if the
+                # option was specified as: --foo=FOOVAL, then $opt here will be
+                # 'foo' (no hyphen chars).
+                opt=${OPTARG/=*/}
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                : $PROG \(trace: $LINENO\): a long option name must be at least two characters in length
+                if test ${#opt} -le 1; then
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
                 fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # Since we know the option was specified in --foo=BAR form, the
+                # option was specified erroneously unless the option's long-form
+                # spec indicates that it can accept an argument.
+                #
+                if test ${longopt_spec[${opt}]} -ne 1; then
+                    printf "${PROG} (error): option '%s' does not take an argument; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                OPTARG=${OPTARG#*=}  # keep everything after the first '=' sign
+                : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+
             else
-                # First -v opt we're seeing
-                BE_VERBOSE=true
+                : $PROG \(trace: $LINENO\): OPTARG is name-only style
+
+                opt="$OPTARG"
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                if test -z "${opt}"; then
+
+                    # This should be a "can't happen" scenario; since bash's 'getopts'
+                    # implementation should directly handle the magic '--' token, we
+                    # should never fall through here.
+
+                    printf "${PROG} (BUG) [line $LINENO]: received empty OPTARG, which means getopts did not handle the stand-alone '--' token; bailing out\n" 1>&2
+                    exit 1
+                fi
+
+                : $PROG \(trace: $LINENO\): a non-empty long option name must be at least two characters in length
+                if test ${#opt} -lt 2; then
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): invalid long option '%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # We know the option was specified in one of the following forms:
+                #
+                #     --foo
+                # or:
+                #     --foo FOOVAL
+                #
+                # The option's long-form spec will tell us whether or not an argument is
+                # expected for the option.
+                #
+                if test ${longopt_spec[${opt}]} -eq 1; then
+
+                    # If bumping OPTIND would put us more than one beyond the "last pos
+                    # plus one", then there is no argument provided at position OPTIND for
+                    # us to consume.
+                    #
+                    if (( $(( $OPTIND + 1 )) > pos_last_plus_one )); then
+
+                        printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+
+                    OPTARG=${@:${OPTIND}:1}
+                    (( ++OPTIND ))
+                    : $PROG \(trace: $LINENO\): manually incremented OPTIND to: $OPTIND
+                fi
             fi
-            shift
-            ;;
+        fi
 
-        -- ) # Stop option processing
-            shift
-            break
-            ;;
+        # Normal getopts style processing happens beneath here, with the slight
+        # twist that 'opt' may contain a long-form option name.
 
-        --* | -* )
-            # Unrecognized option
-            printf "${PROG} (error): unrecognized option \`%s'\n" "$option" 1>&2
-            f_print_help 1>&2
-            exit 1
-            ;;
+        case $opt in
 
-        * ) # Unrecognized non-option
+            'h' | 'help' )
+                # print help message
+                f_print_help
+                exit 0
+                ;;
 
-            # We'll treat the first non-option and all remaining arguments as
-            # names of files to process; note that we DO NOT shift off the
-            # first, but merely stop processing command line options when we
-            # see it.
-            break
-            ;;
-    esac
+            'V' | 'version' )
+                # print program version info
+                f_print_version
+                exit 0
+                ;;
+
+            'v' | 'verbose' )
+                # Accumulating 'verbose' opt. A single -v opt simply turns
+                # BE_VERBOSE on (info level output); two '-v' opts turns on
+                # $DEBUGGING (debug level output); three or more '-v' opts turns
+                # tracing on. Note that if you intend to turn tracing on, you'll
+                # probably want your -v opts to be the first opts on the command
+                # line (so they take effect earlier).
+                #
+                f_maybe_increase_verbosity
+                ;;
+
+
+            'k' | 'keep-going' )
+                DO_KEEP_GOING_UPON_ERROR=true
+                ;;
+
+            'p' | 'push' )
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): '-p' (--push) option was specified; changes (if any) will be pushed back to 'origin' remotes\n" 1>&2
+                fi
+                DO_PUSH=true
+                ;;
+
+            'L' | 'stop-upon-local-mods' )
+                DO_STOP_UPON_LOCAL_MODS=true
+                ;;
+
+
+            ':')  # getopts put : in opt
+                  # Note that we need to restore the leading '-' that getopts
+                  # has sliced off.
+                  printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            '?')  # getopts put ? in opt
+                  # Unrecognized option. Note that we need to restore the
+                  # leading '-' that getopts has sliced off.
+                  printf "${PROG} (error): unrecognized option '-%s'; bailing out\n" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            * )   printf "${PROG} (BUG) [line $LINENO]: unhandled option case; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                  ;;
+
+        esac
+    done
+fi
+
+# shift off all arguments already handled
+let ii=1;  # shell OPTIND index starts at 1
+while (( ii < ${OPTIND} )); do
+    shift
+    (( ++ii ))
+    : $PROG \(trace: $LINENO\): ii is now: $ii
 done
 
 declare -a EXPLICITLY_REQUESTED_REPOS=()
