@@ -44,7 +44,10 @@
 #       remote, if desired, and that you want to merge in whatever the locally
 #       available state is).
 #
-#     * push the changes back to 'origin', if the '--push' option was specified
+#     * push the merged changes back to 'origin' for each repo, if the
+#       '--push' option was specified (with two '--push' options, will push
+#       changes back to 'origin' even if no changes have been merged for a
+#       given repo on "this" invocation of the program).
 #
 #     * check out the original branch name, if needed, to put the git working
 #       directory back into the original state we found it in
@@ -163,7 +166,22 @@ DEBUGGING=false  # debug-level output; override with two '-v' opts
 # ("git push --tags origin master", or whatever the equivalent analogue is if
 # the repo has a weirdo default branch name other than 'master').
 #
-DO_PUSH=false
+DO_PUSH_IF_MERGED=false
+
+# When a single '--push' option is specified, our behavior is to perform a
+# "git push ..." operation to a repo only if we have merged changes during
+# "this" invocation of the program. However, if two (or more) '--push' options
+# are specified, then we change the behavior to always perform a "git push
+# ..."  operation to each repo, even if we have not merged any changes during
+# "this" invocation of the program (unless, of course, we're skipping
+# processing of the repo for some other reason, such as detection of local
+# modifications).
+#
+# See also:
+#
+#     https://github.com/salewski/ads-github-tools/issues/11
+#
+DO_PUSH_ALWAYS=false
 
 
 # The program will never perform any operations in a local working directory
@@ -321,7 +339,10 @@ Mandatory arguments to long options are mandatory for short options too.
   -V, --version               Print the version of the program on stdout
   -k, --keep-going            Keep going when a repo cannot be fast-forward merged
   -L, --stop-upon-local-mods  Exit with status 100 upon finding a locally modified repo
-  -p, --push                  Push changes back to the 'origin' remote
+
+  -p, --push                  Push changes back to the 'origin' remote for a repo. Specify twice
+                                to push changes back to 'origin' even if no changes have been
+                                merged for the repo on "this" invocation of the program
 
   -v, --verbose               Print program progress messages on stderr. Specify multiple
                                 times to increase verbosity: info, debug, and tracing (set -x)
@@ -383,6 +404,53 @@ f_maybe_increase_verbosity () {
     else
         printf "${PROG} (info): verbose output requested; enabling info-level output\n" 1>&2
         BE_VERBOSE=true
+    fi
+}
+
+# Invoked by our accumulating '-p' (--push) option. Increases the program
+# "pushiness" level by "one stage".
+#
+# If we have not yet enabled push behavior, then enables basic push behavior:
+# if changes have been merged during "this" invocation of the program, then a
+# "git push ..." operation will be performed ($DO_PUSH_IF_MERGED).
+#
+# If we already have basic push behavior enabled, then enables a second level
+# of push behavior that is more aggressive: a "git push ..." operation will be
+# performed regardless of whether changes have been merged into a project
+# during "this" invocation of the program ($DO_PUSH_ALWAYS).
+#
+# If we are already at the $DO_PUSH_ALWAYS push level, then this function has
+# no effect (is effectively a NOOP).
+#
+# See also:
+#
+#     https://github.com/salewski/ads-github-tools/issues/11
+#
+f_maybe_increase_pushiness () {
+
+    # XXX: Note that the notion of a "clean project" in the log message below
+    #      refers to a project that does not have local modifications or
+    #      something in them that prevents a fast-forward merge -- any of the
+    #      things that cause us to back off and leave the repo alone. The
+    #      author is not happy with this terminology; suggestions welcome!
+
+    if $DO_PUSH_IF_MERGED; then
+
+        : $PROG \(trace: $LINENO\): basic push behavior already enabled
+
+        if $DO_PUSH_ALWAYS; then
+            : $PROG \(trace: $LINENO\): aggressive push behavior already enabled
+        else
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): aggressive \"push\" behavior requested; will push to 'origin' for all clean projects\n" 1>&2
+            fi
+            DO_PUSH_ALWAYS=true
+        fi
+    else
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): \"push\" behavior requested; will push to 'origin' for clean projects that have changes merged during this run\n" 1>&2
+        fi
+        DO_PUSH_IF_MERGED=true
     fi
 }
 
@@ -681,6 +749,90 @@ f_check_for_git_remote_or_die () {
     exit 1
 }
 
+
+# Expects to be invoked when $PWD is within a git working directory. Checks
+# whether or not the commit object ids at the tip of both of the provided
+# branch names are identical.
+#
+# If they are identical, then emits 'true' on stdout. Assuming one branch is
+# tracking the other, the caller amy interpret this as an indication that no
+# objects exist in either of the branches that are waiting to be merged into
+# the other.
+#
+# Otherwise emits 'false' to indicate that the commit objects at the tip of
+# each branch are not identical. Assuming one branch is tracking the other,
+# the caller may interpret this to mean that there are changes to be merged.
+#
+# If any errors are encountered (e.g., 'git rev-parse ...' does not recognize
+# (our variations of) the specified branch names as a refname), then exits
+# with an error code.
+#
+# @param REPO_NAME - the name of the git repository in which we're rummaging
+#                    around. Used only to create more informative log messages.
+#
+# @param BRANCH_NAME_1 - the name of the a git branch to check
+#
+# @param BRANCH_NAME_2 - the name of the other git branch to check.
+#
+f_check_that_branch_tip_commit_objs_are_identical_or_die () {
+
+    local __required_count=3
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __repo_name=$1
+    local -r __branch_name_1=$2
+    local -r __branch_name_2=$3
+
+    if [[ ${__repo_name} =~ ^[[:space:]]*$ ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with blank value for required REPO_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if [[ ${__branch_name_1} =~ ^[[:space:]]*$ ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with blank value for required BRANCH_NAME_1 param; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if [[ ${__branch_name_2} =~ ^[[:space:]]*$ ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with blank value for required BRANCH_NAME_2 param; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    local -r __branch_1_refname="${__branch_name_1}"'^{commit}'
+    local -r __branch_2_refname="${__branch_name_2}"'^{commit}'
+
+    local __branch_1_obj
+    __branch_1_obj=$("${GIT_PROG}" rev-parse --verify "${__branch_1_refname}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): in repo \"%s\", was error while attempting to construct refname to tip of branch named \"%s\"; bailing out\n" \
+               "${__repo_name}" "${__branch_name_1}" 1>&2
+        exit 1
+    fi
+    : $PROG \(trace: $LINENO\): branch 1 object id is: ${__branch_1_obj}
+
+    local __branch_2_obj
+    __branch_2_obj=$("${GIT_PROG}" rev-parse --verify "${__branch_2_refname}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): in repo \"%s\", was error while attempting to construct refname to tip of branch named \"%s\"; bailing out\n" \
+               "${__repo_name}" "${__branch_name_2}" 1>&2
+        exit 1
+    fi
+    : $PROG \(trace: $LINENO\): branch 2 object id is: ${__branch_2_obj}
+
+    if test "${__branch_1_obj}" = "${__branch_2_obj}"; then
+        printf 'true\n'
+    fi
+
+    printf 'false\n'
+
+    return  # successful completion
+}
+
+
 pos_last_plus_one=$(( $# + 1 ))
 
 # Each value is one or zero, which indicates whether or not the option is
@@ -883,10 +1035,12 @@ if test $# -gt 0; then
                 ;;
 
             'p' | 'push' )
-                if $BE_VERBOSE; then
-                    printf "${PROG} (info): '-p' (--push) option was specified; changes (if any) will be pushed back to 'origin' remotes\n" 1>&2
-                fi
-                DO_PUSH=true
+                # Accumulating 'push' opt. A single '-p' opt turns
+                # $DO_PUSH_IF_MERGED on ("basic push behavior"). Two or more
+                # '-p' opts turn on $DO_PUSH_ALWAYS ("aggressive push
+                # behavior").
+                #
+                f_maybe_increase_pushiness
                 ;;
 
             'L' | 'stop-upon-local-mods' )
@@ -1278,6 +1432,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     # subshell exit status codes:
     #    0 -- success; was able to complete work
     #  100 -- success(ish); work skipped due to detected changes in the git index
+    #  101 -- success(ish); work skipped because it was detected that there was no work to merge (and $DO_PUSH_ALWAYS is not on)
     #
     #   99 -- error(ish); was unable to perform a fast-forward merge for some reason
     #
@@ -1380,6 +1535,31 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             exit 1  # from subshell
         fi
 
+        # Before possibly switching branches (and then needing to switch back)
+        # and attempting a merge, let's see if there is even any potential
+        # merge work to do.
+        #
+        # Note that we skip over this optimization check if $DO_PUSH_ALWAYS is
+        # set; that means that the user has requested that we attempt to push
+        # changes to 'origin' even if we do not merge any changes into the
+        # repo during "this" invocation of the program, so we cannot short
+        # circuit here in that scenario.
+        #
+        if $DO_PUSH_ALWAYS; then :; else
+
+            t_local_and_upstream_tips_are_identical=$(f_check_that_branch_tip_commit_objs_are_identical_or_die \
+                                                          "${repo_name}"  \
+                                                          'refs/heads/'"${default_branch}"  \
+                                                          'refs/remotes/upstream/'"${default_branch}"
+                                                     )
+
+            if $t_local_and_upstream_tips_are_identical; then
+                printf "${PROG} (info): [repo: \"%s\"] no upstream changes to merge, and \"aggressive push\" (a al '-p -p') not specified; skipping (okay)\n" \
+                   "${repo_name}" 1>&2
+                exit 101  # from subshell
+            fi
+        fi
+
         need_to_restore_orig_branch=true
         if test "${t_git_branch_orig}" = "${default_branch}"; then
 
@@ -1425,15 +1605,32 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             printf "${PROG} (debug): [repo: \"%s\"]: successfully invoked 'git merge upstream/%s'\n" "${repo_name}" "${default_branch}" 1>&2
         fi
 
-        if $DO_PUSH; then
-            # printf "${PROG} (warning): [repo: \"%s\"] FIXME: push operation not yet supported; skipping\n" \
-            #        "${repo_name}" 1>&2
-
+        # Note that $DO_PUSH_ALWAYS implies $DO_PUSH_IF_MERGED, as well.
+        #
+        # If user specified just one '-p' (--push) option, then we are only
+        # falling through here because we detected that changes existed to be
+        # merged from the 'upstream' remote branch to the local tracking
+        # branch.
+        #
+        # If user specified two or more '-p' (--push) options, then we could
+        # be falling through here even though we detected that there were not
+        # any new changes to merge. (User might be trying to push changes for
+        # his repos that were merged in earlier runs of this program without
+        # the '-p' opt).
+        #
+        if $DO_PUSH_IF_MERGED; then
 
             if $BE_VERBOSE; then
-                printf "${PROG} (info): [repo: \"%s\"] '-p' (--push) option specified; attempting to push default branch (\"%s\") changes to origin\n" \
-                       "${repo_name}"         \
-                       "${default_branch}" 1>&2
+
+                if $DO_PUSH_ALWAYS; then
+                    printf "${PROG} (info): [repo: \"%s\"] \"aggressive push\" (two '-p' (--push) options) specified; attempting to push default branch (\"%s\") changes to origin\n" \
+                           "${repo_name}"         \
+                           "${default_branch}" 1>&2
+                else
+                    printf "${PROG} (info): [repo: \"%s\"] '-p' (--push) option specified; attempting to push default branch (\"%s\") changes to origin\n" \
+                           "${repo_name}"         \
+                           "${default_branch}" 1>&2
+                fi
             fi
             "${GIT_PROG}" push --tags origin "${default_branch}"
             if test $? -ne 0; then
@@ -1489,6 +1686,17 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         else
             continue
         fi
+    fi
+
+    if test $ss_estat -eq 101; then  # success(ish)
+
+        # Subshell exited with status code 101, indicating that a git repo was
+        # found that contains no new commits to merge from the
+        # upstream/<BRANCH_NAME> branch to the local tracking branch (and
+        # $DO_PUSH_ALWAYS was not enabled, which would have prevented the
+        # processing from short-cicuiting in this way).
+        #
+        continue
     fi
 
     # error-ish conditions (things that will, by default, stop the program
@@ -1638,7 +1846,8 @@ changes.
 
 =item -p, --push
 
-Push changes back to the 'origin' remote.
+Push changes back to the 'origin' remote. May be specified multiple times,
+with behavior changed as decribed below.
 
 This options causes the newly merged default branch content to be pushed back
 up to GitHub. E.g., causes invocation of the command:
@@ -1647,6 +1856,80 @@ up to GitHub. E.g., causes invocation of the command:
 
 (or whatever the equivalent analogue is if the repo has a weirdo default
 branch name other than 'master').
+
+When a single C<--push> option is specified, the behavior is to perform a
+C<git push ...> operation to a repo only if we have merged changes during the
+current invocation of the program.
+
+However, if two (or more) C<--push> options are specified, then the behavior
+is to I<always>[0] perform a C<git push ...> operation to each repo, even if
+we have not merged any changes during the current invocation of the program.
+
+    [0] Unless, of course, we are skipping processing of the repo for some
+        other reason, such as detection of local modifications.
+
+The motivation for these differences in behavior is to support different usage
+patterns. The single C<--push> behavior supports the case where the user
+wishes to push merged changes every nearly every time the program is prun:
+
+    FETCH and MERGE and PUSH
+    [time passes...]
+    FETCH and MERGE and PUSH
+    [time passes...]
+    FETCH and MERGE and PUSH
+    [time passes...]
+
+For example:
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k -p
+
+    [time passes...]
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k -p
+
+    [time passes...]
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k -p
+
+In the above example, the program operates more efficiently because changes in
+the local repo's default branch are only pushed up to 'origin' when they were
+merged in the current invocation. When working with a large number of
+repositories, avoiding the overhead of unnecessary C<git push ...> operations
+can significantly reduce processing time.
+
+On the other hand, another legitimate usage pattern is:
+
+    FETCH and MERGE
+    [time passes...]
+    FETCH and MERGE
+    [time passes...]
+    FETCH and MERGE
+    [time passes...]
+    FETCH and MERGE
+    PUSH
+
+For example:
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k
+
+    [time passes...]
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k
+
+    [time passes...]
+
+        $ ads-github-fetch-all-upstreams -v -c
+        $ ads-github-merge-all-upstreams -v -k -p -p
+
+In this second use case, without the "aggressive push" behavior specified by
+the two push options, previously merged changes would not be pushed to
+'origin' unless there were also changes merged during the current invocation
+of the program.
 
 
 =item -v, --verbose
