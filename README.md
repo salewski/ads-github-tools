@@ -1,6 +1,7 @@
 # ads-github-tools
 
-Herds octocats so you can fork your brains out.
+## Herds octocats so you can fork your brains out.
+
 
 # Overview
 
