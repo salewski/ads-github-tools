@@ -1,9 +1,10 @@
 # ads-github-tools
 
-These tools are still in their early days, having been under casual
-development only since the end of April 2016. Nevertheless, the tools that
-exists currently provide a useful core and are used by the author on a daily
-basis.
+Herds octocats so you can fork your brains out.
+
+# Overview
+
+This is the README.md file for the `'ads-github-toosl'` project.
 
 The `ads-github-tools` project provides command line tools for managing a
 large number of GitHub repositories, motivated by the following two related
@@ -18,15 +19,22 @@ use cases:
 
 Enter the `ads-github-tools`.
 
+The 'ads-github-tools' project web site is:
+
+   * https://salewski.github.io/ads-github-tools/
+
+The latest version of the project is `0.1.0`.
+
+
+# Usage
+
 Typical invocation involves only one or two commands. The author typcially
-runs these three commands once daily:
+runs these two commands once daily:
 
 ```
     $ ads-github-fetch-all-upstreams -v -c
 
-    $ ads-github-merge-all-upstreams -v -k
-
-    $ ads-github-merge-all-upstreams -v -k --push
+    $ ads-github-merge-all-upstreams -v -k -p
 ```
 
 Many users would prefer to run those commands from a crontab (or similar), in
@@ -34,7 +42,7 @@ which case the second invocation could be omitted; the author runs them
 manually because he's actively hacking on the tools and wants to inspect the
 output.
 
-At the moment (2016-06-03) there are five tools:
+At the moment (2016-08-20) there are five tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
@@ -76,8 +84,16 @@ At the moment (2016-06-03) there are five tools:
   originally checked out branch when done if the temporary switch was
   necessary.
 
-  * With the `--push` option, will invoke 'git push origin <DEFAULT_BRANCH_NAME>'
-    for each repo.
+  * With one `--push` option, will invoke 'git push origin <DEFAULT_BRANCH_NAME>'
+    for each repo that has changes merged into it during the program invocation.
+
+  * With two `--push` options, will invoke 'git push origin
+    <DEFAULT_BRANCH_NAME>' for each repo that is not being skipped over for
+    some other reason (e.g. local changes in the working directory),
+    regardless of whether changes are merged into it during the program
+    invocation. This is useful for pushing changes that were merged but not
+    pushed during earlier runs of the program invoked without the `--push`
+    option.
 
 I'm working on sketching out a caching system for results from the GitHub API
 with the intent of making it easy to use from shell scripts or similar. The
@@ -114,3 +130,33 @@ My current thinking is that there will be three levels of tools:
    * `ads-github-fetch-all-upstreams`
    * `ads-github-merge-all-upstreams`
    * `...`
+
+
+# License
+
+GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>
+
+Unless otherwise stated by a different license notice in a particular file,
+all files in the `ads-github-tools' project are made available under the GNU
+GPL version 2, or (at your option) any later version.
+
+See the [COPYING] file for the full license.
+
+Copyright (C) 2016 Alan D. Salewski <salewski@att.net>
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program; if not, write to the Free Software Foundation, Inc.,
+    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+
+[COPYING]:      https://github.com/salewski/ads-github-tools/blob/master/COPYING
