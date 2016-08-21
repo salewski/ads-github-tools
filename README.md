@@ -5,7 +5,7 @@
 
 # Overview
 
-This is the README.md file for the `'ads-github-toosl'` project.
+This is the README.md file for the `'ads-github-tools'` project.
 
 The `ads-github-tools` project provides command line tools for managing a
 large number of GitHub repositories, motivated by the following two related
@@ -38,10 +38,9 @@ runs these two commands once daily:
     $ ads-github-merge-all-upstreams -v -k -p
 ```
 
-Many users would prefer to run those commands from a crontab (or similar), in
-which case the second invocation could be omitted; the author runs them
-manually because he's actively hacking on the tools and wants to inspect the
-output.
+Many users would prefer to run those commands from a crontab (or similar); the
+author runs them manually because he's actively hacking on the tools and wants
+to inspect the output.
 
 At the moment (2016-08-20) there are five tools:
 
@@ -108,7 +107,7 @@ incurring unnecessary hits against the user's GitHub API rate limit and to cut
 down on unnecessary retrieval of the same data over and over.
 
 My current thinking is that there will be three levels of tools:
-
+ 
 1. low-level tools that store and retrieve objects from the cache, and related
    * `ads-github-cache update` (similar in spirit to `apt-get update` and `apt-file update`)
    * `ads-github-cache put KEY [VALUE]`
