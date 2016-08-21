@@ -79,6 +79,20 @@ author runs them manually because he's actively hacking on the tools and wants
 to inspect the output.
 </p>
 
+
+<h2>Installation</h2>
+<p>
+Installation should be as simple as:
+<pre>
+    $ ./configure   # add a --prefix=path/to/some/location to install someplace other than beneath /usr/local
+    $ make
+    $ make check    # optional, but encouraged
+    $ make install
+</pre>
+</p>
+
+
+<h2>Progams provided by <tt>ads-github-tools</tt></h2>
 <p>
 At the time of writing (<tt>2016-08-20</tt>) there are five tools:
 <ul>
@@ -162,11 +176,17 @@ At the time of writing (<tt>2016-08-20</tt>) there are five tools:
   </li>
 </ul>
 
+
+<h2>Future directions</h2>
+
+<p>
 The author is (casually) working on sketching out a caching system for results
 from the GitHub API with the intent of making it easy to use from shell
 scripts or similar. The first two scripts noted above are a step in that
 direction.
+</p>
 
+<p>
 Once the caching implementation is functional, the
 <tt>'ads-github-fetch-all-upstreams'</tt> will be modified to use it, perhaps
 via a set of intermediary tools. These tools will make use of the
@@ -174,7 +194,9 @@ via a set of intermediary tools. These tools will make use of the
 HTTP headers both to avoid incurring unnecessary hits against the user's
 GitHub API rate limit and to cut down on unnecessary retrieval of the same
 data over and over.
+</p>
 
+<p>
 The author's current thinking is that there will be three levels of tools:
 <ol type="1">
   <li><p>low-level tools that store and retrieve objects from the cache, and related
@@ -215,20 +237,11 @@ The author's current thinking is that there will be three levels of tools:
     </p>
   </li>
 </ol>
-
-<p>
-Installation should be as simple as:
-<pre>
-    $ ./configure   # add a --prefix=path/to/some/location to install someplace other than beneath /usr/local
-    $ make
-    $ make check    # optional, but encouraged
-    $ make install
-</pre>
 </p>
 
 <br></br>
 
-<h2>License</h2>
+<h2><tt>ads-github-tools</tt> license</h2>
 <pre>
 GPLv2+: GNU GPL version 2 or later &lt;http://gnu.org/licenses/gpl.html&gt;
 
