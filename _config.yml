@@ -1,0 +1,14 @@
+title: ads-github-tools by Alan D. Salewski
+description: Manage a large number of GitHub repos (command line tools)
+
+# See also: https://milanaryal.com/2015/writing-on-github-pages-and-jekyll-using-markdown/
+#           https://github.com/blog/2100-github-pages-now-faster-and-simpler-with-jekyll-3-0
+#
+markdown: kramdown
+kramdown:
+  input: GFM # Enable GitHub Flavored Markdown (fenced code blocks)
+  hard_wrap: false
+highlighter: rouge
+
+exclude:
+  - local-ruby-gems/  # avoid processing jekyll itself; see also: https://github.com/jekyll/jekyll/issues/2938
