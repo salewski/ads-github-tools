@@ -120,7 +120,7 @@ changes from previous releases. Any incompatibilities with previous versions
 will be noted in the `'NEWS'` file.
 
 
-## Prerequisites
+# Prerequisites
 
 The tools provided by the `'ads-github-tools'` project are intended to be
 built and run on Unix and Unix-like systems, so expect a standard set of
