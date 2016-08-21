@@ -24,7 +24,16 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.1.0`.
+The latest version of the project is `0.1.0`, and can be downloaded from:
+
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.0.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.0.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.0.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.0.tar.gz.SHA3-256
+    
+Older releases are available from the project's downloads page:
+
+   * https://salewski.github.io/ads-github-tools/downloads/
 
 
 # Usage
@@ -95,6 +104,82 @@ At the moment (2016-08-20) there are five tools:
     pushed during earlier runs of the program invoked without the `--push`
     option.
 
+
+See the "Prerequisites" section below for other programs that must be
+installed and configured on your system before you can install the
+`'ads-github-tools'` package.
+
+See the [BUGS] file for information on reporting bugs.
+
+See the [INSTALL] file for installation instructions.
+
+See the [HACKING] file for developer build instructions and the like.
+
+See the [NEWS] file for changes for this release, and a running list of
+changes from previous releases. Any incompatibilities with previous versions
+will be noted in the `'NEWS'` file.
+
+
+## Prerequisites
+
+The tools provided by the `'ads-github-tools'` project are intended to be
+built and run on Unix and Unix-like systems, so expect a standard set of
+utilities (`cat`, `sed`, `awk`, `rm`, ...) to be present. These utilities are
+not explicitly listed below as prerequisites as they should be present on any
+modern Unix or GNU/Linux system (or in Cygwin, if you happen to be running on
+MS Windows).
+
+Many of the programs provided by `'ads-github-tools'` are implemented in Bash
+(a Bourne shell derivative). The 'ads-github-tools' project was developed and
+tested using Bash version 4.3.30. It uses associative arrays which were added
+in Bash 4.0, so you'll need a 4.x version or newer; the `'configure'` script
+will check for this and exit with an error message if a new enough version of
+Bash is not found. The author would appreciate hearing about any successes or
+failures with other versions of Bash. In the unlikely event that your system
+does not already have bash installed, it can be obtained from the project's
+site:
+
+   * http://www.gnu.org/software/bash/
+
+On a Debian system (including derivatives, such as Ubuntu), you can install
+the program via:
+```
+    # apt-get install bash
+```
+
+or (for a statically linked version):
+```
+    # apt-get install bash-static
+```
+
+Another required tool is [git-hub][GIT_HUB], which provides a command line
+interface for interacting with a GitHub repository. The tool provides a
+'`clone`' operation that, for GitHub forked repos, establishes an 'upstream'
+remote that points to the upstream source of the fork (which is part of the
+typical arrangement when tracking changes to an upstream project over time: an
+'origin' remote points to your own fork of the project on GitHub, and an
+'upstream' remote points to the upstream project's tree on GitHub). The
+`'git-hub'` tool is used by our `'ads-github-fetch-all-upstreams'` tool when
+cloning repositories.
+
+On a Debian system (including derivatives, such as Ubuntu) you can install the
+`'git-hub'` to via:
+```
+    # apt-get install git-hub
+```
+
+Other users can obtain source release tarballs from that project's releases page:
+
+   * https://github.com/sociomantic-tsunami/git-hub/releases
+   
+or you can build from that project's latest sources from its GitHub project
+page:
+
+   * https://github.com/sociomantic-tsunami/git-hub/releases
+
+
+# Future directions
+
 I'm working on sketching out a caching system for results from the GitHub API
 with the intent of making it easy to use from shell scripts or similar. The
 first two scripts noted above are a step in that direction.
@@ -159,4 +244,10 @@ Copyright (C) 2016 Alan D. Salewski <salewski@att.net>
     51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 
+
+[BUGS]:         https://github.com/salewski/ads-github-tools/blob/master/BUGS
 [COPYING]:      https://github.com/salewski/ads-github-tools/blob/master/COPYING
+[HACKING]:      https://github.com/salewski/ads-github-tools/blob/master/HACKING
+[INSTALL]:      https://github.com/salewski/ads-github-tools/blob/master/INSTALL
+[NEWS]:         https://github.com/salewski/ads-github-tools/blob/master/NEWS
+[GIT_HUB]:      https://github.com/sociomantic-tsunami/git-hub
