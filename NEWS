@@ -26,6 +26,8 @@ which they were fixed will be noted here, as well.
 
 *** issue 17: ads-github-merge-all-upstreams: stderr message on failed ff merge indicates "bailing out", which is not always true
 
+    https://github.com/salewski/ads-github-tools/issues/17
+
     In the version of 'ads-github-merge-all-upstreams' distributed as part of
     ads-github-tools-0.1.0, the tool would emit an incorrect "bailing out"
     message when the tool's '-k' (--keep-going) option was speecified and a
@@ -80,9 +82,30 @@ which they were fixed will be noted here, as well.
     it.
 
 
+*** issue 18: ads-github-merge-all-upstreams: suppress "no upstream changes to merge" messages unless verbose output requested
+
+    https://github.com/salewski/ads-github-tools/issues/18
+
+    The default output of the 'ads-github-merge-all-upstreams' program (that
+    is, when the program is invoked with no command line options) was
+    previously too chatty; it was emitting a bunch of "no upstream changes to
+    merge" messages:
+
+    :    ...
+    :    ads-github-merge-all-upstreams (info): [repo: "foo"] no upstream changes to merge, and "aggressive push" (a al '-p -p') not specified; skipping (okay)
+    :    ads-github-merge-all-upstreams (info): [repo: "bar"] no upstream changes to merge, and "aggressive push" (a al '-p -p') not specified; skipping (okay)
+    :    ads-github-merge-all-upstreams (info): [repo: "baz"] no upstream changes to merge, and "aggressive push" (a al '-p -p') not specified; skipping (okay)
+    :    ...
+
+    The program now only emits those messages when the user requests verbose
+    output via '-v' (--verbose) option.
+
+
 ** improvements
 
 *** issue 16: ads-github-merge-all-upstreams: use 'git push origin heads/<BRANCH>' to avoid ambiguity with tags of the same name as <BRANCH>
+
+    https://github.com/salewski/ads-github-tools/issues/16
 
     If a repository had a tag name that matched the default branch name
     (typically "master"), then the previous version of the program would not

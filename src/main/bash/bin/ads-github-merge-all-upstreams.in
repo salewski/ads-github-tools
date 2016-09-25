@@ -1554,8 +1554,10 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                                                      )
 
             if $t_local_and_upstream_tips_are_identical; then
-                printf "${PROG} (info): [repo: \"%s\"] no upstream changes to merge, and \"aggressive push\" (a al '-p -p') not specified; skipping (okay)\n" \
-                   "${repo_name}" 1>&2
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): [repo: \"%s\"] no upstream changes to merge, and \"aggressive push\" (a al '-p -p') not specified; skipping (okay)\n" \
+                       "${repo_name}" 1>&2
+                fi
                 exit 101  # from subshell
             fi
         fi
