@@ -1632,7 +1632,17 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                            "${default_branch}" 1>&2
                 fi
             fi
-            "${GIT_PROG}" push --tags origin "${default_branch}"
+            # CAREFUL: We qualify the default branch name with 'heads/' to
+            #          disambiguate the refspec for the branch from a refspec
+            #          for a tag by the same name (yes, this was really seen
+            #          in the wild).
+            #
+            # See: https://github.com/salewski/ads-github-tools/issues/16
+            #      gitrevisions(7)  (section: "SPECIFYING REVISIONS")
+            #      git-rev-parse(1) (section: "SPECIFYING REVISIONS")
+            #
+            #
+            "${GIT_PROG}" push --tags origin heads/"${default_branch}"
             if test $? -ne 0; then
                 printf "${PROG} (error): [repo: \"%s\"]: was unable to push default branch (\"%s\") changes to origin; bailing out\n" \
                        "${repo_name}"      \

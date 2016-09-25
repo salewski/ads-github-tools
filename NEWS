@@ -29,7 +29,14 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (none)
+*** issue 16: ads-github-merge-all-upstreams: use 'git push origin heads/<BRANCH>' to avoid ambiguity with tags of the same name as <BRANCH>
+
+    If a repository had a tag name that matched the default branch name
+    (typically "master"), then the previous version of the program would not
+    be able to push the merged changes to the origin repository because the
+    git refspec used internally was ambiguous. The program has been enhanced
+    to qualify the default branch name as "heads/<BRANCH>" rather than just
+    "<BRANCH>" to remove this ambiguity.
 
 
 * ads-github-tools 0.1.0 (2016-08-20)
