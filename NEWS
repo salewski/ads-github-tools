@@ -1,4 +1,16 @@
--*- text -*-
+-*- org -*-
+
+#+STARTUP: hidestars oddeven
+
+HINT: org-mode global cycling: S-TAB
+
+HINT: To show all content (including any drawers), regardless of org-mode
+startup visibility:
+
+:    C-u C-u C-u TAB
+
+[The above assumes the default key binding of TAB to [[elisp:org-cycle][org-cycle]].]
+
 
 This is the 'NEWS' file for the 'ads-github-tools' project. This file contains
 information on changes since the last release of the package, as well as a
@@ -8,58 +20,74 @@ which they were fixed will be noted here, as well.
 
 -----------------------------------------------------------------------
 
-ads-github-tools 0.1.1 (TBD)
+* ads-github-tools 0.1.1 (TBD)
 
------------------------------------------------------------------------
+** fixes
 
-ads-github-tools 0.1.0 (2016-08-20)
+   (none)
 
-    * Initial version of project. The project currently provides five command
-      line programs:
 
-      + ads-github-normalize-url: produces a "normalized" view of a given URL,
-        suitable for use in generating an ID. Currently is a quick 'n dirty
-        implementation optimized for this sole purpose, so there's no
-        guarantee that the normalized variation of the URL will actually work
+** improvements
 
-      + ads-github-hash-url: similar in spirit to `git-hash-object(1)`, this
-        tool takes a (presumably normalized) URL and emits a checksum for
-        it. Currently uses the SHA-3 256-bit algorithm variant.
+   (none)
+
+
+* ads-github-tools 0.1.0 (2016-08-20)
+
+** Initial version of project. The project currently provides five command line programs:
+
+   + ads-github-normalize-url
+
+     Produces a "normalized" view of a given URL, suitable for use in
+     generating an ID. Currently is a quick 'n dirty implementation optimized
+     for this sole purpose, so there's no guarantee that the normalized
+     variation of the URL will actually work
+
+   + ads-github-hash-url
+
+     Similar in spirit to 'git-hash-object(1)', this tool takes a (presumably
+     normalized) URL and emits a checksum for it. Currently uses the SHA-3
+     256-bit algorithm variant.
   
-      + ads-github-show-rate-limits: Show user's GitHub API rate limits
-        ("core" and "search").
+   + ads-github-show-rate-limits
 
-      + ads-github-fetch-all-upstreams: Operates on the working directories of
-        a collection of GitHub-hosted git repositories. The user can specify
-        one or more repositories explicitly to restrict operations to just
-        those repos. Each that is found with an 'upstream' remote defined will
-        have `git fetch upstream` invoked in it.
+     Shows the user's GitHub API rate limits ("core" and "search").
+
+   + ads-github-fetch-all-upstreams
+
+     Operates on the working directories of a collection of GitHub-hosted git
+     repositories. The user can specify one or more repositories explicitly to
+     restrict operations to just those repos. Each that is found with an
+     'upstream' remote defined will have 'git fetch upstream' invoked in it.
   
-        - With the `--clone-if-missing` option, any of the user's GitHub repos
-          for which there is not a git working directory beneath the current
-          location will be cloned (using the `git-hub` tool's `clone`
-          operation, which sets up the 'upstream' remote if the repo is a
-          fork).
+     - With the '--clone-if-missing' option, any of the user's GitHub repos
+       for which there is not a git working directory beneath the current
+       location will be cloned (using the 'git-hub' tool's 'clone' operation,
+       which sets up the 'upstream' remote if the repo is a fork).
 
-        - There's also an `--upstream-remote-if-missing` option that will add
-          the 'upstream' remote on existing project working directories that
-          do not have it (only if the project is a fork of another project, of
-          course).
+     - There's also an '--upstream-remote-if-missing' option that will add the
+       'upstream' remote on existing project working directories that do not
+       have it (only if the project is a fork of another project, of course).
     
-      + ads-github-merge-all-upstreams: Operates on the working directories of
-        a collection of GitHub-hosted git repositories. Each that is found
-        with both 'origin' and 'upstream' remotes defined will have `git merge
-        --ff-only upstream/<DEFAULT_BRANCH_NAME>` invoked in it. The user can
-        specify one or more repositories explicitly to restrict operations to
-        just those repos. The program is careful to sanity check the local
-        repository before attempting any operations on it. Also, it will skip
-        any repository for which the git index has any changes recorded. Will
-        (temporarily) check out the default branch before merging (if the
-        working directory happens to have some other branch checked out); will
-        restore the originally checked out branch when done if the temporary
-        switch was necessary.
+   + ads-github-merge-all-upstreams
 
-        - With the `--push` option, will invoke 'git push origin <DEFAULT_BRANCH_NAME>'
-          for each repo.
+     Operates on the working directories of a collection of GitHub-hosted git
+     repositories. Each that is found with both 'origin' and 'upstream'
+     remotes defined will have:
 
------------------------------------------------------------------------
+     :    git merge --ff-only upstream/<DEFAULT_BRANCH_NAME>
+
+     invoked in it. The user can specify one or more repositories explicitly
+     to restrict operations to just those repos. The program is careful to
+     sanity check the local repository before attempting any operations on
+     it. Also, it will skip any repository for which the git index has any
+     changes recorded. Will (temporarily) check out the default branch before
+     merging (if the working directory happens to have some other branch
+     checked out); will restore the originally checked out branch when done if
+     the temporary switch was necessary.
+
+     - With the '--push' option, will invoke:
+
+       :    git push origin <DEFAULT_BRANCH_NAME>
+
+       for each repo.
