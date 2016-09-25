@@ -24,7 +24,60 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (none)
+*** issue 17: ads-github-merge-all-upstreams: stderr message on failed ff merge indicates "bailing out", which is not always true
+
+    In the version of 'ads-github-merge-all-upstreams' distributed as part of
+    ads-github-tools-0.1.0, the tool would emit an incorrect "bailing out"
+    message when the tool's '-k' (--keep-going) option was speecified and a
+    fast-forward merge is not possible for some reason:
+
+    :    $ ads-github-merge-all-upstreams -vkpp
+    :    ...
+    :    ads-github-merge-all-upstreams (info): [repo: "foobar"] currently checked-out branch ("master") is the default branch (no need for checkout)
+    :    fatal: Not possible to fast-forward, aborting.
+    :    ads-github-merge-all-upstreams (error): [repo: "foobar"] was error while attempting to merge 'upstream/master'; bailing out
+    :    ads-github-merge-all-upstreams (warning): '-k' (--keep-going) specified; continuing
+    :    ads-github-merge-all-upstreams (info): [repo: "bazqux"] currently checked-out branch ("master") is the default branch (no need for checkout)
+    :    Already up-to-date.
+    :    ...
+
+    That message is correct for the default behavior of the program (when the
+    '-k' option is not specified, but when the '-k' option /is/ specified, the
+    message should not have indicated that the program was "bailing out"; it
+    was not correct, and gave the impression that the error detection is not
+    working correctly.
+
+    The program has been fixed to emit "context aware" messages in these
+    scenarios. With the default invocation (no command line options specified)
+    is the same as it was previously:
+
+    :    $ ads-github-merge-all-upstreams
+    :    ...
+    :    fatal: Not possible to fast-forward, aborting.
+    :    ads-github-merge-all-upstreams (error): [repo: "foobar"] was error while attempting to merge 'upstream/master'; bailing out
+    :
+    :    $ echo $?
+    :    1
+
+    When the '-k' (--keep-going) option is specified, the error message
+    related to the failed fast-forward merge no longer indicates that the
+    program is "bailing out":
+
+    :    $ ads-github-merge-all-upstreams -k
+    :    fatal: Not possible to fast-forward, aborting.
+    :    ads-github-merge-all-upstreams (error): [repo: "serverless"] was error while attempting to merge 'upstream/master'
+    :    ads-github-merge-all-upstreams (warning): '-k' (--keep-going) specified; continuing
+    :    ...
+    :    ads-github-merge-all-upstreams (error): one or more errors encountered with '-k' (--keep-going) specified (see error output above for details); bailing out
+    :
+    :    $ echo $?
+    :    1
+
+    Note that the error message from the 'git merge --ff-only ...' command
+    invoked internally still indicates that it is "aborting". We hope that it
+    is clear from context that that is not coming directly from the
+    'ads-github-merge-all-upstreams' tool and that users are not confused by
+    it.
 
 
 ** improvements
