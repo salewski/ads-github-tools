@@ -29,7 +29,22 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (none)
+*** issue 19: ads-github-merge-all-upstreams: avoid using 'git branch' porcelain command
+
+    https://github.com/salewski/ads-github-tools/issues/19
+
+    Replaced three invocations of the git porcelain command 'git branch' with
+    (as appropriate) invocations of git plumbing commands:
+
+    : git symbolic-ref --short --quiet HEAD
+
+    or:
+
+    : git for-each-ref --format='%(refname:short)' 'refs/heads/'
+
+    or:
+
+    : git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/'
 
 
 * ads-github-tools 0.1.1 (2016-09-26)
