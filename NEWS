@@ -24,7 +24,11 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (none)
+*** issue 20: ads-github-merge-all-upstream: typo in log message ("a al" ==> "a la")
+
+    https://github.com/salewski/ads-github-tools/issues/20
+
+    Fixed typo in log message.
 
 
 ** improvements
