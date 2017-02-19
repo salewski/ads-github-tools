@@ -1,6 +1,6 @@
 #!/bin/bash -
 
-# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+# Copyright (c) 2016, 2017 Alan D. Salewski <salewski@att.net>
 #
 #     This program is free software; you can redistribute it and/or modify
 #     it under the terms of the GNU General Public License as published by
@@ -356,7 +356,7 @@ EOF
 f_print_version () {
     "${CAT_PROG}" <<EOF
 ${PROG} ${gl_const_release}
-Copyright (C) 2016 Alan D. Salewski
+Copyright (C) 2016, 2017 Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
@@ -2026,7 +2026,7 @@ If you find any, please report them as described in the C<BUGS> file.
 
 =head1 COPYRIGHT
 
-Copyright 2016 Alan D. Salewski
+Copyright 2016, 2017 Alan D. Salewski
 
 =cut
 
