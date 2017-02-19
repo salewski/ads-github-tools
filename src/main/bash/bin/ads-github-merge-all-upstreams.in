@@ -40,7 +40,7 @@
 #       'git merge', so the merge will only be performed if git-merge(1) is
 #       able to resolve the merge as a "fast forward".
 #
-#       (There's an assumption that you have already fetched from the 'upstram'
+#       (There's an assumption that you have already fetched from the 'upstream'
 #       remote, if desired, and that you want to merge in whatever the locally
 #       available state is).
 #
@@ -102,7 +102,7 @@
 #            is only one such code defined:
 #
 #            100 -- Indicates that the program exited upon finding a locally
-#                   modfied repository with uncommitted changes. The user must
+#                   modified repository with uncommitted changes. The user must
 #                   explicitly request this behavior via the '-L'
 #                   (--stop-upon-local-mods) command line option.
 #
@@ -864,7 +864,7 @@ if test $# -gt 0; then
     # process GNU-style long-form options; that option is specified to take an argument to
     # cause getopts to place whatever follows the second '-' character into OPTARG.
     #
-    # Note that getopts will automatically stop processsing options upon encountering
+    # Note that getopts will automatically stop processing options upon encountering
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
@@ -1081,7 +1081,7 @@ done
 
 declare -a EXPLICITLY_REQUESTED_REPOS=()
 
-# Any remaining arguments are interpretted as the names of repositories that
+# Any remaining arguments are interpreted as the names of repositories that
 # the user specifically wants to operate on.
 #
 # XXX: We do not currently do anything special to account for the same repo
@@ -1257,7 +1257,7 @@ REPO_DATA_LINES=''
 # Note that we still obtain info on /all/ repos even if the user has specified
 # that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
 # the user specified only a couple of repos, then we lose here because we
-# techically could query the GitHub service for the info on just those
+# technically could query the GitHub service for the info on just those
 # specific repos to accomplish our work.  If the user explicitly specifies
 # more than a few, though, we're back on solid ground because we can typically
 # get the info on all available user repos with fewer than 5 GitHub API calls
@@ -1671,7 +1671,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             fi
             "${GIT_PROG}" checkout "${t_git_branch_orig}"
             if test $? -ne 0; then
-                printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previously checked-ou branch (\"%s\"); bailing out\n" \
+                printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previously checked-out branch (\"%s\"); bailing out\n" \
                        "${repo_name}"      \
                        "${t_git_branch_orig}" 1>&2
                 exit 1
@@ -1715,7 +1715,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         # found that contains no new commits to merge from the
         # upstream/<BRANCH_NAME> branch to the local tracking branch (and
         # $DO_PUSH_ALWAYS was not enabled, which would have prevented the
-        # processing from short-cicuiting in this way).
+        # processing from short-circuiting in this way).
         #
         continue
     fi
@@ -1868,7 +1868,7 @@ changes.
 =item -p, --push
 
 Push changes back to the 'origin' remote. May be specified multiple times,
-with behavior changed as decribed below.
+with behavior changed as described below.
 
 This options causes the newly merged default branch content to be pushed back
 up to GitHub. E.g., causes invocation of the command:
@@ -1891,7 +1891,7 @@ we have not merged any changes during the current invocation of the program.
 
 The motivation for these differences in behavior is to support different usage
 patterns. The single C<--push> behavior supports the case where the user
-wishes to push merged changes every nearly every time the program is prun:
+wishes to push merged changes every nearly every time the program is run:
 
     FETCH and MERGE and PUSH
     [time passes...]
@@ -1957,7 +1957,7 @@ of the program.
 
 Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
 what it is doing. The option may be specified multiple times to increase
-fruther the level of verbosity. One C<-v> option enables info-level output;
+further the level of verbosity. One C<-v> option enables info-level output;
 two such opts enable debug-level output; three or more enable trace-level
 output.
 
@@ -1966,7 +1966,7 @@ output.
 
 Signals the end of options and disables further options processing. This is
 useful in the pathological scenario in which a REPO parameter would otherwise
-be interpretted as a command line option.
+be interpreted as a command line option.
 
 =back
 
@@ -1987,7 +1987,7 @@ Exit status code category ranges:
             is only one such code defined:
 
             100 -- Indicates that the program exited upon finding a locally
-                   modfied repository with uncommitted changes. The user must
+                   modified repository with uncommitted changes. The user must
                    explicitly request this behavior via the '-L'
                    (--stop-upon-local-mods) command line option.
 
