@@ -755,7 +755,7 @@ f_check_for_git_remote_or_die () {
 # branch names are identical.
 #
 # If they are identical, then emits 'true' on stdout. Assuming one branch is
-# tracking the other, the caller amy interpret this as an indication that no
+# tracking the other, the caller may interpret this as an indication that no
 # objects exist in either of the branches that are waiting to be merged into
 # the other.
 #
