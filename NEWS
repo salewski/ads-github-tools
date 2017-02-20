@@ -31,6 +31,41 @@ which they were fixed will be noted here, as well.
     Fixed typo in log message.
 
 
+*** issue 21: ads-github-merge-all-upstreams: no longer chokes when it encounters a "detached HEAD"
+
+    https://github.com/salewski/ads-github-tools/issues/21
+
+    Prior to this fix the program choked (when the repo directory was
+    initially in a "detached HEAD" state) upon attempting to restore the
+    working directory to the state it was in prior to the program switching to
+    the default branch. This happened because the code only knew how to deal
+    with a working directory "attached" to a named branch. Since the repo was
+    originally in the detached HEAD state, the program did not have a named
+    branch to which it could switch back.
+
+    Rather than attempt to switch back to an explicitly named branch, the code
+    now basically does this:
+
+    :    git checkout @{-1}
+
+    which you can read as: "where HEAD used to be one move ago (before we
+    checked-out the default branch)".
+
+    The impact of the original problem was that the
+    'ads-github-merge-all-upstreams' program stopped dead in its tracks and
+    left the repo directory with the default branch checked out.
+
+    The workaround was to simply re-run the program leaving that repo with the
+    default branch checked out. Because the program then found the repo with
+    the default branch already checked out, it did not attempt to swicth the
+    branch, so also did not need to attempt to restore it to its original
+    state. Once the program completed, the user could then manually check out
+    the tag (or whatever) to then put the repo back into the original detached
+    HEAD state (if so desired).
+
+    With this fix, such workarounds are no longer needed.
+
+
 ** improvements
 
 *** issue 19: ads-github-merge-all-upstreams: avoid using 'git branch' porcelain command

@@ -365,6 +365,105 @@ Written by Alan D. Salewski.
 EOF
 }
 
+# Helper function to store a given value (or nothing, if no value is provided)
+# to the variable named by V_NAME in the current shell.
+#
+# The idea is that callers invoke some function f_foo_func with the name of a
+# variable provided as a parameter, and such functions internally invoke this
+# one with both that name (V_NAME) and a value (VALUE) as a parameters. This
+# allows callers of other functions to obtain output values from those
+# functions without spawning a subshell. It allows one to replace variations
+# of this:
+#
+#     somevalue=$(somefunc arg1 arg2)
+#
+# with this:
+#
+#     somefunc somevalue arg1 arg2
+#     ...
+#     # do something with $somevalue
+#
+# Note that 'somevalue' (passed as the first argument to somefunc() in the
+# second example) is a string literal that names the variable that is to be
+# set in the current shell.
+#
+# This approach also allows foo_or_die(...) functions to behave as you would
+# want them to:
+#
+#    # wrong (exit status still needs to be checked and acted upon by the caller):
+#    somevalue=$(somefunc_or_die arg1 arg2)
+#    if test $? -ne 0; then ...; fi
+#
+#    # right (less verbose code needed at calling location):
+#    somefunc_or_die somevalue arg1 arg2
+#
+# @param V_NAME (required) - The name of the variable to set.
+#
+# @param VALUE  (optional) - The value to give to the variable named by V_NAME
+#
+# See also:
+#     f_set_named_index_array_or_die( V_NAME, ... )
+#     f_set_named_assoc_array_or_die( V_NAME, ... )
+#
+f_set_named_scalar_or_die () {
+
+    local __minimal_count=1
+    local __maximal_count=2
+    if test $# -lt ${__minimal_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; (at least) %d required; bailing out\n" \
+            $# ${__minimal_count} 1>&2
+        exit 1
+    fi
+    if test $# -gt ${__maximal_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; (at most) %d expected; bailing out\n" \
+            $# ${__maximal_count} 1>&2
+        exit 1
+    fi
+
+    local __variable_name
+    if test $? -ne 0; then
+        printf "${PROG} (BUG): ${FUNCNAME}() was unable to declare local variable named \"%s\"; bailing out\n" '__variable_name' 1>&2
+        exit 1
+    fi
+    __variable_name=$1
+
+    unset -v "${__variable_name}"
+    if test $? -ne 0; then
+        printf "${PROG} (BUG): ${FUNCNAME}() value provided for variable name (\"%s\") is not a valid identifier; bailing out\n" \
+               "${__variable_name}" 1>&2
+        exit 1
+    fi
+
+    # Using an array here allows us to use the magic "${__variable_value[@]}"
+    # syntax below, which will do what we want (expand to a quoted something
+    # if non-empty, else expand to nothing) regardless of whether or not a
+    # variable value was provided by the caller.
+    #
+    local -a __variable_value
+    if test $? -ne 0; then
+        printf "${PROG} (BUG): ${FUNCNAME}() was unable to declare local variable named \"%s\"; bailing out\n" '__variable_value' 1>&2
+        exit 1
+    fi
+
+    if test $# -gt 1; then
+        __variable_value+=( "$2" )
+    fi
+
+    printf -v "${__variable_name}" '%s' "${__variable_value[@]}"
+
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to set the value of variable named \"%s\"; bailing out\n" "${__variable_name}" 1>&2
+        exit 1
+    fi
+
+    return 0  # success
+}
+
+# These are not currently needed in this prog (but see f_set_named_scalar above):
+# f_set_named_index_array_or_die( V_NAME, ... )
+# f_set_named_assoc_array_or_die( V_NAME, ... )
+
+
 # Invoked by our accumulating '-v' (--verbose) option. Increases the program
 # output verbosity level by "one stage".
 #
@@ -830,6 +929,100 @@ f_check_that_branch_tip_commit_objs_are_identical_or_die () {
     printf 'false\n'
 
     return  # successful completion
+}
+
+
+# Expects to be invoked when $PWD is within a git working directory that is in
+# a "detached HEAD" state. Obtains the git object id to which HEAD points
+# (which will be a commit object) and sets the variable named by V_NAME to
+# that value.
+#
+# Will error out if the working directory is "attached" to a branch (as
+# opposed to being a detached HEAD).
+#
+# If any errors are encountered (e.g., 'git cat-file -t ...' fails for some
+# reason), then exits with an error code.
+#
+# @param REPO_NAME (required) - the name of the git repository in which we're
+#                               rummaging around. Used only to create more
+#                               informative log messages.
+#
+# @param V_NAME (required) - The name of the variable to set (output variable).
+#
+f_obtain_detached_head_commit_id_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+               $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __variable_name=$1  # output variable
+    local -r __repo_name=$2
+
+    if [[ ${__variable_name} =~ ^[[:space:]]*$ ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with blank value for required VARIABLE_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ ${__repo_name} =~ ^[[:space:]]*$ ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with blank value for required REPO_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    local __commit_object_id
+    local __git_object_type
+    local __branch_name
+
+    # Ensure that our working directory is /not/ "attached". Recall that:
+    #
+    #     'git symbolic-ref ...'
+    #
+    # will exit with status zero if the provided name ("HEAD") is a symbolic
+    # reference (which would be the case if it points to a branch).
+    #
+    # When the working directory is in a "detached HEAD" state, HEAD points
+    # directly to a commit (so is not a symbolic ref).
+    #
+    __branch_name=$("${GIT_PROG}" symbolic-ref --quiet HEAD)
+    if test $? -eq 0; then
+
+        printf "${PROG} (BUG): ${FUNCNAME}() [repo: \"%s\"] function called from within a working directory that is attached"\
+" (HEAD points to: \"%s\";"\
+" should only be called from within a \"detached HEAD\"); bailing out\n" \
+               "${__repo_name}"   \
+               "${__branch_name}" \
+               1>&2
+        exit 1
+    fi
+
+    # Some minor additional sanity checking...
+    __git_object_type=$("${GIT_PROG}" cat-file -t 'HEAD')
+    if test "${__git_object_type}" = 'commit'; then :; else
+        printf "${PROG} (error): in repo \"%s\", checking the git object type of HEAD for detached head produced \"%s\" (was expecting 'commit'); bailing out\n" \
+               "${__repo_name}"       \
+               "${__git_object_type}" \
+               1>&2
+        exit 1
+    fi
+
+    __commit_object_id=$("${GIT_PROG}" log --walk-reflogs -1 --format='%H' 'HEAD@{0}')
+    if test $? -ne 0; then
+        printf "${PROG} (error): in repo \"%s\", was error while attempting to obtain git commit object id for detached head; bailing out\n" \
+               "${__repo_name}" 1>&2
+        exit 1
+    fi
+
+    # Should never happen...
+    if test -z "${__commit_object_id}"; then
+        printf "${PROG} (error): in repo \"%s\", obtained empty string for git commit object id for detached head; bailing out\n" \
+               "${__repo_name}" 1>&2
+        exit 1
+    fi
+
+    f_set_named_scalar_or_die "${__variable_name}" "${__commit_object_id}"
+
+    return 0  # success
 }
 
 
@@ -1483,17 +1676,48 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         #     * git-symbolic-ref(1)
         #     * https://github.com/salewski/ads-github-tools/issues/19
         #
+        # If we are on a "detached HEAD" (HEAD is pointed directly at a
+        # specific commit rather than a named branch (due to checking out a
+        # tag name or the explicit commit (possibly with commits made on top
+        # of it)), then we will record the git object id of the commit object.
+        #
+        # Note that in both cases, the data (currently checked-out branch name
+        # or the specific to commit object id) is captured here only to be
+        # able to display it to the user in the event that something goes
+        # wrong when we attempt to restore the working directory to it's
+        # current state. See our use of "git checkout @{-1}" below for the
+        # actual state changing command (which means "check out whatever was
+        # checked out previously, according to the reflog").
+        #
+        t_git_detached_head_commit=   # object id where HEAD is currently pointing; is set
+                                      # only if working directory is in a "detached HEAD" state.
+
         t_git_branch_orig=$("${GIT_PROG}" symbolic-ref --short --quiet HEAD)
-        if test $? -ne 0; then
-            # The most likely cause of the error is that the user is in a
-            # 'detached HEAD' state (as the result of checking out a tag, or
-            # similar). It is not safe for us to checkout some other branch
-            # because the users commits to the detached HEAD (if any) would be
-            # lost.
-            printf "${PROG} (error): [repo: \"%s\"] was error while attempting to determine currently checked out branch (detached HEAD?); bailing out\n" \
-                   "${repo_name}" 1>&2
-            exit 1
+        t_stat=$?
+        if test $t_stat -ne 0; then
+
+            if test $t_stat -ne 1; then
+                # 'git symbolic-ref ...' exited with a status other than 0 or
+                # 1, which indicates some sort of general error.
+                #
+                printf "${PROG} (error): [repo: \"%s\"] was error while attempting to determine currently checked out branch name (if any); bailing out\n" \
+                       "${repo_name}" 1>&2
+                exit 1
+            fi
+
+            # 'git symbolic-ref ...' exited with status 1, which means that
+            # the requested name ("HEAD") is not a symbolic ref; in our case
+            # that should mean the working directory is in a "detached HEAD"
+            # state.
+
+            t_git_branch_orig=  # redundant with the above (unless 'git symbolic-ref...' bugged out)
+
+            # This both sanity-checks that we're looking at a detached head
+            # and then obtains the commit object id to which HEAD points.
+            #
+            f_obtain_detached_head_commit_id_or_die 't_git_detached_head_commit_id' "${repo_name}"
         fi
+        unset t_stat
 
         # sanity check: ensure default branch name (obtained via the GitHub
         # API) is the name of a branch that is actually present in our working
@@ -1567,10 +1791,10 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             fi
         fi
 
-        need_to_restore_orig_branch=true
+        need_to_restore_orig_HEAD=true
         if test "${t_git_branch_orig}" = "${default_branch}"; then
 
-            need_to_restore_orig_branch=false
+            need_to_restore_orig_HEAD=false
 
             if $BE_VERBOSE; then
                 printf "${PROG} (info): [repo: \"%s\"] currently checked-out branch (\"%s\") is the default branch (no need for checkout)\n" \
@@ -1578,10 +1802,26 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             fi
         else
             if $BE_VERBOSE; then
-                printf "${PROG} (info): [repo: \"%s\"] currently checked-out branch (\"%s\") is NOT the default branch (\"%s\"); checking out the default branch\n" \
-                       "${repo_name}"         \
-                       "${t_git_branch_orig}" \
-                       "${default_branch}" 1>&2
+                if test -n "${t_git_branch_orig}"; then
+
+                    printf "${PROG} (info): [repo: \"%s\"] currently checked-out branch (\"%s\") is NOT the default branch (\"%s\"); checking out the default branch\n" \
+                           "${repo_name}"         \
+                           "${t_git_branch_orig}" \
+                           "${default_branch}" 1>&2
+
+                elif test -n "${t_git_detached_head_commit_id}"; then
+
+                    printf "${PROG} (info): [repo: \"%s\"] currently on detached HEAD (commit: \"%s\"), NOT the default branch (\"%s\"); checking out the default branch\n" \
+                           "${repo_name}"                     \
+                           "${t_git_detached_head_commit_id}" \
+                           "${default_branch}" 1>&2
+                else
+                    # Should only fall through here if we have broken something...
+                    printf "${PROG} (BUG): [repo: \"%s\"] on neither the default branch (\"%s\") nor a detached HEAD; something is broken; bailing out\n" \
+                           "${repo_name}" \
+                           "${default_branch}" 1>&2
+                    exit 1
+                fi
             fi
             "${GIT_PROG}" checkout "${default_branch}"
             if test $? -ne 0; then
@@ -1590,6 +1830,15 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                        "${default_branch}" 1>&2
                 exit 1
             fi
+
+            # Note that at this point the reflog would have recorded the
+            # switch to the default branch. This is important because we will
+            # rely on the reflog to restore HEAD when we're all done.
+
+            # FIXME: From this point on, any failure will leave the repo on
+            #        the default branch rather than in the condition that we
+            #        found it. We should probably try harder to restore things
+            #        to they way we found them.
         fi
 
         # If we're falling through here, then we are in a known git working
@@ -1662,18 +1911,49 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             fi
         fi
 
-        if $need_to_restore_orig_branch; then
+        if $need_to_restore_orig_HEAD; then
 
             if $BE_VERBOSE; then
-                printf "${PROG} (info): [repo: \"%s\"] restoring previously checked-out branch (\"%s\")\n" \
-                       "${repo_name}"         \
-                       "${t_git_branch_orig}" 1>&2
+
+                if test -n "${t_git_branch_orig}"; then
+
+                    printf "${PROG} (info): [repo: \"%s\"] restoring previously checked-out branch (\"%s\")\n" \
+                           "${repo_name}"         \
+                           "${t_git_branch_orig}" 1>&2
+
+                elif test -n "${t_git_detached_head_commit_id}"; then
+
+                    printf "${PROG} (info): [repo: \"%s\"] restoring previous \"detached HEAD\" state (commit: \"%s\")\n" \
+                           "${repo_name}"         \
+                           "${t_git_detached_head_commit_id}" 1>&2
+
+                else
+                    # Should only fall through here if we have broken something...
+                    printf "${PROG} (BUG): [repo: \"%s\"] was originally on neither the default branch (\"%s\") nor a detached HEAD; something is broken; bailing out\n" \
+                           "${repo_name}" \
+                           "${default_branch}" 1>&2
+                    exit 1
+                fi
             fi
-            "${GIT_PROG}" checkout "${t_git_branch_orig}"
+            "${GIT_PROG}" checkout '@{-1}'  # read as: "where HEAD used to be one move ago (before we checked-out the default branch)"
             if test $? -ne 0; then
-                printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previously checked-out branch (\"%s\"); bailing out\n" \
-                       "${repo_name}"      \
-                       "${t_git_branch_orig}" 1>&2
+                if test -n "${t_git_branch_orig}"; then
+
+                    printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previously checked-out branch (\"%s\"); bailing out\n" \
+                           "${repo_name}"      \
+                           "${t_git_branch_orig}" 1>&2
+
+                elif test -n "${t_git_detached_head_commit_id}"; then
+
+                    printf "${PROG} (error): [repo: \"%s\"]: was unable to restore checkout of previous \"detached HEAD\" state (commit: \"%s\"); bailing out\n" \
+                           "${repo_name}"      \
+                           "${t_git_detached_head_commit_id}" 1>&2
+                else
+                    # Should only fall through here if we have broken something,
+                    # but we're exiting with an error status anyway, so...
+                    printf "${PROG} (BUG): [repo: \"%s\"] was unable to restore HEAD to \"one move ago\" from reflog; bailing out\n" \
+                           "${repo_name}" 1>&2
+                fi
                 exit 1
             fi
         else
