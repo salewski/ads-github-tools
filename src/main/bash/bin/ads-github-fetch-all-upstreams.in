@@ -571,7 +571,7 @@ if test $# -gt 0; then
     # process GNU-style long-form options; that option is specified to take an argument to
     # cause getopts to place whatever follows the second '-' character into OPTARG.
     #
-    # Note that getopts will automatically stop processsing options upon encountering
+    # Note that getopts will automatically stop processing options upon encountering
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
@@ -787,7 +787,7 @@ declare -a PROCESSED_REPOS=()
 
 declare -a EXPLICITLY_REQUESTED_REPOS=()
 
-# Any remaining arguments are interpretted as the names of repositories that
+# Any remaining arguments are interpreted as the names of repositories that
 # the user specifically wants to operate on.
 #
 # XXX: We do not currently do anything special to account for the same repo
@@ -967,7 +967,7 @@ REPO_DATA_LINES=''
 # Note that we still obtain info on /all/ repos even if the user has specified
 # that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
 # the user specified only a couple of repos, then we lose here because we
-# techically could query the GitHub service for the info on just those
+# technically could query the GitHub service for the info on just those
 # specific repos to accomplish our work.  If the user explicitly specifies
 # more than a few, though, we're back on solid ground because we can typically
 # get the info on all available user repos with fewer than 5 GitHub API calls
@@ -1251,7 +1251,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                 # do. Note that we have to make a call to the service
                 # inquiring about a specific repo to obtain the parent's
                 # 'clone_url'; it is not available in the output of the full
-                # list of repos which we've alread obtained. This could be a
+                # list of repos which we've already obtained. This could be a
                 # bit expensive against your rate limit if you have a large
                 # number of repos, but if most of those repos are forks it
                 # will only be expensive the first time the program is run to
@@ -1462,7 +1462,7 @@ Setup 'upstream' remote in existing repo working dirs, if missing
 
 Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
 what it is doing. The option may be specified multiple times to increase
-fruther the level of verbosity. One C<-v> option enables info-level output;
+further the level of verbosity. One C<-v> option enables info-level output;
 two such opts enable debug-level output; three or more enable trace-level
 output.
 
@@ -1471,7 +1471,7 @@ output.
 
 Signals the end of options and disables further options processing. This is
 useful in the pathological scenario in which a REPO parameter would otherwise
-be interpretted as a command line option.
+be interpreted as a command line option.
 
 =back
 
