@@ -148,6 +148,8 @@ CAT_PROG="${CAT:-@CAT@}"
 
 CURL_PROG="${CURL:-@CURL_PROG@}"
 
+ECHO_PROG="${ECHO:-@ECHO_PROG@}"
+
 EXPR_PROG="${EXPR:-@EXPR_PROG@}"
 
 GIT_PROG="${GIT:-@GIT_PROG@}"
@@ -175,9 +177,12 @@ SED_PROG="${SED:-@SED@}"
 
 TR_PROG="${TR:-@TR_PROG@}"
 
+XARGS_PROG="${XARGS:-@XARGS_PROG@}"
+
 declare -a NEEDED_EXTERNAL_PROGS=(
     "${CAT_PROG}"
     "${CURL_PROG}"
+    "${ECHO_PROG}"
     "${EXPR_PROG}"
     "${HEAD_PROG}"
     "${JQ_PROG}"
@@ -185,6 +190,7 @@ declare -a NEEDED_EXTERNAL_PROGS=(
     "${GIT_HUB_PROG}"
     "${SED_PROG}"
     "${TR_PROG}"
+    "${XARGS_PROG}"
 )
 
 
@@ -1351,6 +1357,17 @@ done < <(echo "$REPO_DATA_LINES")
 
 if test ${#EXPLICITLY_REQUESTED_REPOS[@]} -gt 0; then
 
+    # We use this to "remember" the names of all repo names that have not been
+    # processed. This allows us to present the complete list to the user in
+    # our error message.
+    #
+    # Using an assoc. array to automatically dedup the list of names. Each key
+    # is the name of a repo that should appear in the error message.
+    #
+    # See also: https://github.com/salewski/ads-github-tools/issues/23
+    #
+    declare -A t_unprocessed_repo_names_to_counts=()
+
     for t_requested_repo_name in "${EXPLICITLY_REQUESTED_REPOS[@]}"; do
 
         t_processed_it=false
@@ -1363,11 +1380,44 @@ if test ${#EXPLICITLY_REQUESTED_REPOS[@]} -gt 0; then
         done
 
         if $t_processed_it; then :; else
-            printf "${PROG} (error): did not process explicitly requested repo: \"%s\"; bailing out\n" \
-                   "${t_requested_repo_name}" 1>&2
-            exit 1
+            (( ++t_unprocessed_repo_names_to_counts["${t_requested_repo_name}"] ))
+            : $PROG \(trace: $LINENO\): name of unprocessed repo name \""${t_requested_repo_name}"\" seen ${t_unprocessed_repo_names_to_counts["${t_requested_repo_name}"]} time\(s\)
         fi
     done
+
+    if test "${#t_unprocessed_repo_names_to_counts[@]}" -gt 0; then
+        t_maybe_ess='s'
+        if test "${#t_unprocessed_repo_names_to_counts[@]}" -eq 1; then
+            t_maybe_ess=''
+        fi
+
+        # Need single value for our printf '%s' conversion specification
+        # below.
+        #
+        # Feeding the names of all unprocessed repo names (one per line) to
+        # 'xargs echo' has the effect of flattening the list down to a single
+        # line (well, a single line for each 'echo' invocation; in the common
+        # case all will fit on a single command line an result in the pretty
+        # output that we intend, but this will work either way because we
+        # capture the output as a single value -- if multiple lines are
+        # produced the output will just be a bit uglier).
+        #
+        # Note that (non-built-in) 'echo' is the default "utility" invoked by
+        # xargs since at least as far back as SUSv2 (1998), but we specify it
+        # explicitly for clarity.
+        #
+        t_unprocessed_repo_names_as_string="$( printf '%s\n' "${!t_unprocessed_repo_names_to_counts[@]}" | "${XARGS_PROG}" "${ECHO_PROG}" )"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to flatten list of %d unprocessed repo names; bailing out\n" \
+                   "${#t_unprocessed_repo_names_to_counts[@]}" 1>&2
+            exit 1
+        fi
+
+        printf "${PROG} (error): did not process explicitly requested repo%s: %s; bailing out\n" \
+               "${t_maybe_ess}" \
+               "${t_unprocessed_repo_names_as_string}" 1>&2
+        exit 1
+    fi
 fi
 
 if $BE_VERBOSE; then

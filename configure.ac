@@ -84,6 +84,11 @@ if test -z "$CURL_PROG"; then
     AC_MSG_ERROR([curl not found])
 fi
 
+AC_PATH_PROG([ECHO_PROG], [echo])
+if test -z "$ECHO_PROG"; then
+    AC_MSG_ERROR([echo not found])
+fi
+
 AC_PATH_PROG([EXPR_PROG], [expr])
 if test -z "EXPR_PROG"; then
     AC_MSG_ERROR([expr not found])
@@ -181,6 +186,10 @@ if test -z "$USERMOD"; then
     AC_MSG_ERROR([usermod program not found])
 fi
 
+AC_PATH_PROG([XARGS_PROG], [xargs])
+if test -z "$XARGS_PROG"; then
+    AC_MSG_ERROR([xargs not found])
+fi
 
 
 dnl require /at least/ perl version 5.005
@@ -309,6 +318,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
   -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
+  -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
   -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \
   -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
@@ -325,6 +335,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
+  -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
 '
 ]
 AC_SUBST([do_subst_command])
