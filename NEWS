@@ -86,6 +86,90 @@ which they were fixed will be noted here, as well.
     : git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/'
 
 
+*** issue 22: ads-github-fetch-all-upstreams: add feature to detect and pull down only "missing" repos
+
+    A '-m' (--missing-only) command line option has been added to the
+    'ads-github-fetch-all-upstreams' program. This new option provides a
+    shorthand way of invoking:
+
+    :    $ ads-github-fetch-all-upstreams -c <MISSING_REPO>...
+
+    while at the same time limiting the program's behavior to /only/ missing
+    repos. And it does so without the user having to explicitly name (or even
+    know) the values for each missing repository name.
+
+    In this context, a "missing repository" has the same meaning as it does
+    for the '-c' (--clone-if-missing) option. That is: any repository from
+    GitHub where the local git working directory is not present.
+
+    The following is the equivalent invocation of the above:
+
+    :    $ ads-github-fetch-all-upstreams -m
+
+    The semantics of:
+
+    :    $ ads-github-fetch-all-upstreams -m <REPO>...
+
+    limits the operation of the program to only those explicitly named repos, and
+    will clone them only if they are missing (that is, the program will not fetch
+    changes from the corresponding upstream repo when the local repo is already
+    present; see "Design Notes" section below for more on the rationale for this
+    behavior). If any of the explicitly named repos are already present, then the
+    program will print an error message and exit with a non-zero status at the end
+    (after cloning all of the other explicitly named repos (if any)). This is
+    intended to make the user aware of any repo names fat-fingered on the command
+    line.
+
+    Note that the '-m' (--missing-only) option implies '-c'
+    (--clone-if-missing), so the '-c' in the following is redundant (but
+    innocuous):
+
+    :    $ ads-github-fetch-all-upstreams -m -c
+
+    Said another way, the '--missing-only' option limits the behavior of the
+    program to operate /only/ on repos that are missing, so the behavior of
+    the program when '--missing-only' is specified is meaningless unless
+    '--clone-if-missing' were also implied.
+
+**** Design Notes
+
+     The author considered making the semantics of the '--missing-only'
+     option, when provided with explicitly named repo names on the command
+     line, be "fetch (or clone) these particular repos plus any repos that are
+     missing".
+
+     That approach would be consistent with the behavior of:
+
+     :    $ ads-github-fetch-all-upstreams -c <NONMISSING_REPO>...
+
+     insofar as the repos would be cloned if they were missing, but fetched
+     otherwise. That idea was ultimately rejected because it would fetch
+     updates for the repo if its working directory happened to be
+     present. That's not "missing only" behavior, so would make the behavior
+     of '--missing-only' (or whatever the option would be named) more
+     difficult to explain and comprehend. It's also not the common case itch
+     being scratched.
+
+     This decision does mean, though, that there is currently no way to express
+     "fetch (or clone) these particular repos plus any repos that are missing" when
+     one or more of the explicitly named repos is already present, yet still have
+     the program exit with a zero exit status. This use case can, of course, be
+     easily accommodated by using two separate invocations of the program:
+
+     :    $ # first clone (as fast as possible) any missing repos...
+     :    $ ads-github-fetch-all-upstreams -m
+     :
+     :    $ # ...and then fetch changes for explicitly named repos (note no need for '-c' here)
+     :    $ ads-github-fetch-all-upstreams <REPO>...
+
+     The second invocation in that example will be an elaborate NOOP when all of
+     the explicitly named repos were freshly cloned by the first invocation.
+
+     If this example represents your common use case and you find this behavior
+     limiting or otherwise annoying, please contact the author as outlined in the
+     [[https://github.com/salewski/ads-github-tools/blob/master/BUGS][BUGS]] file.
+
+
 *** issue 23: ads-github-fetch-all-upstreams: only one unprocessed named repo noted in error message
 
     https://github.com/salewski/ads-github-tools/issues/23

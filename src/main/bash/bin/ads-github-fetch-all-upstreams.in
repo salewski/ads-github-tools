@@ -108,6 +108,18 @@ DEBUGGING=false  # debug-level output; override with two '-v' opts
 DO_CLONE_IF_NOT_PRESENT=false
 
 
+# The default behavior of the program is to operate only on working
+# directories that are present ("operate only on these" semantics).
+#
+# Sometimes you want exactly the opposite behavior, though ("fetch all the new
+# stuff" semantics). Our '--missing-only' command line option allows the user
+# to request that behavior.
+#
+# See also: https://github.com/salewski/ads-github-tools/issues/22
+#
+FETCH_ONLY_MISSING=false
+
+
 # It may be the case that we have cloned one of our repositories manually, but
 # for whatever reason have not set up the 'upstream' remote to point to the
 # parent GitHub repository from which ours was cloned.
@@ -257,6 +269,7 @@ Mandatory arguments to long options are mandatory for short options too.
   -h, --help                        Print this help message on stdout
   -V, --version                     Print the version of the program on stdout
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
+  -m, --missing-only                Operate on (clone) only repos that are missing locally (implies '-c')
   -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
 
   -v, --verbose                     Print program progress messages on stderr. Specify multiple
@@ -557,6 +570,7 @@ declare -A longopt_spec=(
     ['version']=0   # -V
 
     ['clone-if-missing']=0            # -c
+    ['missing-only']=0                # -m
     ['upstream-remote-if-missing']=0  # -u
     ['verbose']=0                     # -v
 )
@@ -581,7 +595,7 @@ if test $# -gt 0; then
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
-    while getopts ':-:hcuVv' opt
+    while getopts ':-:hcmuVv' opt
     do
         : $PROG \(trace: $LINENO\): opt is: $opt
 
@@ -733,6 +747,12 @@ if test $# -gt 0; then
 
 
             'c' | 'clone-if-missing' )
+                DO_CLONE_IF_NOT_PRESENT=true
+                ;;
+
+            'm' | 'missing-only')
+                FETCH_ONLY_MISSING=true
+                # The '-m' option implies the '-c' option, so:
                 DO_CLONE_IF_NOT_PRESENT=true
                 ;;
 
@@ -1105,6 +1125,34 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         fi
     fi
 
+    if $FETCH_ONLY_MISSING; then
+
+        if test -d "${repo_name}"; then
+            # We'll treat the presence of a subdirectory with the repo name as "not missing"
+
+            if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
+
+                # If we are falling through here then it means that the user
+                # explicitly requested the repo, but it's working directory is
+                # already present. This will ultimately result in the program
+                # exiting with an error status because we are not adding the
+                # repo name to our $PROCESSED_REPOS array. With that being the
+                # case, we'll print the following message as a warning.
+
+                printf "${PROG} (warning): subdirectory exists for repo name \"%s\"; --missing-only specified; skipping\n" \
+                       "${repo_name}" 1>&2
+            else
+
+                if $BE_VERBOSE; then
+                    printf "${PROG} (info): subdirectory exists for repo name \"%s\"; --missing-only specified; skipping (okay)\n" \
+                           "${repo_name}" 1>&2
+                fi
+            fi
+
+            continue
+        fi
+    fi
+
     # If there's a subdirectory beneath the current location with the
     # repository name, then it is probably the git working directory for the
     # project. Note that it is possible to have a project cloned into a
@@ -1116,7 +1164,17 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         if $DO_CLONE_IF_NOT_PRESENT; then
 
             if $BE_VERBOSE; then
-                printf "${PROG} (info): no subdirectory exists for repo name \"%s\"; --clone-if-missing specified, so will clone repo from GitHub\n" "${repo_name}" 1>&2
+                if $FETCH_ONLY_MISSING; then
+                    # The '--missing-only' option implies '--clone-if-missing',
+                    # so we show a slightly different log message to help avoid
+                    # confusion in case the user did not explicitly provide
+                    # '--clone-if-missing' (which would be redundant if '--missing-only'
+                    # was provided).
+                    #
+                    printf "${PROG} (info): no subdirectory exists for repo name \"%s\"; --missing-only specified, so will clone repo from GitHub\n" "${repo_name}" 1>&2
+                else
+                    printf "${PROG} (info): no subdirectory exists for repo name \"%s\"; --clone-if-missing specified, so will clone repo from GitHub\n" "${repo_name}" 1>&2
+                fi
             fi
 
             declare t_v_opts=()
@@ -1501,6 +1559,33 @@ Print the version of the program to stdout and then exit.
 =item -c, --clone-if-missing
 
 Use L<git-hub(1)> to clone your missing repos from GitHub.
+
+
+=item -m, --missing-only
+
+Fetch only repos that are missing locally.
+
+The default behavior of the program is to operate only on working directories
+that are present, or only on those repos that are explicitly named on the
+command line (two different flavors of "operate only on these" semantics).
+
+Sometimes you want exactly the opposite behavior, though ("fetch all the new
+stuff" semantics). Our C<--missing-only> command line option allows the user
+to request that behavior.
+
+This option implies C<--clone-if-missing>) (C<-c>), and effectively provides a
+shorthand way of invoking:
+
+    $ ads-github-fetch-all-upstreams -c <MISSING_REPO>...
+
+without having to explicitly name (or even know) the values for each missing
+repository name.
+
+This behavior is useful, for example, if you have forked a number of different
+GitHub repos and want to have them cloned locally without having to wait for
+the status of all existing repositories to be checked (which can be a long
+time if you have a large number of GitHub repos), and without having to
+explicitly name the missing repos on the command line.
 
 
 =item -u, --upstream-remote-if-missing
