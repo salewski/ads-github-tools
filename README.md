@@ -24,12 +24,12 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.1.1`, and can be downloaded from:
+The latest version of the project is `0.2.0`, and can be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.1.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.1.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.1.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.1.1.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA3-256
     
 Older releases are available from the project's downloads page:
 
@@ -51,7 +51,20 @@ Many users would prefer to run those commands from a crontab (or similar); the
 author runs them manually because he's actively hacking on the tools and wants
 to inspect the output.
 
-At the moment (2016-08-20) there are five tools:
+The following invocation is also handy for creating local clones of recently
+forked GitHub repos:
+```
+    $ ads-github-fetch-all-upstreams -m
+```
+That invocation clones all of a user's GitHub repos for which there is no
+working directory beneath the current directory. It can be thought of as
+creating clones of "all the new stuff (and /just/ the new stuff)"; it operates
+much more quickly than invocations that operate on all of a user's GitHub
+repos (assuming only a minority of them are "missing", which is the common
+case). Note that the `'-m'` (`--missing-only`) option was introduced in the
+version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
+
+At the moment (2017-02-26) there are five tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
@@ -79,6 +92,14 @@ At the moment (2016-08-20) there are five tools:
   * There's also an `--upstream-remote-if-missing` option that will add the
     'upstream' remote on existing project working directories that do not have
     it (only if the project is a fork of another project, of course).
+    
+  * `ads-github-tools-0.2.0` added the `--missing-only` option (which implies
+    `--clone-if-missing`). The `--missing-only` option limits the program's
+    activity to operating on /only/ the user's "missing" GitHub repos. It can
+    be thought of as creating clones of "all the new stuff (and /just/ the
+    new stuff)"; it operates much more quickly than invocations that operate
+    on all of a user's GitHub repos (assuming only a minority of them are
+    "missing", which is the common case).
     
 * `ads-github-merge-all-upstreams` - Operates on the working directories of a
   collection of GitHub-hosted git repositories. Each that is found with both
