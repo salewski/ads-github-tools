@@ -184,7 +184,7 @@ typical arrangement when tracking changes to an upstream project over time: an
 cloning repositories.
 
 On a Debian system (including derivatives, such as Ubuntu) you can install the
-`'git-hub'` to via:
+`'git-hub'` program via:
 ```
     # apt-get install git-hub
 ```
