@@ -598,6 +598,7 @@ ads_perl5_extra_includes_opt
 ads_perl5_extra_includes
 POD2MAN
 PERL
+XARGS_PROG
 USERMOD
 USERADD
 GROUPADD
@@ -614,6 +615,7 @@ GIT_HUB_PROG
 GIT_PROG
 FIND
 EXPR_PROG
+ECHO_PROG
 CURL_PROG
 CHOWN
 CHGRP
@@ -2654,6 +2656,50 @@ if test -z "$CURL_PROG"; then
     as_fn_error $? "curl not found" "$LINENO" 5
 fi
 
+# Extract the first word of "echo", so it can be a program name with args.
+set dummy echo; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_ECHO_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $ECHO_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_ECHO_PROG="$ECHO_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_ECHO_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+ECHO_PROG=$ac_cv_path_ECHO_PROG
+if test -n "$ECHO_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ECHO_PROG" >&5
+$as_echo "$ECHO_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$ECHO_PROG"; then
+    as_fn_error $? "echo not found" "$LINENO" 5
+fi
+
 # Extract the first word of "expr", so it can be a program name with args.
 set dummy expr; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -3374,6 +3420,49 @@ if test -z "$USERMOD"; then
     as_fn_error $? "usermod program not found" "$LINENO" 5
 fi
 
+# Extract the first word of "xargs", so it can be a program name with args.
+set dummy xargs; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_XARGS_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $XARGS_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_XARGS_PROG="$XARGS_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_XARGS_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+XARGS_PROG=$ac_cv_path_XARGS_PROG
+if test -n "$XARGS_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $XARGS_PROG" >&5
+$as_echo "$XARGS_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$XARGS_PROG"; then
+    as_fn_error $? "xargs not found" "$LINENO" 5
+fi
 
 
 
@@ -4084,6 +4173,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
   -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
+  -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
   -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \
   -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
@@ -4100,6 +4190,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
+  -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
 '
 
 
