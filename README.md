@@ -30,6 +30,8 @@ The latest version of the project is `0.2.0`, and can be downloaded from:
    * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-1
    * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-256
    * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA3-256
+
+See the [NEWS] file for changes for this release.
     
 Older releases are available from the project's downloads page:
 
