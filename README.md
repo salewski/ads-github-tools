@@ -24,7 +24,8 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.2.0`, and can be downloaded from:
+The latest version of the project is `0.2.0` (released 2017-02-26), and can
+be downloaded from:
 
    * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz
    * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-1
