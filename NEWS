@@ -24,7 +24,16 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (none)
+*** issue 24: ads-github-merge-all-upstreams: bogon REPO command line options fail silently
+
+    https://github.com/salewski/ads-github-tools/issues/24
+
+    If a repository is explicitly named on the 'ads-github-merge-all-upstreams'
+    command line and is not actually processed, the program now emits an error
+    message and exits with a non-zero status.
+
+    This helps avoid the false-warm-and-fuzzy from silent non-action when the user
+    fat-fingers one or more repo names on the command line.
 
 
 ** improvements

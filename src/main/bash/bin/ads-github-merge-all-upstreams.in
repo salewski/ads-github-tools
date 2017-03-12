@@ -241,6 +241,8 @@ CAT_PROG="${CAT:-@CAT@}"
 
 CURL_PROG="${CURL:-@CURL_PROG@}"
 
+ECHO_PROG="${ECHO:-@ECHO_PROG@}"
+
 EXPR_PROG="${EXPR:-@EXPR_PROG@}"
 
 GIT_PROG="${GIT:-@GIT_PROG@}"
@@ -258,16 +260,20 @@ SED_PROG="${SED:-@SED@}"
 
 TR_PROG="${TR:-@TR_PROG@}"
 
+XARGS_PROG="${XARGS:-@XARGS_PROG@}"
+
 declare -a NEEDED_EXTERNAL_PROGS=(
     "${CAT_PROG}"
     "${CURL_PROG}"
     "${EXPR_PROG}"
+    "${ECHO_PROG}"
     "${GIT_PROG}"
     "${GREP_PROG}"
     "${HEAD_PROG}"
     "${JQ_PROG}"
     "${SED_PROG}"
     "${TR_PROG}"
+    "${XARGS_PROG}"
 )
 
 
@@ -1272,7 +1278,22 @@ while (( ii < ${OPTIND} )); do
     : $PROG \(trace: $LINENO\): ii is now: $ii
 done
 
-declare -a EXPLICITLY_REQUESTED_REPOS=()
+# GitHub issue #24: If there are any explicitly requested repos that we do not
+# process, then we need to let the user know about it.
+#
+# See: https://github.com/salewski/ads-github-tools/issues/24
+declare -a PROCESSED_REPOS=()
+
+# We'll use an associative array to keep track of the repositories that the
+# user explicitly requests. The keys will be the repo names, and the values
+# will be a counter flag (0 or 1) indicating whether or not the repo name is
+# known to GitHub. This allows us to detect and report on fat-fingered repo
+# names that are not processed.
+#
+# This also has the side-effect of consolidating to a single "seen" instance
+# repo names specified more than once on the command line.
+#
+declare -A EXPLICITLY_REQUESTED_REPOS=()
 
 # Any remaining arguments are interpreted as the names of repositories that
 # the user specifically wants to operate on.
@@ -1291,7 +1312,7 @@ while test $# -gt 0 ; do
         printf "${PROG} (info): noting user-specified explicit repo name: \"%s\"\n" "${_one_repo_name}" 1>&2
     fi
 
-    EXPLICITLY_REQUESTED_REPOS+=( "${_one_repo_name}" )
+    EXPLICITLY_REQUESTED_REPOS["${_one_repo_name}"]=0
 done
 
 for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
@@ -1564,7 +1585,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
 
         t_repo_is_keeper=false
 
-        for expl_repo_name in "${EXPLICITLY_REQUESTED_REPOS[@]}"; do
+        for expl_repo_name in "${!EXPLICITLY_REQUESTED_REPOS[@]}"; do
 
             if test "${expl_repo_name}" = "${repo_name}"; then
                 t_repo_is_keeper=true
@@ -1580,6 +1601,10 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             fi
             continue
         fi
+
+        # Remember that the repo name is known to GitHub
+        (( ++EXPLICITLY_REQUESTED_REPOS["${repo_name}"] ))
+        : $PROG \(trace: $LINENO\): explicitly requested repo name \""${repo_name}"\" is known to GitHub
     fi
 
     # The main purpose of this program is to:
@@ -1599,6 +1624,14 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         if $BE_VERBOSE; then
             printf "${PROG} (info): [repo: \"%s\"] is not a fork of another GitHub repo, so we do not need to check for an \"upstream\" remote; skipping (okay)\n" "${repo_name}" 1>&2
         fi
+
+        # We will treat this as "processed", just with nothing to do. There's
+        # no reason to error out when processing explicitly specified repos
+        # just because one or more of them are not forks of other GitHub
+        # repos.
+        #
+        PROCESSED_REPOS+=( "${repo_name}" )
+
         continue
     fi
 
@@ -1610,15 +1643,39 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     #
     if test -d "${repo_name}"; then :; else
 
-        if $DEBUGGING; then
-            printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+        if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
+
+            # The repo was explicitly requested by the user, but there is no
+            # working directory for it. We will print a message to stderr and
+            # deliberately NOT add the repo name to our $PROCESSED_REPOS
+            # array; that will cause the program to ultimately exit with an
+            # error status.
+            #
+            printf "${PROG} (error): no subdirectory named after explicitly requested repo \"%s\"; skipping; (HINT: you need to clone it first)\n" "${repo_name}" 1>&2
+
+        else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2
+            fi
         fi
 
         continue
     fi
 
     if test -d "${repo_name}/.git"; then :; else
-        printf "${PROG} (warning): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+
+        if test "${#EXPLICITLY_REQUESTED_REPOS[@]}" -gt 0; then
+
+            # The repo was explicitly requested by the user, but there is no
+            # working directory for it. We will print a message to stderr and
+            # deliberately NOT add the repo name to our $PROCESSED_REPOS
+            # array; that will cause the program to ultimately exit with an
+            # error status.
+            #
+            printf "${PROG} (error): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+        else
+            printf "${PROG} (warning): subdirectory named after repo \"%s\" exists, but is not a git working directory; skipping\n" "${repo_name}" 1>&2
+        fi
         continue
     fi
 
@@ -1969,6 +2026,7 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     ss_estat=$?
 
     if test $ss_estat -eq 0; then
+        PROCESSED_REPOS+=( "${repo_name}" )
         continue
     fi
 
@@ -1985,6 +2043,10 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             printf "${PROG} (warning): locally modified repo found and '-L' (--stop-upon-local-mods) specified; exiting with status %s\n" "${ESTAT_LOCAL_MODS_FOUND}" 1>&2
             exit $ESTAT_LOCAL_MODS_FOUND
         else
+            # We will treat this as "processed", just with nothing to do.
+            #
+            PROCESSED_REPOS+=( "${repo_name}" )
+
             continue
         fi
     fi
@@ -1996,7 +2058,11 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         # upstream/<BRANCH_NAME> branch to the local tracking branch (and
         # $DO_PUSH_ALWAYS was not enabled, which would have prevented the
         # processing from short-circuiting in this way).
+
+        # We will treat this as "processed", just with nothing to do.
         #
+        PROCESSED_REPOS+=( "${repo_name}" )
+
         continue
     fi
 
@@ -2015,6 +2081,11 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
         # behavior.
         #
         if $DO_KEEP_GOING_UPON_ERROR; then
+
+            # The program will ultimately exit with an error status. Note that
+            # we are deliberately NOT adding the repository name to our
+            # $PROCESSED_REPOS array.
+
             printf "${PROG} (warning): '-k' (--keep-going) specified; continuing\n" 1>&2
             CONTINUED_THROUGH_ERROR=true
             continue
@@ -2034,6 +2105,80 @@ done < <(echo "$REPO_DATA_LINES")
 if $DO_KEEP_GOING_UPON_ERROR && $CONTINUED_THROUGH_ERROR; then
     printf "${PROG} (error): one or more errors encountered with '-k' (--keep-going) specified (see error output above for details); bailing out\n" 1>&2
     exit 1
+fi
+
+if test ${#EXPLICITLY_REQUESTED_REPOS[@]} -gt 0; then
+
+    # We use this to "remember" the names of all repo names that have not been
+    # processed. This allows us to present the complete list to the user in
+    # our error message.
+    #
+    # Using an assoc. array to automatically dedup the list of names. Each key
+    # is the name of a repo that should appear in the error message.
+    #
+    # See also: https://github.com/salewski/ads-github-tools/issues/23
+    #
+    declare -A t_unprocessed_repo_names_to_counts=()
+
+    for t_requested_repo_name in "${!EXPLICITLY_REQUESTED_REPOS[@]}"; do
+
+        t_processed_it=false
+
+        for t_processed_repo_name in "${PROCESSED_REPOS[@]}"; do
+            if test "${t_requested_repo_name}" = "${t_processed_repo_name}"; then
+                t_processed_it=true
+                break
+            fi
+        done
+
+        if $t_processed_it; then :; else
+            (( ++t_unprocessed_repo_names_to_counts["${t_requested_repo_name}"] ))
+            : $PROG \(trace: $LINENO\): name of unprocessed repo name \""${t_requested_repo_name}"\" seen ${t_unprocessed_repo_names_to_counts["${t_requested_repo_name}"]} time\(s\)
+
+            if test ${EXPLICITLY_REQUESTED_REPOS["${t_requested_repo_name}"]} -eq 0; then
+                # We never bumped up the value when looping over all of the
+                # repo names known to GitHub. The user probably fat-fingered
+                # the repo name.
+                printf "${PROG} (error): explicitly named repo \"%s\" is not known to GitHub\n" \
+                       "${t_requested_repo_name}" 1>&2
+                # No need to exit here directly; we're setting up an error message to report on /all/ unprocessed repos.
+            fi
+        fi
+    done
+
+    if test "${#t_unprocessed_repo_names_to_counts[@]}" -gt 0; then
+        t_maybe_ess='s'
+        if test "${#t_unprocessed_repo_names_to_counts[@]}" -eq 1; then
+            t_maybe_ess=''
+        fi
+
+        # Need single value for our printf '%s' conversion specification
+        # below.
+        #
+        # Feeding the names of all unprocessed repo names (one per line) to
+        # 'xargs echo' has the effect of flattening the list down to a single
+        # line (well, a single line for each 'echo' invocation; in the common
+        # case all will fit on a single command line an result in the pretty
+        # output that we intend, but this will work either way because we
+        # capture the output as a single value -- if multiple lines are
+        # produced the output will just be a bit uglier).
+        #
+        # Note that (non-built-in) 'echo' is the default "utility" invoked by
+        # xargs since at least as far back as SUSv2 (1998), but we specify it
+        # explicitly for clarity.
+        #
+        t_unprocessed_repo_names_as_string="$( printf '%s\n' "${!t_unprocessed_repo_names_to_counts[@]}" | "${XARGS_PROG}" "${ECHO_PROG}" )"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to flatten list of %d unprocessed repo names; bailing out\n" \
+                   "${#t_unprocessed_repo_names_to_counts[@]}" 1>&2
+            exit 1
+        fi
+
+        printf "${PROG} (error): did not process explicitly requested repo%s: %s; bailing out\n" \
+               "${t_maybe_ess}" \
+               "${t_unprocessed_repo_names_as_string}" 1>&2
+        exit 1
+    fi
 fi
 
 if $BE_VERBOSE; then
