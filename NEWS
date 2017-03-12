@@ -20,7 +20,7 @@ which they were fixed will be noted here, as well.
 
 -----------------------------------------------------------------------
 
-* ads-github-tools 0.2.1 (TBD)
+* ads-github-tools 0.3.0 (TBD)
 
 ** fixes
 
@@ -37,6 +37,19 @@ which they were fixed will be noted here, as well.
 
 
 ** improvements
+
+*** issue 6: ads-github-show-rate-limits: allow user to request utc date output
+
+    https://github.com/salewski/ads-github-tools/issues/6
+
+    The 'ads-github-show-rate-limits' program has a new '-u' (--utc) option
+    that allows the user to request that time fields be output in
+    human-readable (RFC 3339) formatted UTC (as opposed to the default seconds
+    since the Unix epoch, or (with the '-h' (--human-readable) option)
+    human-readable local time.
+
+    See ads-github-show-rate-limits(1) for details.
+
 
 *** issue 25: ads-github-show-rate-limits(1) indicates data is parsed from HTTP headers, but it is really parsed from the JSON in the HTTP body response of the .../rate_limit endpoint
 

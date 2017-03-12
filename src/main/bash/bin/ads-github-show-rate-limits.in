@@ -104,7 +104,22 @@ BE_VERBOSE=false # info-level output; override with one '-v' opt
 DEBUGGING=false  # debug-level output; override with two '-v' opts
 
 
+# Think of this as the "global human readable" flag.
+#
+# We also have field-specific human readable flags (named in the form
+# HUMAN_READABLE_FOO_MODE) that allow us to support certain use cases (such as
+# implying human readable for only the reset date field when the '-u' option
+# is provided). Setting the global human readable flag has the effect of
+# implicitly setting all such field-specific flags.
+#
 HUMAN_READABLE_MODE=false  # override with '-h' (--human-readable) opt
+#
+HUMAN_READABLE_LIMIT_COUNT_MODE=false       # set implicitly when the '-h' opt is provided
+HUMAN_READABLE_REMAINING_COUNT_MODE=false   # set implicitly when the '-h' opt is provided
+HUMAN_READABLE_DATE_MODE=false              # set implicitly when either the '-h' or '-u' opts (or both) are provided
+
+# Note that setting UTC_DATE_MODE implicitly sets HUMAN_READABLE_DATE_MODE, too.
+UTC_DATE_MODE=false  # override with '-u' (--utc or --universal) opt
 
 
 declare -r gl_const_re_all_digits='^[[:digit:]]{1,}$'
@@ -209,15 +224,19 @@ f_print_help () {
 usage: $PROG [OPTION...]
 Requests user's rate limit information from GitHub and displays it on stdout
 
-      --help            Print this help message on stdout
-  -V, --version         Print the version of the program on stdout
+      --help              Print this help message on stdout
+  -V, --version           Print the version of the program on stdout
 
-  -h, --human-readable  Print numbers and dates in human readable format (e.g., "4,835")
+  -h, --human-readable    Print numbers and dates in human readable format (e.g., "4,835")
+                            Dates will be in local time unless '-u' is also specified
 
-  -v, --verbose         Print program progress messages on stderr. Specify multiple
-                          times to increase verbosity: info, debug, and tracing (set -x)
+  -u, --utc, --universal  Print dates in human-readable Coordinated Universal Time (UTC)
+                            Overrides "local time" conversion when specified with '-h'
 
-      --                Signals the end of options and disables further options processing.
+  -v, --verbose           Print program progress messages on stderr. Specify multiple
+                            times to increase verbosity: info, debug, and tracing (set -x)
+
+      --                  Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
 EOF
@@ -283,9 +302,14 @@ pos_last_plus_one=$(( $# + 1 ))
 # expected to have an argument.
 #
 declare -A longopt_spec=(
-    ['help']=0      # (no short-form equivalent)
-    ['version']=0   # -V
-    ['verbose']=0   # -v
+    ['help']=0       # (no short-form equivalent)
+    ['version']=0    # -V
+
+    # These are two flavors for the same long-form option (modelled after the opts for GNU date(1))
+    ['utc']=0        # -u
+    ['universal']=0  # -u
+
+    ['verbose']=0    # -v
 
     ['human-readable']=0  # -h
 )
@@ -310,7 +334,7 @@ if test $# -gt 0; then
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
-    while getopts ':-:hVv' opt
+    while getopts ':-:huVv' opt
     do
         : $PROG \(trace: $LINENO\): opt is: $opt
 
@@ -475,6 +499,21 @@ if test $# -gt 0; then
 
             'h' | 'human-readable' )
                 HUMAN_READABLE_MODE=true
+                #
+                # Setting the "global" human readable flag has the effect of
+                # enabling all field-specific human-readable flags
+                #
+                HUMAN_READABLE_LIMIT_COUNT_MODE=true
+                HUMAN_READABLE_REMAINING_COUNT_MODE=true
+                HUMAN_READABLE_DATE_MODE=true
+                ;;
+
+
+            'u' | 'utc' | 'universal' )
+                UTC_DATE_MODE=true
+                #
+                # Setting UTC_DATE_MODE implicitly sets HUMAN_READABLE_DATE_MODE, too
+                HUMAN_READABLE_DATE_MODE=true
                 ;;
 
 
@@ -745,7 +784,7 @@ while IFS=':' read -r resource_name limit_count remaining_count reset_date_from_
     FORMATTED_RESOURCE_NAMES+=( "${resource_name}" )
 
 
-    if $HUMAN_READABLE_MODE; then
+    if $HUMAN_READABLE_LIMIT_COUNT_MODE; then
         printf -v t_formatted_limit_count "%'d" "${limit_count}"
         if test $? -ne 0; then
             printf "${PROG} (error): [github resource: %s]: was unable to format limit count value (\"%s\"); bailing out\n" "${resource_name}" "${limit_count}" 1>&2
@@ -760,7 +799,7 @@ while IFS=':' read -r resource_name limit_count remaining_count reset_date_from_
     FORMATTED_LIMIT_COUNTS+=( "${t_formatted_limit_count}" )
 
 
-    if $HUMAN_READABLE_MODE; then
+    if $HUMAN_READABLE_REMAINING_COUNT_MODE; then
         printf -v t_formatted_remaining_count "%'d" "${remaining_count}"
         if test $? -ne 0; then
             printf "${PROG} (error): [github resource: %s]: was unable to format remaining count value (\"%s\"); bailing out\n" "${resource_name}" "${remaining_count}" 1>&2
@@ -775,15 +814,28 @@ while IFS=':' read -r resource_name limit_count remaining_count reset_date_from_
     FORMATTED_REMAINING_COUNTS+=( "${t_formatted_remaining_count}" )
 
 
-    if $HUMAN_READABLE_MODE; then
+    if $HUMAN_READABLE_DATE_MODE; then
 # FIXME (PORTABILITY): maybe provide workarounds if 'date' from GNU coreutils is not available.
 # FIXME: add option to allow user to request UTC
-        t_formatted_reset_date="$(date --date="@${reset_date_from_epoch_secs}" --rfc-3339=seconds)"
+        declare -a t_date_options=()
+        t_date_options+=( '--date=@'"${reset_date_from_epoch_secs}" )
+        t_date_options+=( '--rfc-3339=seconds' )
+
+        if $UTC_DATE_MODE; then
+            t_date_options+=( '--utc' )
+        fi
+
+        t_formatted_reset_date="$(date "${t_date_options[@]}")"
         if test $? -ne 0; then
             printf "${PROG} (error): [github resource: %s]: was unable to format reset date value (\"%s\"); bailing out\n" "${resource_name}" "${reset_date_from_epoch_secs}" 1>&2
             exit 1
         fi
+        unset t_date_options
     else
+        # Note: Our $UTC_DATE_MODE flag is irrelevant here because the date
+        #       from the Unix epoch seconds is relative to UTC by definition;
+        #       the seconds count value in ${reset_date_from_epoch_secs} is
+        #       already in a form relative to UTC.
         t_formatted_reset_date=${reset_date_from_epoch_secs}
     fi
     if test ${#t_formatted_reset_date} -gt $COL_WIDTH_RESET_DATE; then
@@ -825,7 +877,7 @@ exit 0
 #
 #     $ pod2man /path/to/this/file \
 #               --center='ads-github-tools' \
-#               --release='ads-github-tools-0.1.0' \
+#               --release='ads-github-tools-0.3.0' \
 #               --section='1' \
 #               > /outputdir/ads-github-show-rate-limits.1
 #
@@ -875,8 +927,6 @@ some specific formats (edn, json).
 
 All requests are made over HTTPS.
 
-FIXME: docs still a wip
-
 
 =head2 Motivation
 
@@ -920,14 +970,108 @@ and:
 
 By default, numbers and dates are presented in the same format as they are
 returned by the upstream GitHub service; this allows downstream tools to
-process them without having to parse some (more complicated) human-readable
-format. In this format, dates are represented as seconds since the Unix epoch.
+process them without having to parse some (typically more complicated)
+human-readable formats. In their default representation, dates are shown as
+seconds since the Unix epoch.
 
 When the C<-h> (C<--human-readable>) option is is specified, then numbers will
-be presented in a locale-aware format, and dates will be formatted to the
-second in RFC 3339 format.
+be presented in a locale-aware format, and dates will be formatted in local
+time to the second in RFC 3339 format.
 
-A future version will allow dates to be presented in UTC.
+To have dates presented in human readable UTC form, see the C<-u> (C<--utc> or
+C<--universal>) option.
+
+
+=item -u, --utc, --universal
+
+By default dates are presented in the form in which they are returned by the
+upstream GitHub API: in the number of seconds since the Unix epoch, which is
+roughly defined as the number of seconds since 00:00:00 UTC on 1 January 1970.
+
+So in that sense, the default output is I<already> in UTC format. However,
+keep reading.
+
+The epoch itself is represented as 0 (zero) seconds. Consider the following:
+
+    $ date --date=@0 --utc --rfc-3339=seconds
+    1970-01-01 00:00:00+00:00
+
+    $ date --date=@300 --utc --rfc-3339=seconds
+    1970-01-01 00:05:00+00:00
+
+    $ date --date=@307 --utc --rfc-3339=seconds
+    1970-01-01 00:05:07+00:00
+
+    $ date --date=@-180 --utc --rfc-3339=seconds
+    1969-12-31 23:57:00+00:00
+
+On the author's machine, the current time, represented in seconds since the
+Unix epoch, is:
+
+    $ date '+%s'
+    1489335551
+
+As noted, the default output of C<ads-github-show-rate-limits> displays the
+date values in that same format. For example:
+
+    $ ads-github-show-rate-limits
+       core  5000  5000  1489339313
+    graphql   200   200  1489339313
+     search    30    30  1489335773
+
+Such values are less than human-friendly (for most humans ;-), so we also
+provide the L<-h|/"-h, --human-readable"> (C<--human-readable>) option. That
+has the effect of displaying the dates in a form that is more readable by most
+folks both due to the format and the locale-specific "local time"
+representation:
+
+    ads-github-show-rate-limits --human-readable
+       core  5,000  5,000  2017-03-12 13:23:12-04:00
+    graphql    200    200  2017-03-12 13:23:12-04:00
+     search     30     30  2017-03-12 12:24:12-04:00
+
+The C<-u> (C<--utc> or C<--universal>) option allows the user to request that
+the dates I<not> be converted to the user's local time, but to have them
+displayed in UTC, instead:
+
+    $ ads-github-show-rate-limits --human-readable --utc
+       core  5,000  5,000  2017-03-12 17:25:05+00:00
+    graphql    200    200  2017-03-12 17:25:05+00:00
+     search     30     30  2017-03-12 16:26:05+00:00
+
+Two things to note about the above:
+
+=over 4
+
+=item 1. The date is still in RFC 3339 format
+
+=item 2. The non-date fields are also in "human readable" form.
+
+=back
+
+Regarding the second item, you can achieve a similar effect for the date
+fields while leaving the non-date fields in their default (non-human-readable)
+representation by omitting the L<-h|/"-h, --human-readable">
+(C<--human-readable>) option:
+
+    $ ads-github-show-rate-limits --utc
+       core  5000  5000  2017-03-12 17:25:05+00:00
+    graphql   200   200  2017-03-12 17:25:05+00:00
+     search    30    30  2017-03-12 16:26:05+00:00
+
+The above example demonstrates that the C<-u> (C<--utc> or C<--universal>)
+option, when specified I<without> the L<-h|/"-h, --human-readable">
+(C<--human-readable>) option, means "human readable UTC output for date fields
+only".
+
+B<Design note:> Two long-form aliases, C<--utc> and C<--universal>, are
+provided for alignment with the similarly named options of the GNU L<date(1)>
+program.
+
+B<Historical note:> The C<-u> (C<--utc> or C<--universal>) option was
+introduced in the version of C<ads-github-show-rate-limits> distributed with
+C<ads-github-tools> version 0.3.0. See also L<"issue
+6"|https://github.com/salewski/ads-github-tools/issues/6>
 
 
 =item -v, --verbose
@@ -966,7 +1110,21 @@ If you find any, please report them as described in the C<BUGS> file.
 
 =over 4
 
-=item ads-github-tools(7)
+=item * L<ads-github-tools(7)>
+  
+
+=item * Wikipedia "Unix time" page
+
+For information about the Unix epoch:
+
+L<https://en.wikipedia.org/wiki/Unix_time>
+
+
+=item * L<date(1)>
+
+The C<-u> (C<--utc> and C<--universal>) option in
+C<ads-github-show-rate-limits> is named after the identically named options of
+the GNU C<date(1)> program.
 
 =back
 
