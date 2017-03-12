@@ -858,11 +858,11 @@ exit 0
 The C<ads-github-show-rate-limits> program is part of the C<ads-github-tools>
 project.
 
-The C<ads-github-show-rate-liimits> program requests the user's rate limit
+The C<ads-github-show-rate-limits> program requests the user's rate limit
 information from GitHub and displays it on stdout.
 
 The program makes an authenticated HTTP 'HEAD' call to the GitHub API (using
-C<curl(1)>) to obtain the HTTP response headers that contain the service rate
+L<curl(1)>) to obtain the HTTP response headers that contain the service rate
 limit information. The rate limit information is parsed out of the headers and
 presented to the user.
 
