@@ -17,10 +17,10 @@
 #     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
 
 # ads-github-show-rate-limits: Show user's GitHub API rate limits. Makes an
-# authenticated HTTP 'HEAD' call to the GitHub API (using curl) to obtain the
-# HTTP response headers that contain the service rate limit information. The
-# rate limit information is parsed out of the headers and presented to the
-# user.
+# authenticated HTTPS 'GET' request to the GitHub API (using curl) to obtain
+# the response body that contains a JSON representation of the service rate
+# limit information. The rate limit information is parsed out of the JSON
+# structure and presented to the user.
 #
 # The default output (whitespace delimited columns of plain text) is suitable
 # for a user working interactively in a shell and for use in a Unix shell
@@ -861,10 +861,10 @@ project.
 The C<ads-github-show-rate-limits> program requests the user's rate limit
 information from GitHub and displays it on stdout.
 
-The program makes an authenticated HTTP 'HEAD' call to the GitHub API (using
-L<curl(1)>) to obtain the HTTP response headers that contain the service rate
-limit information. The rate limit information is parsed out of the headers and
-presented to the user.
+The program makes an authenticated HTTPS 'GET' request to the GitHub API
+(using L<curl(1)>) to obtain the response body that contains a JSON
+representation of the service rate limit information. The rate limit
+information is parsed out of the JSON and presented to the user.
 
 The default output (whitespace delimited columns of plain text) is suitable
 for a user working interactively in a shell and for use in a Unix shell

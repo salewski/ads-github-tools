@@ -38,7 +38,22 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (none)
+*** issue 25: ads-github-show-rate-limits(1) indicates data is parsed from HTTP headers, but it is really parsed from the JSON in the HTTP body response of the .../rate_limit endpoint
+
+    https://github.com/salewski/ads-github-tools/issues/25
+
+    The ads-github-show-rate-limits(1) man page previously mis-documented the
+    underlying mechanism used by the tool to obtain the user's GitHub API rate
+    limits information. It was documented to obtain that information from the
+    HTTP response headers rather than the JSON response body from the
+    '/rate_limit' service endpoint.
+
+    While per-endpoint calls do allow for the possibility of extracting GitHub
+    service limit information out of the HTTP response headers (e.g., see the
+    [[https://developer.github.com/v3/#rate-limiting]["Rate Limiting"]] section of the GitHub API documentation), the
+    'ads-github-tools-show-rate-limits' program is actually making a call to
+    the GitHub [[https://developer.github.com/v3/rate_limit/][/rate_limit]] API endpoint and extracting the data that it
+    displays out of the JSON returned in the HTTP response body.
 
 
 * ads-github-tools 0.2.0 (2017-02-26)
