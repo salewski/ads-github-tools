@@ -26,8 +26,12 @@
 # for a user working interactively in a shell and for use in a Unix shell
 # pipeline.
 #
+# The --output-format=WORD option can be used to request output in different
+# formats. At the time of writing (2017-03-12), only two formats are
+# supported: 'text' and 'json'.
+#
 # FIXME: A future version will provide options to allow the user to request
-#        output in some specific formats (edn, json).
+#        output in additional specific formats (edn, transit).
 #
 # All requests are made over HTTPS.
 #
@@ -72,8 +76,8 @@
 # TODO
 # ====
 #
-#     * Provide an option to allow user to request output in different formats
-#       (edn, json, ...)
+#     * Add additional output formats (edn, transit, others?) controlled by
+#       the -O (--output-format=WORD) option.
 #
 # See Also:
 # =========
@@ -120,6 +124,16 @@ HUMAN_READABLE_DATE_MODE=false              # set implicitly when either the '-h
 
 # Note that setting UTC_DATE_MODE implicitly sets HUMAN_READABLE_DATE_MODE, too.
 UTC_DATE_MODE=false  # override with '-u' (--utc or --universal) opt
+
+
+# Keys are internal values used by the program; values are allowed names for user-specified formats.
+declare -A LEGIT_OUTPUT_FORMAT_SYM_TO_NAME=()
+LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['JSON']='json'  # see also: https://github.com/salewski/ads-github-tools/issues/8
+LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['TEXT']='text'  # the default
+
+DFLT_OUTPUT_FORMAT=${LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['TEXT']}
+
+OUTPUT_FORMAT=    # set with '-O' (--output-format=WORD)
 
 
 declare -r gl_const_re_all_digits='^[[:digit:]]{1,}$'
@@ -224,19 +238,24 @@ f_print_help () {
 usage: $PROG [OPTION...]
 Requests user's rate limit information from GitHub and displays it on stdout
 
-      --help              Print this help message on stdout
-  -V, --version           Print the version of the program on stdout
+Mandatory arguments to long options are mandatory for short options, too.
 
-  -h, --human-readable    Print numbers and dates in human readable format (e.g., "4,835")
-                            Dates will be in local time unless '-u' is also specified
+      --help                Print this help message on stdout
+  -V, --version             Print the version of the program on stdout
 
-  -u, --utc, --universal  Print dates in human-readable Coordinated Universal Time (UTC)
-                            Overrides "local time" conversion when specified with '-h'
+  -h, --human-readable      Print numbers and dates in human readable format (e.g., "4,835")
+                              Dates will be in local time unless '-u' is also specified
 
-  -v, --verbose           Print program progress messages on stderr. Specify multiple
-                            times to increase verbosity: info, debug, and tracing (set -x)
+  -O, --output-format=WORD  Emit output in the format specified by WORD [default: text]
+                              Valid values for WORD include: 'text' and 'json'
 
-      --                  Signals the end of options and disables further options processing.
+  -u, --utc, --universal    Print dates in human-readable Coordinated Universal Time (UTC)
+                              Overrides "local time" conversion when specified with '-h'
+
+  -v, --verbose             Print program progress messages on stderr. Specify multiple
+                              times to increase verbosity: info, debug, and tracing (set -x)
+
+      --                    Signals the end of options and disables further options processing.
 
 Report bugs to $MAINTAINER.
 EOF
@@ -296,6 +315,62 @@ f_maybe_increase_verbosity () {
     fi
 }
 
+
+# Checks if FORMAT_NAME is one of the legitimate names for an output format
+# (all legit format names are present as values in our $LEGIT_OUTPUT_FORMAT_SYM_TO_NAME
+# associative array).
+#
+# If the provided FORMAT_NAME is legit, then $OUTPUT_FORMAT will be set to its
+# corresponding internal name (the corresponding key in $LEGIT_OUTPUT_FORMAT_SYM_TO_NAME).
+#
+# Otherwise a message is printed on stderr and the program exits with an error status.
+#
+# @param CLI_OPT_NAME - (required) The name of the command line option to which FORMAT_NAME was provided as an argument
+#
+# @param FORMAT_NAME  - (required) A a user-provided format name value.
+#
+f_set_output_format_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __cli_opt_name=$1
+    local -r __format_name_to_check=$2
+
+    # We will use this to display a comma-separated list of the legit options
+    # in the event that we need to emit an error message.
+    #
+    local __t_flattened_format_opt_names=''
+
+    for __t_key_name in "${!LEGIT_OUTPUT_FORMAT_SYM_TO_NAME[@]}"; do
+
+        __t_legit_format_name="${LEGIT_OUTPUT_FORMAT_SYM_TO_NAME["${__t_key_name}"]}"
+
+        if test "${__t_legit_format_name}" = "${__format_name_to_check}"; then
+            OUTPUT_FORMAT=${__t_key_name}
+            return 0  # success
+        fi
+
+        if test -n "${__t_flattened_format_opt_names}"; then
+            __t_flattened_format_opt_names="${__t_flattened_format_opt_names}"', '  # append comma-space
+        fi
+        __t_flattened_format_opt_names="${__t_flattened_format_opt_names}${__t_legit_format_name}"
+    done
+
+    printf "${PROG} (error): invalid format name \"%s\" provided for '%s' option; valid values include: [%s]; bailing out\n" \
+           "${__format_name_to_check}" \
+           "${__cli_opt_name}"         \
+           "${__t_flattened_format_opt_names}" 1>&2
+
+    # This is the "...or die" part...
+    exit 1
+}
+
+
 pos_last_plus_one=$(( $# + 1 ))
 
 # Each value is one or zero, which indicates whether or not the option is
@@ -304,6 +379,8 @@ pos_last_plus_one=$(( $# + 1 ))
 declare -A longopt_spec=(
     ['help']=0       # (no short-form equivalent)
     ['version']=0    # -V
+
+    ['output-format']=1  # -O
 
     # These are two flavors for the same long-form option (modelled after the opts for GNU date(1))
     ['utc']=0        # -u
@@ -334,9 +411,11 @@ if test $# -gt 0; then
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
-    while getopts ':-:huVv' opt
+    while getopts ':-:hO:uVv' opt
     do
         : $PROG \(trace: $LINENO\): opt is: $opt
+        : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+        : $PROG \(trace: $LINENO\): OPTIND is: $OPTIND
 
         if test "${opt}" = '-'; then
 
@@ -467,6 +546,10 @@ if test $# -gt 0; then
             fi
         fi
 
+        : $PROG \(trace: $LINENO\): opt is: $opt
+        : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+        : $PROG \(trace: $LINENO\): OPTIND is: $OPTIND
+
         # Normal getopts style processing happens beneath here, with the slight
         # twist that 'opt' may contain a long-form option name.
 
@@ -506,6 +589,15 @@ if test $# -gt 0; then
                 HUMAN_READABLE_LIMIT_COUNT_MODE=true
                 HUMAN_READABLE_REMAINING_COUNT_MODE=true
                 HUMAN_READABLE_DATE_MODE=true
+                ;;
+
+
+            'O' | 'output-format' )
+                t_local_opt_string='-'"${opt}"  # correct for single-letter option name
+                if test "${#opt}" -gt 1; then
+                    t_local_opt_string='-'"${t_local_opt_string}"  # correct for long-form option name
+                fi
+                f_set_output_format_or_die "${t_local_opt_string}" "${OPTARG}"
                 ;;
 
 
@@ -552,6 +644,11 @@ if test $# -gt 0; then
     printf "${PROG} (error): unrecognized command line parameters: \"%s\"; bailing out\n" "$*" 1>&2
     f_print_help 1>&2
     exit 1
+fi
+
+
+if test -z "${OUTPUT_FORMAT}"; then
+    OUTPUT_FORMAT=$DFLT_OUTPUT_FORMAT
 fi
 
 
@@ -671,6 +768,13 @@ if test $? -ne 0; then
     printf "${PROG} (error): was unable to obtain GitHub rate limit; bailing out\n" 1>&2
     exit 1
 fi
+
+
+if test "${OUTPUT_FORMAT}" = 'JSON'; then
+    echo "${t_gh_json_service_response}"
+    exit $?  # We're done
+fi
+
 
 # The json structure we're parsing looks like this:
 #
@@ -916,14 +1020,18 @@ information from GitHub and displays it on stdout.
 The program makes an authenticated HTTPS 'GET' request to the GitHub API
 (using L<curl(1)>) to obtain the response body that contains a JSON
 representation of the service rate limit information. The rate limit
-information is parsed out of the JSON and presented to the user.
+information is parsed out of the JSON and presented to the user in textual
+columns. See below for ways to change the output format.
 
 The default output (whitespace delimited columns of plain text) is suitable
 for a user working interactively in a shell and for use in a Unix shell
 pipeline.
 
+The L<-O|/"-O, --output-format=WORD"> (C<--output-format=WORD>) option can be
+used to request JSON output, instead.
+
 A future version will provide options to allow the user to request output in
-some specific formats (edn, json).
+some other specific formats (edn, transit).
 
 All requests are made over HTTPS.
 
@@ -980,6 +1088,80 @@ time to the second in RFC 3339 format.
 
 To have dates presented in human readable UTC form, see the C<-u> (C<--utc> or
 C<--universal>) option.
+
+
+=item -O, --output-format=WORD
+
+Allows the user to request output in a format other than the default
+whitespace-separated text columns, according to WORD.
+
+Valid values for WORD include:
+
+=over 4
+
+=item * text  (this is the default)
+
+=item * json
+
+=back
+
+Note that the JSON output is the raw JSON output emitted by the GitHub API's
+C</rate_limit> endpoint, and contains a legacy "rate" object that is
+suppressed in the default C<text> output:
+
+    $ ads-github-show-rate-limits --output-format=json | jq '.'
+    {
+      "resources": {
+        "core": {
+          "limit": 5000,
+          "remaining": 5000,
+          "reset": 1489366021
+        },
+        "search": {
+          "limit": 30,
+          "remaining": 30,
+          "reset": 1489362481
+        },
+        "graphql": {
+          "limit": 200,
+          "remaining": 200,
+          "reset": 1489366021
+        }
+      },
+      "rate": {
+        "limit": 5000,
+        "remaining": 5000,
+        "reset": 1489366021
+      }
+    }
+
+The rationale is that somebody requesting the JSON output is likely familiar
+with the GitHub API, and there is little point in creating a
+close-but-different variation of it in this program. Unless a good reason is
+found to depart from it, any other tree-like output formats introduced in the
+future will follow this same principle.
+
+For more info on the "rate" JSON object being legacy, see the
+L<"deprecation notice"|https://developer.github.com/v3/rate_limit/> in the
+GitHub API C<"/rate_limit"> documentation, from which we quote:
+
+=over 4
+
+The "rate" object...is deprecated and is scheduled for removal in the next
+version of the API.
+
+If you're writing new API client code (or updating your existing code), you
+should use the "core" object instead of the "rate" object. The "core" object
+contains the same information that is present in the "rate" object.
+
+=back
+
+If more than one C<-O> (C<--output-format=WORD>) option is specified on the
+command line, the one specified last wins.
+
+B<Historical note:> The C<-O> (C<--output-format=WORD>) option was introduced
+in the version of C<ads-github-show-rate-limits> distributed with
+C<ads-github-tools> version 0.3.0. See also L<"issue 8"|https://github.com/salewski/ads-github-tools/issues/8>
 
 
 =item -u, --utc, --universal
@@ -1125,6 +1307,32 @@ L<https://en.wikipedia.org/wiki/Unix_time>
 The C<-u> (C<--utc> and C<--universal>) option in
 C<ads-github-show-rate-limits> is named after the identically named options of
 the GNU C<date(1)> program.
+
+
+=item * L<jq(1)>
+
+The C<jq> program is referenced in examples above. It is a command line tool
+for transforming JSON in various ways. On Debian (and Debian-derived) systems,
+it is available in the C<jq> package. The upstream website for the tool is here:
+
+=over 4
+
+=item *
+
+L<https://stedolan.github.io/jq/>
+
+=back
+
+and the source of the tool is available on GitHub here:
+
+=over 4
+
+=item *
+
+L<https://github.com/stedolan/jq>
+
+=back
+
 
 =back
 

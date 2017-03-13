@@ -51,6 +51,72 @@ which they were fixed will be noted here, as well.
     See ads-github-show-rate-limits(1) for details.
 
 
+*** issue 8: ads-github-show-rate-limits: allow user to request json output
+
+    https://github.com/salewski/ads-github-tools/issues/8
+
+    The 'ads-github-show-rate-limits' program has a new '-O' (--output-format=WORD)
+    option that allows the user to request different output formats. Currently
+    the only two output formats accepted are 'text' (the default) and
+    'json'.
+
+    The default output of the program has not changed. It is still
+    whitespace-separated columns of text. Specifying the new
+    '--output-format=text' option is just an explicit way of requesting the
+    default behavior.
+
+    See ads-github-show-rate-limits(1) for full details.
+
+    Some examples:
+
+    + Example 1a: Default output
+
+      :    $ ads-github-show-rate-limits
+      :       core  5000  5000  1489368062
+      :    graphql   200   200  1489368062
+      :     search    30    30  1489364522
+
+    + Example 1b: Same thing, only explicitly using the new '--output-format=text' option:
+
+      :    $ ads-github-show-rate-limits --output-format text
+      :       core  5000  5000  1489368062
+      :    graphql   200   200  1489368062
+      :     search    30    30  1489364522
+
+    + Example 2a: Requesting JSON ouput:
+
+      :    $ ads-github-show-rate-limits --output-format json
+      :    {"resources":{"core":{"limit":5000,"remaining":5000,"reset":1489368065},"search":{"limit":30,"remaining":30,"reset":1489364525},"graphql":{"limit":200,"remaining":200,"reset":1489368065}},"rate":{"limit":5000,"remaining":5000,"reset":1489368065}}
+
+    + Example 2b: Requesting JSON ouput, and then using jq(1) to pretty-print it:
+
+      :    $ ads-github-show-rate-limits --output-format json | jq '.'
+      :    {
+      :      "resources": {
+      :        "core": {
+      :          "limit": 5000,
+      :          "remaining": 5000,
+      :          "reset": 1489368082
+      :        },
+      :        "search": {
+      :          "limit": 30,
+      :          "remaining": 30,
+      :          "reset": 1489364542
+      :        },
+      :        "graphql": {
+      :          "limit": 200,
+      :          "remaining": 200,
+      :          "reset": 1489368082
+      :        }
+      :      },
+      :      "rate": {
+      :        "limit": 5000,
+      :        "remaining": 5000,
+      :        "reset": 1489368082
+      :      }
+      :    }
+
+
 *** issue 25: ads-github-show-rate-limits(1) indicates data is parsed from HTTP headers, but it is really parsed from the JSON in the HTTP body response of the .../rate_limit endpoint
 
     https://github.com/salewski/ads-github-tools/issues/25
