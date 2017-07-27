@@ -60,11 +60,13 @@
 # TODO
 # ====
 #
-#     * Provide an option to have non-existing working directories created by
-#       cloning my fork repo in GitHub and then setting up the 'upstream'
-#       remote to the parent of the fork (the repository from which I created
-#       the fork originally). The 'git-hub clone' command does this as it's
-#       default behavior.
+#     When this program was initially introduced, the author scribbled notes
+#     in this comments section to remind himself about bugs to be fixed and
+#     potential new features that might be useful. Both are now tracked in the
+#     project's GitHub "issues" page here:
+#
+#         https://github.com/salewski/ads-github-tools/issues
+#
 #
 # See Also:
 # =========
