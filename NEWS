@@ -135,6 +135,30 @@ which they were fixed will be noted here, as well.
     displays out of the JSON returned in the HTTP response body.
 
 
+*** issue 28: ads-github-fetch-all-upstreams: unset GREP_OPTIONS to make grep(1) behavior predictable
+
+    https://github.com/salewski/ads-github-tools/issues/28
+
+    The 'ads-github-fetch-all-upstreams' program now unconditionally unsets
+    the GREP_OPTIONS environment variable.
+
+    This only has an effect if the grep program in use is GNU grep; other grep
+    implementations did not recognize or alter their behavior based on the
+    'GREP_OPTIONS' variable. GNU grep prior to version 2.11 (~2014-11) would
+    append values from this variable to the command line, which would make
+    behavior of our invocations in the current program unpredictable. Versions
+    of GNU grep 2.11 or newer no longer behave that way, but do emit a warning
+    on stderr about the change in behavior.
+
+    Unsetting GREP_OPTIONS here has the effect of making our grep invocations
+    predictable (when older versions of GNU grep are in use) and also of
+    suppressing the spurious warning:
+
+        grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+
+    when newer versions of GNU grep are in use.
+
+
 * ads-github-tools 0.2.0 (2017-02-26)
 
 ** fixes
