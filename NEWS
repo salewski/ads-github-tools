@@ -159,6 +159,15 @@ which they were fixed will be noted here, as well.
     when newer versions of GNU grep are in use.
 
 
+*** issue 29: ads-github-merge-all-upstreams: unset GREP_OPTIONS to make grep(1) behavior predictable
+
+    https://github.com/salewski/ads-github-tools/issues/29
+
+    Application of the same improvement as described above for
+    ads-github-merge-all-upstreams, only here for the
+    ads-github-merge-all-upstreams tool.
+
+
 * ads-github-tools 0.2.0 (2017-02-26)
 
 ** fixes

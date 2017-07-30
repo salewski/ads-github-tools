@@ -160,6 +160,30 @@ BE_VERBOSE=false # info-level output; override with one '-v' opt
 # This one implies BE_VERBOSE, too
 DEBUGGING=false  # debug-level output; override with two '-v' opts
 
+
+# GitHub issue #29: Unset GREP_OPTIONS to make grep(1) behavior predictable.
+#
+# This only has an effect if the grep program in use is GNU grep; other grep
+# implementations did not recognize or alter their behavior based on the
+# 'GREP_OPTIONS' variable. GNU grep prior to version 2.11 (~2014-11) would
+# append values from this variable to the command line, which would make
+# behavior of our invocations in the current program unpredictable. Versions
+# of GNU grep 2.11 or newer no longer behave that way, but do emit a warning
+# on stderr about the change in behavior.
+#
+# Unsetting GREP_OPTIONS here has the effect of making our grep invocations
+# predictable (when older versions of GNU grep are in use) and also of
+# suppressing the spurious warning:
+#
+#     grep: warning: GREP_OPTIONS is deprecated; please use an alias or script
+#
+# when newer versions of GNU grep are in use.
+#
+# See: https://github.com/salewski/ads-github-tools/issues/29
+#
+unset GREP_OPTIONS
+
+
 # By default the 'upstream/<DEFAULT_BRANCH_NAME>' will be merged in, but not
 # pushed back up to GitHub. The '--push' option causes the newly merged
 # default branch content to be pushed back up to GitHub
