@@ -1205,7 +1205,31 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             declare t_v_opts=()
             if $BE_VERBOSE; then t_v_opts+=( '--verbose' ); fi
             if $DEBUGGING;  then t_v_opts+=( '--verbose' ); fi
-            "${GIT_PROG}" hub "${t_v_opts[@]}" clone "${repo_name}"
+
+            declare t_v_clone_opts=()
+
+            # GitHub issue #38: ads-github-fetch-all-upstreams: chokes attempting to clone non-fork repos
+            #
+            # When cloning a repo, the default behavior of git-hub(1) is to
+            # create a triangular workflow configuration, which is usually
+            # what you want when there is and upstream repo from which your
+            # origin repo was forked. However, if the repo is not a GitHub
+            # fork of some other GitHub repo, then we need to tell git-hub(1)
+            # to not try to create a triangular workflow config; attempting to
+            # do so will result in the error:
+            #
+            #     Warning: Repository username/some-repo is not a fork, just cloning, upstream will not be set
+            #     usage: git-hub [-h] [--version] [-v] [-s] {clone,issue,pull,setup} ...
+            #     git-hub: error: Can't use triangular workflow without an upstream repo
+            #     ads-github-fetch-all-upstreams (error): was error while attempting to clone repo "some-repo" from GitHub; bailing out
+            #
+            # See: https://github.com/salewski/ads-github-tools/issues/38
+            #
+            if $is_fork; then :; else
+                t_v_clone_opts+=( '--no-triangular' );
+            fi
+
+            "${GIT_PROG}" hub "${t_v_opts[@]}" clone "${t_v_clone_opts[@]}" "${repo_name}"
 
             if test $? -ne 0; then
                 printf "${PROG} (error): was error while attempting to clone repo \"%s\" from GitHub; bailing out\n" "${repo_name}" 1>&2
@@ -1217,6 +1241,9 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                 printf "${PROG} (error): just cloned repo \"%s\", but subdir with that name is not present; bailing out\n" "${repo_name}" 1>&2
                 exit 1
             fi
+
+            unset t_v_clone_opts
+            unset t_v_opts
         else
             if $DEBUGGING; then
                 printf "${PROG} (debug): no subdirectory named after repo \"%s\"; skipping (okay)\n" "${repo_name}" 1>&2

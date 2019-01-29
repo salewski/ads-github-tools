@@ -36,6 +36,32 @@ which they were fixed will be noted here, as well.
     fat-fingers one or more repo names on the command line.
 
 
+*** issue 38: ads-github-fetch-all-upstreams: chokes attempting to clone non-fork repos
+
+    https://github.com/salewski/ads-github-tools/issues/38
+
+    This issue was due to our use of the underlying git-hub(1) used when
+    cloning non-fork GitHub repos.
+
+    When cloning a repo, the default behavior of git-hub(1) is to create a
+    triangular workflow configuration, which is usually what you want when
+    there is and upstream repo from which your origin repo was
+    forked. However, if the repo is not a GitHub fork of some other GitHub
+    repo, then we need to tell git-hub(1) to not try to create a triangular
+    workflow config; attempting to do so will result in the error:
+
+    #+BEGIN_SRC sh
+        Warning: Repository username/some-repo is not a fork, just cloning, upstream will not be set
+        usage: git-hub [-h] [--version] [-v] [-s] {clone,issue,pull,setup} ...
+        git-hub: error: Can't use triangular workflow without an upstream repo
+        ads-github-fetch-all-upstreams (error): was error while attempting to clone repo "some-repo" from GitHub; bailing out
+    #+END_SRC
+
+    The 'ads-github-fetch-all-upstreams' program is now careful to provide the
+    '--no-triangular' option to git-hub's 'clone' sub-command when cloning a
+    non-fork repo.
+
+
 ** improvements
 
 *** issue 6: ads-github-show-rate-limits: allow user to request utc date output
