@@ -177,6 +177,18 @@
      provides metadata about the project, overview of the tools, etc.
 
 
+*** I don't love the cofiguration leakage
+
+    While initially hacking together some useful tools, some of which have
+    since been integrated into the 'ads-github-tools' project, it was useful
+    to build on top of other existing tools. However, since we are interacting
+    with the remote GitHub service, some of those other tools had different
+    means of configuring their authentication mechanisms and the
+    'ads-github-tools' inherited those mechanisms. Now that the tools have
+    matured a bit, we might want to consider how we might want to avoid
+    leaking those configuration details.
+
+
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
   :LOGBOOK:
   - CREATED [2016-05-15 Sun 12:13]
