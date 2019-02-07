@@ -188,6 +188,11 @@
     matured a bit, we might want to consider how we might want to avoid
     leaking those configuration details.
 
+    Some of those mechanisms include:
+
+    + .netrc  (for curl)
+    + git-hub
+
 
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
   :LOGBOOK:
