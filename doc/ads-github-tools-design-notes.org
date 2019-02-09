@@ -195,6 +195,8 @@
 
     For the format of the '.netrc' file, see =netrc(5)=.
 
+    For configuring the 'git-hub' tool, see the "CONFIGURATION" section in =git-hub(1)=.
+
 
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
   :LOGBOOK:
