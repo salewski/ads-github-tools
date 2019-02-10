@@ -197,6 +197,18 @@
 
     For configuring the 'git-hub' tool, see the "CONFIGURATION" section in =git-hub(1)=.
 
+    Note that cloning your forks via the 'git-hub' tool requires (at least)
+    three forms of authentication be configured:
+
+    1. Your .netrc config is required by the curl invocations that obtain the
+       list of your repos (forks and non-forks). This is true even when a
+       given repo is named on the command line of the ads-github-fetch-all-upstreams
+
+       command, as it (among other things) verifies that the name specified
+       matches a
+
+    2. 
+
 
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
   :LOGBOOK:
