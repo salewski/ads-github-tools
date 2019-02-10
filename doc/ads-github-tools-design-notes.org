@@ -206,7 +206,9 @@
        command, as it (among other things) verifies that the name specified
        matches the name of a repo associated with your GitHub account.
 
-    2. 
+    2. Your 'git-hub' configuration (in your ~/.gitconfig file). In the
+       '[hub]' section, you should have values set for the config keys
+       'username', 'oauthtoken', and 'baseurl'.
 
 
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
