@@ -231,8 +231,25 @@
 
     3. A valid OpenSSH public key must be registered in your GitHub account,
        which must match the key used to perform the 'git clone'
-       action. Setting this up requires that you paste the text of the public
-       key into a text box of the GitHub web UI, on the page:
+       action.
+
+       Failure to have this configuration item set will result in the
+       following error at runtime:
+
+       #+BEGIN_SRC bash
+           Warning: Repository salewski/foo-repo is not a fork, just cloning, upstream will not be set
+           Cloning git@github.com:salewski/foo-repo.git to foo-repo
+           Error: git clone --quiet -- git@github.com:salewski/foo-repo.git foo-repo failed (return code: 128)
+           Permission denied (publickey).
+           fatal: Could not read from remote repository.
+
+           Please make sure you have the correct access rights
+           and the repository exists.
+           ads-github-fetch-all-upstreams (error): was error while attempting to clone repo "foo-repo" from GitHub; bailing out
+       #+END_SRC
+
+       Setting this up requires that you paste the text of the public key into
+       a text box of the GitHub web UI, on the page:
 
        :    Settings -> SSH and GPG keys
 
