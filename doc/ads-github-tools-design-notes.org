@@ -229,7 +229,14 @@
        :    Settings -> Developer settings -> Personal access tokens
 
 
-    3.
+    3. A valid OpenSSH public key must be registered in your GitHub account,
+       which must match the key used to perform the 'git clone'
+       action. Setting this up requires that you paste the text of the public
+       key into a text box of the GitHub web UI, on the page:
+
+       :    Settings -> SSH and GPG keys
+
+       (after clicking on the button labeled "New SSH Key")
 
 
 * TODO [#4] =ads-github-fetch-all-upstreams= maybe allow fetching of non-github-repo 'upstream' remotes, as well
