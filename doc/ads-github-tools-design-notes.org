@@ -212,7 +212,7 @@
 
     2. Your 'git-hub' configuration (in your ~/.gitconfig file). In the
        '[hub]' section, you should have values set for the config keys
-       'username', 'oauthtoken', and 'baseurl'.
+       =username=, =oauthtoken=, and =baseurl=.
 
        Failure to have this configuration item set (or set properly) will
        result in the following error at runtime:
@@ -221,6 +221,12 @@
        Error: Can't find 'hub.oauthtoken' config key in git config. Read the man page for details.
        ads-github-fetch-all-upstreams (error): was error while attempting to clone repo "foo-repo" from GitHub; bailing out
        #+END_SRC
+
+       Note that the value of the =oauthtoken= matches the value of a
+       "personal access token", which can be created in the GitHub website
+       (when logged into your account) on the page:
+
+       :    Settings -> Developer settings -> Personal access tokens
 
 
     3.
