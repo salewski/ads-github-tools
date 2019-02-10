@@ -203,9 +203,8 @@
     1. Your .netrc config is required by the curl invocations that obtain the
        list of your repos (forks and non-forks). This is true even when a
        given repo is named on the command line of the ads-github-fetch-all-upstreams
-
        command, as it (among other things) verifies that the name specified
-       matches a
+       matches the name of a repo associated with your GitHub account.
 
     2. 
 
