@@ -230,8 +230,9 @@
 
 
     3. A valid OpenSSH public key must be registered in your GitHub account,
-       which must match the key used to perform the 'git clone'
-       action.
+       which must match the key used to perform the 'git clone' action (which,
+       depending on your local ssh setup, may require that a specific key be
+       used for communication with the GitHub site).
 
        Failure to have this configuration item set will result in the
        following error at runtime:
