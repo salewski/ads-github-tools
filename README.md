@@ -199,7 +199,7 @@ Other users can obtain source release tarballs from that project's releases page
 or you can build from that project's latest sources from its GitHub project
 page:
 
-   * https://github.com/sociomantic-tsunami/git-hub/releases
+   * https://github.com/sociomantic-tsunami/git-hub
 
 
 # Future directions
