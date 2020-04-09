@@ -194,6 +194,13 @@ which they were fixed will be noted here, as well.
     ads-github-merge-all-upstreams tool.
 
 
+*** issue 41: eyesore avoidance: say "sync" rather than "synch" everywhere
+
+    https://github.com/salewski/ads-github-tools/issues/41
+
+    This was a cosmetic issue with the documentation.
+
+
 * ads-github-tools 0.2.0 (2017-02-26)
 
 ** fixes

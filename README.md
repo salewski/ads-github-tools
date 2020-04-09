@@ -12,10 +12,10 @@ large number of GitHub repositories, motivated by the following two related
 use cases:
 
     1. When you work on multiple computers, keeping your local clones of the
-       repos in synch can be a chore.
+       repos in sync can be a chore.
        
     2. Similarly, when you have a large number of GitHub repos that are mostly
-       forks of other repos, keeping your forks in synch with the upstream
+       forks of other repos, keeping your forks in sync with the upstream
        changes can be a chore.
 
 Enter the `ads-github-tools`.
