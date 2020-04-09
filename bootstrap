@@ -37,8 +37,8 @@
 
 declare -r PROG='bootstrap'
 
-declare -r OUR_SUPPORTED_AUTOMAKE_VERSION='1.14'
-declare -r OUR_SUPPORTED_AUTOCONF_VERSION='2.64'
+declare -r OUR_SUPPORTED_AUTOMAKE_VERSION='1.16'
+declare -r OUR_SUPPORTED_AUTOCONF_VERSION='2.69'
 
 _run_on_dir="$(readlink -f "$(dirname "${0}")")"
 if test $? -ne 0; then

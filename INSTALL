@@ -2,7 +2,7 @@ Installation Instructions
 *************************
 
 Copyright (C) 1994-1996, 1999-2002, 2004-2012 Free Software Foundation, Inc.
-Copyright (C) 2016 Alan D. Salewski
+Copyright (C) 2016, 2020 Alan D. Salewski
 
    Copying and distribution of this file, with or without modification,
 are permitted in any medium without royalty provided the copyright
@@ -16,7 +16,7 @@ Basic Installation
 project. The generic configuration and installation instructions follow
 immediately; these should already be familar to people who are familiar with
 using the GNU autotools ('./configure' and friends...). There are currently
-(as of 2016-05-28) no non-standard configuration options specific to the
+(as of 2020-04-09) no non-standard configuration options specific to the
 ads-github-tools project.
 
    Briefly, the shell commands './configure; make; make install' should

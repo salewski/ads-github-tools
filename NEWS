@@ -201,6 +201,18 @@ which they were fixed will be noted here, as well.
     This was a cosmetic issue with the documentation.
 
 
+*** issue 45: migrate build to use automake-1.16
+
+    https://github.com/salewski/ads-github-tools/issues/45
+
+    The project is now developed using GNU Automake 1.16 (rather than version
+    1.14).
+
+    The currently used version of GNU Autoconf (2.69) has not changed, but a
+    crufty reference to an older version in our 'bootstrap' script has been
+    cleaned up.
+
+
 * ads-github-tools 0.2.0 (2017-02-26)
 
 ** fixes
