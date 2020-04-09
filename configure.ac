@@ -18,7 +18,7 @@ dnl     [AC_]PACKAGE_BUGREPORT
 dnl     [AC_]PACKAGE_URL
 dnl
 AC_INIT([[ADS GitHub Tools]],
-        [[0.3.0]],
+        [[0.3.1-snapshot]],
         [[Alan D. Salewski <salewski@att.net>]],
         [[ads-github-tools]],
         [[https://github.com/salewski/ads-github-tools]])
