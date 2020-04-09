@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.2.0` (released 2017-02-26), and can
+The latest version of the project is `0.3.0` (released 2020-04-09), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.2.0.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
@@ -67,7 +67,7 @@ repos (assuming only a minority of them are "missing", which is the common
 case). Note that the `'-m'` (`--missing-only`) option was introduced in the
 version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
 
-At the moment (2020-04-07) there are five tools:
+At the moment (2020-04-09) there are five tools:
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
