@@ -1,0 +1,209 @@
+#!/bin/bash -
+#
+# gh-remote-fixname-fork-to-origin: Rename the 'fork' remote to 'origin', etc.
+#
+# In a git working directory of a GitHub forked repo that was cloned by
+# 'ads-github-fetch-all-upstreams' (the version 0.3.0 behavior is described
+# here), the 'git hub ...' command was used (behind the scenes) to clone the
+# repo; that tool (since version 1.0) names the git remote for the origin repo
+# "fork" and the git remote for the upstream repo "upstream". This program
+# detects that scenario, and renames the "fork" remote to "origin". It
+# attempts to also tidy up other remnants of the original "fork" name in the
+# local .git/config file.
+#
+# This is a prototype script for behavior that I'd like to get into the
+# 'ads-github-tools' project.
+#
+# This script is idempotent; it is safe to run it repeatedly in a working
+# directory even if earlier invocations had partial failures. The program
+# sanity checks the "as is" current configuration prior to attempting to
+# change it to the target state. If the "as is" state does not match the
+# initial state, then the program will exit with an error message; it will not
+# attempt to modify anything from an unknown initial state.
+#
+# Examples:
+# =========
+#
+# Example 1: Simple use from within a repo working directory
+#
+#     $ gh-remote-fixname-fork-to-origin
+#     gh-remote-fixname-fork-to-origin (info): no remote named 'origin' found (okay)
+#     gh-remote-fixname-fork-to-origin (info): renaming remote 'fork' => 'origin'
+#     gh-remote-fixname-fork-to-origin (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'
+#
+#
+# Example 2: Fix-up several repo working dirs from a parent dir
+#
+#     $ for rname in my-repo1 my-repo2 my-repo3; do ( unset CDPATH; cd "$rname" && echo && echo working on: $rname && gh-remote-fixname-fork-to-origin ) || break; done
+#
+#     working on: my-repo1
+#     gh-remote-fixname-fork-to-origin (info): no remote named 'origin' found (okay)
+#     gh-remote-fixname-fork-to-origin (info): renaming remote 'fork' => 'origin'
+#     gh-remote-fixname-fork-to-origin (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'
+#
+#     working on: my-repo3
+#     gh-remote-fixname-fork-to-origin (info): no remote named 'origin' found (okay)
+#     gh-remote-fixname-fork-to-origin (info): renaming remote 'fork' => 'origin'
+#     gh-remote-fixname-fork-to-origin (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'
+#
+#     working on: my-repo3
+#     gh-remote-fixname-fork-to-origin (info): no remote named 'origin' found (okay)
+#     gh-remote-fixname-fork-to-origin (info): renaming remote 'fork' => 'origin'
+#     gh-remote-fixname-fork-to-origin (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'
+#
+
+set -o pipefail
+
+declare -r PROG='gh-remote-fixname-fork-to-origin'
+
+BE_VERBOSE=true
+# BE_VERBOSE=false
+
+# XXX: This is just a hair better than assuming we are already in a known git
+#      repo. Replace with a more robust mechanism when implemented "for real".
+git config --local --list > /dev/null 2>&1
+if test $? -ne 0; then
+    printf "${PROG} (error): This program must be run from within a git working directory; bailing out\n" 1>&2
+    exit 1
+fi
+
+# After cloning my personal fork of the 'mermaid' repo via the command:
+#
+#     $ ads-github-fetch-all-upstreams -vcu 'mermaid'
+#
+# the git remotes that were setup look like this:
+#
+#     $ git remote -v
+#     fork    git@github.com:salewski/mermaid.git (fetch)
+#     fork    git@github.com:salewski/mermaid.git (push)
+#     upstream        git@github.com:mermaid-js/mermaid.git (fetch)
+#     upstream        git@github.com:mermaid-js/mermaid.git (push)
+#
+# The full list of local git config keys (those in the local, repo-specific
+# .git/config file) that reference the "fork" remote are:
+#
+#     $ git config --local --list | grep '[f]ork' | sort
+#     hub.forkremote=fork
+#     remote.fork.fetch=+refs/heads/*:refs/remotes/fork/*
+#     remote.fork.url=git@github.com:salewski/mermaid.git
+#     remote.pushdefault=fork
+#
+#     $ git remote
+#     fork
+#     upstream
+#
+# XXX: The git-remote(1) command is considered porcelain (according to
+#      git(1)), but so is git-config(1) (both are considered to be "Ancillary
+#      Commands"). So technically, relying on the output of 'git-remote' here
+#      is volatile; research a how to do this without porcelain (including
+#      without parsing the output of git-config(1)).
+t_have_remote_origin=false
+t_have_remote_fork=false
+declare -a t_pstats=()
+
+# We'll check for both remote names "origin" and "fork". We expect that our
+# common case will be that there WILL be an existing remote named "fork" and
+# there WILL NOT be an existing remote named "origin", but we need to deal
+# with all scenarios. In particular, we would not want to attempt to rename
+# "fork" to "origin" if a remote named "origin" already exists.
+#
+for t_rname in 'origin' 'fork'; do
+
+    t_pstats=()  # reset
+
+    case $t_rname in
+        'origin')
+            git remote | grep --quiet '[o]rigin'
+            ;;
+        'fork')
+            git remote | grep --quiet '[f]ork'
+            ;;
+    esac
+    t_pstats=( ${PIPESTATUS[@]} )
+
+    if test ${t_pstats[0]} -eq 0 \
+    && test ${t_pstats[1]} -eq 0; then
+
+        case $t_rname in
+            'origin')
+                t_have_remote_origin=true
+                ;;
+            'fork')
+                t_have_remote_fork=true
+                ;;
+        esac
+    else
+        if test ${t_pstats[0]} -ne 0; then
+            printf "${PROG} (error): 'git remote' command exited with a non-zero status; bailing out\n" 1>&2
+            exit 1
+        fi
+
+        if test ${t_pstats[1]} -eq 1; then
+            # grep(1) indicates that pattern was not found
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): no remote named '%s' found (okay)\n" "${t_rname}" 1>&2
+                # keep going...
+            fi
+        else
+            # Hopefully a more useful error message was emitted by grep on
+            # stderr indicating what the problem is...
+            printf "${PROG} (error): was unable to grep for '%s' remote; bailing out\n" "${t_rname}" 1>&2
+            exit 1
+        fi
+    fi
+done
+
+if $t_have_remote_fork \
+&& $t_have_remote_origin; then
+
+    printf "${PROG} (error): both 'fork' and 'origin' remotes already exist; will not attempt a rename; bailing out\n" 1>&2
+    exit 1
+fi
+
+if $t_have_remote_fork; then
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): renaming remote 'fork' => 'origin'\n" 1>&2
+    fi
+    git remote rename 'fork' 'origin'
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to rename remote 'fork' to 'origin'; bailing out\n" 1>&2
+        exit 1
+    fi
+fi
+
+
+# XXX: This doesn't deal with all of the possible output scenarios from
+#      git-config, just my common case scenario. Does not deal with the
+#      potential for multiple values, etc.
+t_hub_forkremote=$(git config --local --get 'hub.forkremote')
+if test $? -eq 0; then
+    if test "${t_hub_forkremote}" = 'origin'; then
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): git-config key 'hub.forkremote' is already 'origin'; no need to set (okay)\n" 1>&2
+            # keep going...
+        fi
+    else
+        # We only want to change the value from 'fork' to 'origin'; if the
+        # existing key
+        if test "${t_hub_forkremote}" = 'fork'; then :; else
+            printf "${PROG} (error): git-config key 'hub.forkremote' has value \"%s\"; was expecting \"fork\"; bailing out\n" "${t_hub_forkremote}" 1>&2
+            exit 1
+        fi
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'\n" 1>&2
+        fi
+        git config --local 'hub.forkremote' 'origin'
+    fi
+else
+    # This is a warning because of our primary motivating use case. The author
+    # does not actually use the 'git hub...' command very heavily directly, so
+    # the absence of this key (though unexpected here) does not indicate a
+    # fatal problem. Nevertheless, we always want to note that the "found
+    # state" is different than what would be typically expected when this tool
+    # is being used (hence the reason the message is not info-level and
+    # conditional).
+    #
+    printf "${PROG} (warning): no such git-config key: 'hub.forkremote'?\n" 1>&2
+    # keep going
+fi
