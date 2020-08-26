@@ -175,11 +175,13 @@ fi
 # XXX: This doesn't deal with all of the possible output scenarios from
 #      git-config, just my common case scenario. Does not deal with the
 #      potential for multiple values, etc.
-t_hub_forkremote=$(git config --local --get 'hub.forkremote')
+declare -r KEYNAME_HUB_FORKREMOTE='hub.forkremote'
+t_hub_forkremote=$(git config --local --get "${KEYNAME_HUB_FORKREMOTE}")
 if test $? -eq 0; then
     if test "${t_hub_forkremote}" = 'origin'; then
         if $BE_VERBOSE; then
-            printf "${PROG} (info): git-config key 'hub.forkremote' is already 'origin'; no need to set (okay)\n" 1>&2
+            printf "${PROG} (info): git-config key '%s' is already 'origin'; no need to set (okay)\n" \
+                   "${KEYNAME_HUB_FORKREMOTE}" 1>&2
             # keep going...
         fi
     else
@@ -187,14 +189,17 @@ if test $? -eq 0; then
         # existing key is something other than 'fork' then we don't want to
         # touch it.
         if test "${t_hub_forkremote}" = 'fork'; then :; else
-            printf "${PROG} (error): git-config key 'hub.forkremote' has value \"%s\"; was expecting \"fork\"; bailing out\n" "${t_hub_forkremote}" 1>&2
+            printf "${PROG} (error): git-config key '%s' has value \"%s\"; was expecting \"fork\"; bailing out\n" \
+                   "${KEYNAME_HUB_FORKREMOTE}" \
+                   "${t_hub_forkremote}" 1>&2
             exit 1
         fi
 
         if $BE_VERBOSE; then
-            printf "${PROG} (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'\n" 1>&2
+            printf "${PROG} (info): changing git-config key '%s' value from 'fork' to 'origin'\n" \
+                   "${KEYNAME_HUB_FORKREMOTE}" 1>&2
         fi
-        git config --local 'hub.forkremote' 'origin'
+        git config --local "${KEYNAME_HUB_FORKREMOTE}" 'origin'
     fi
 else
     # This is a warning because of our primary motivating use case. The author
@@ -205,6 +210,7 @@ else
     # is being used (hence the reason the message is not info-level and
     # conditional).
     #
-    printf "${PROG} (warning): no such git-config key: 'hub.forkremote'?\n" 1>&2
+    printf "${PROG} (warning): no such git-config key: '%s'?\n" \
+           "${KEYNAME_HUB_FORKREMOTE}" 1>&2
     # keep going
 fi
