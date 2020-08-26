@@ -183,8 +183,9 @@ if test $? -eq 0; then
             # keep going...
         fi
     else
-        # We only want to change the value from 'fork' to 'origin'; if the
-        # existing key
+        # We only want to change the value from 'fork' to 'origin'. If the
+        # existing key is something other than 'fork' then we don't want to
+        # touch it.
         if test "${t_hub_forkremote}" = 'fork'; then :; else
             printf "${PROG} (error): git-config key 'hub.forkremote' has value \"%s\"; was expecting \"fork\"; bailing out\n" "${t_hub_forkremote}" 1>&2
             exit 1
