@@ -200,6 +200,11 @@ if test $? -eq 0; then
                    "${KEYNAME_HUB_FORKREMOTE}" 1>&2
         fi
         git config --local "${KEYNAME_HUB_FORKREMOTE}" 'origin'
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to change git config key '%s' from 'fork' to 'origin'; bailing out\n" \
+                   "${KEYNAME_HUB_FORKREMOTE}" 1>&2
+            exit 1
+        fi
     fi
 else
     # This is a warning because of our primary motivating use case. The author
