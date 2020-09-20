@@ -912,7 +912,7 @@ if [[ "${gl_const_http_accept_github_version}" =~ $re_starts_with_accept ]]; the
     exit 1
 fi
 if $BE_VERBOSE; then
-    printf "${PROG} (info): configured HTTP 'Accept:' header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
+    printf "${PROG} (info): configured HTTP header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
 fi
 
 
