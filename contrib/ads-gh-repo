@@ -1,0 +1,314 @@
+#!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# ads-gh-repo: sketch of what a "create new repo in GitHup with an arbitrary
+# branch name" feature might work.
+#
+# The initial use case would be to support that specific use case (optionally
+# honoring the user's 'init.defaultBranch' setting (git >= 2.28 only).
+#
+# A longer-term approach might be to support the entire GitHub "Repositories"
+# API, but whether or not that is worth the effort remains to be seen.
+#
+#     https://developer.github.com/v3/repos/#create-a-repository-for-the-authenticated-user
+#     https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#create-a-repository-for-the-authenticated-user
+#
+declare -r PROG='ads-gh-repo'
+
+declare -r GITHUB_REPO_OWNER='salewski'
+declare -r NEW_REPO_NAME='aljunk-testing-repo-001'
+
+#BE_VERBOSE=false
+BE_VERBOSE=true
+
+#DEBUGGING=false
+DEBUGGING=true
+
+#DO_FORCE_REPLACE=false
+DO_FORCE_REPLACE=true
+
+DO_EMIT_NEW_REPO_JSON=false
+#DO_EMIT_NEW_REPO_JSON=true
+
+MY_TMP_DIR=$(mktemp -t --directory "${PROG}.XXXXXXXX")
+if test $? -ne 0; then
+    printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
+    exit 1
+fi
+#
+# This should be a "can't happen" scenario, but since we do a 'rm -fr ...' on
+# the value when we are done, we want to be belt-and-suspenders about it...
+#
+if test -z "${MY_TMP_DIR}"; then
+    printf "${PROG} (error) temporary directory path is empty; bailing out\n" 1>&2
+    exit 1
+fi
+
+MY_CURL_TMP_OUT_FPATH="${MY_TMP_DIR}/curl.out"
+
+
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+# CAREFUL: Interpolating heredoc
+#
+# This requires 'nebula-preview' header, and then overrides 'private' param
+# (if both are provided).
+#
+#    "visibility":     "private",
+#
+#    Access: application/vnd.github.nebula-preview+json
+#
+json_create=$(cat - <<EOF
+{
+    "name":           "${NEW_REPO_NAME}",
+    "private":        "true",
+    "default_branch": "whatever",
+
+    "description":    "just trying something"
+}
+EOF
+)
+
+
+# Common global options for use in every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify this array.
+#
+declare -a MY_CURL_DEFAULT_OPTS=()
+declare -a MY_CURL_OPTS=()
+
+# This disables output of curl's progress meter /and/ output of error messages...
+MY_CURL_DEFAULT_OPTS+=( '--silent' )
+# ...but this re-enables output of the error messages.
+MY_CURL_DEFAULT_OPTS+=( '--show-error' )
+
+
+# Force use of TLS 1.2 (or later). Writing in 2016, all previous versions are
+# known to be broken and susceptible to known attacks. Note that the
+# '--tlsv1.2' option was added in curl 7.34.0
+#
+# This is absolutely essential since we're using HTTP Basic Auth (see below).
+#
+MY_CURL_DEFAULT_OPTS+=( '--tlsv1.2' )
+
+# Allow ONLY https, for both the initial request and for redirects
+MY_CURL_DEFAULT_OPTS+=( '--proto')
+MY_CURL_DEFAULT_OPTS+=( 'https')
+MY_CURL_DEFAULT_OPTS+=( '--proto-redir')
+MY_CURL_DEFAULT_OPTS+=( 'https')
+
+
+# Tell curl to use HTTP Basic Authentication. This is the curl default, but
+# we're explicit about what we expect (and want to avoid any surprises from
+# weirdo ~/.curlrc files).
+#
+# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+#
+MY_CURL_DEFAULT_OPTS+=( '--basic' )
+
+
+# User's authentication credentials will be obtained from the user's ~/.netrc
+# file. See curl(1) and netrc(5)
+#
+MY_CURL_DEFAULT_OPTS+=( '--netrc'  )
+
+MY_CURL_DEFAULT_OPTS+=( '--user-agent' )
+MY_CURL_DEFAULT_OPTS+=( "$PROG"        )
+
+
+# Even when we're just making HEAD requests, have curl fail
+# MY_CURL_DEFAULT_OPTS+=( '--fail' )
+
+
+# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+# 2016, v3 is the default, but some newer version may become the default in
+# the future.
+#
+MY_CURL_DEFAULT_OPTS+=( '--header' )
+MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+# We always write the (JSON) output to a file in our temporary directory...
+#
+MY_CURL_DEFAULT_OPTS+=( '--output' )
+MY_CURL_DEFAULT_OPTS+=( "${MY_CURL_TMP_OUT_FPATH}" )
+
+# ...and write the HTTP response status to stdout. This allows for robust
+# error handling. Also, we cannot really know how to interpret the output
+# returned from the remote server until we have examined (at least) the HTTP
+# response code.
+#
+MY_CURL_DEFAULT_OPTS+=( '--write-out'  )
+MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
+
+
+MY_CURL_OPTS=()  # (re)set
+MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+MY_CURL_OPTS+=( '--get' )
+
+# First check to see if the repo already exists. API responds with HTTP 200 on
+# success (meaning repo was found to exist). The output (in our temporary
+# 'curl.out' file) will be GitHub's JSON representation of the repository.
+#
+# FIXME: GITHUB_REPO_OWNER and NEW_REPO_NAME both need to be URL-encoded here
+#
+t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
+                   "https://api.github.com/repos/${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}" )
+t_estat=$?
+set +x
+
+if test $t_estat -ne 0; then
+    printf "${PROG} (error): was error while invoking curl(1) to retrieve existing repo; bailing out\n" 1>&2
+    exit 1
+fi
+if test -z "${t_http_code}"; then
+    printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+    exit 1
+fi
+
+REPO_EXISTS=
+NEED_TO_DELETE_EXISTING=false
+case ${t_http_code} in
+
+    '200')
+        REPO_EXISTS=true
+
+        if $DO_FORCE_REPLACE; then
+            NEED_TO_DELETE_EXISTING=true
+        else
+            printf "${PROG} (error): GitHub repository already exists: %s/%s\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            exit 1
+        fi
+
+        # printf "${PROG} (error): \"force replace\" feature not yet implemented, and GitHub repository already exists: %s/%s\n" \
+        #        "${GITHUB_REPO_OWNER}" \
+        #        "${NEW_REPO_NAME}" 1>&2
+        # exit 1
+        ;;
+
+    '404')
+        REPO_EXISTS=false
+        # Keep going...
+        ;;
+
+    *)
+        printf "${PROG} (error): HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+               "${t_http_code}" 1>&2
+        exit 1
+        ;;
+esac
+
+if ! ${REPO_EXISTS}; then
+
+    if $BE_VERBOSE; then
+
+        if ${DO_FORCE_REPLACE}; then
+            # User explicitly requested that an existing repo be deleted, but
+            # no existing repo was found. We'll emit a slightly different
+            # message customized to this circumstance.
+            #
+            printf "${PROG} (info): deletion of existing GitHup repo requested, but repo does not exist: %s/%s\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+        else
+            printf "${PROG} (info): GitHub repository does not yet exist: %s/%s\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+        fi
+    fi
+else
+    # Repo exists, and user wants us to delete it
+
+    # Internal sanity checks
+    if ${DO_FORCE_REPLACE}; then :; else
+        printf "${PROG} (BUG): [line: ${LINENO}] DO_FORCE_REPLACE should be set here; bailing out\n" 1>&2
+        exit 1
+    fi
+    if ${NEED_TO_DELETE_EXISTING}; then :; else
+        printf "${PROG} (BUG): [line: ${LINENO}] NEED_TO_DELETE_EXISTING should be set here; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): as requested, will delete existing GitHup repo: %s/%s\n" \
+               "${GITHUB_REPO_OWNER}" \
+               "${NEW_REPO_NAME}" 1>&2
+    fi
+
+    MY_CURL_OPTS=()  # (re)set
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+# AL.DEBUG working here
+
+fi
+
+exit 88
+
+
+MY_CURL_OPTS=()  # (re)set
+MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+# Recall that the '--data' option implies an HTTP POST request.
+#
+MY_CURL_OPTS+=( '--data' )
+MY_CURL_OPTS+=( "${json_create}" )
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): attempting to create new GitHup repo: %s/%s\n" \
+           "${GITHUB_REPO_OWNER}" \
+           "${NEW_REPO_NAME}" 1>&2
+fi
+
+# Create a new repository for the authenticated user. Note that that the
+# literal string token 'user' in 'user/repos' is correct (it IS NOT supposed
+# to be the name of the authenticated user; that is implied by the
+# credentials)
+#
+set -x
+
+# We are expecting an HTTP 201 if the new repository was successfully
+# created. We'll treat any other response code as an error.
+#
+# If the repository already exists (and possibly other scenarios), the HTTP
+# response code will be 422 ("Unprocessable Entity") [RFC 4918].
+#
+t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
+                   https://api.github.com/user/repos )
+t_estat=$?
+set +x
+
+if test $t_estat -ne 0; then
+    printf "${PROG} (error): was error while invoking curl(1) to create repo; bailing out\n" 1>&2
+    exit 1
+fi
+if test -z "${t_http_code}"; then
+    printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+    exit 1
+fi
+
+if test '201' = "${t_http_code}"; then
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): successfully created new GitHup repo: %s/%s\n" \
+               "${GITHUB_REPO_OWNER}" \
+               "${NEW_REPO_NAME}" 1>&2
+    fi
+else
+    printf "${PROG} (error): HTTP response code was: \"%s\"; expected 201 (\"Created\"); bailing out\n" \
+           "${t_http_code}" 1>&2
+    exit 1
+fi
+
+if test -s "${MY_CURL_TMP_OUT_FPATH}"; then
+    if $DO_EMIT_NEW_REPO_JSON; then
+        cat "${MY_CURL_TMP_OUT_FPATH}"
+    fi
+fi
+
+if $DEBUGGING; then
+    printf "${PROG} (debug): cleaning up tmp directory: %s\n" "${MY_CURL_TMP_OUT_FPATH}" 1>&2
+fi
+rm -fr "${MY_TMP_DIR}"
