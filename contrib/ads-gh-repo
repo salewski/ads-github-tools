@@ -221,7 +221,7 @@ if ! ${REPO_EXISTS}; then
         fi
     fi
 else
-    # Repo exists, and user wants us to delete it
+    # Repo exists, and the user wants us to delete it
 
     # Internal sanity checks
     if ${DO_FORCE_REPLACE}; then :; else
@@ -242,12 +242,79 @@ else
     MY_CURL_OPTS=()  # (re)set
     MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
 
-# AL.DEBUG working here
+    MY_CURL_OPTS+=( '--request' )  # -X
+    MY_CURL_OPTS+=( 'DELETE' )
 
+    # DELETE /repos/:owner/:repo
+    #
+    # Upon success, we will expect an HTTP 204 ("No Content") reponse.
+    #
+    # Possible expected errors include:
+    #
+    #
+    #     404 ("Not Found") - If the repo does not exist. Though we checked
+    #                         for the existence of the repo above, it would
+    #                         still be possible for some other process to have
+    #                         come along and deleted the repo since we
+    #                         checked.
+    #
+    #     403 ("Forbidden") - If an organization owner has configured the
+    #                         organization to prevent members from deleting
+    #                         organization owned repos
+    #
+    # https://developer.github.com/v3/repos/#delete-a-repository
+    # https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#delete-a-repository
+
+    # FIXME: GITHUB_REPO_OWNER and NEW_REPO_NAME both need to be URL-encoded here
+    #
+    t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
+                       "https://api.github.com/repos/${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}" )
+    t_estat=$?
+
+    if test $t_estat -ne 0; then
+        printf "${PROG} (error): was error while invoking curl(1) to DELETE existing repo; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${t_http_code}"; then
+        printf "${PROG} (error): curl(1) DELETE command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    case ${t_http_code} in
+
+        '204')
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): successfully deleted existing GitHup repo: %s/%s\n" \
+                       "${GITHUB_REPO_OWNER}" \
+                       "${NEW_REPO_NAME}" 1>&2
+            fi
+            ;;
+
+        '403')
+            printf "${PROG} (error): curl(1) DELETE resulted in a 403 (\"Forbidden\"); was unable to delete repo: %s/%s; bailing out\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            exit 1
+            ;;
+
+        '404')
+            # This should only happen if some other process is attempting to
+            # delete the repo at the same time we are, and that other process
+            # beat us to it. Highly unlikely, except in contrived situations.
+            #
+            printf "${PROG} (warning): curl(1) DELETE resulted in a 404 (\"Not Found\"); existing GitHup repo deleted by some other means (not us): %s/%s\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            # keep going...
+            ;;
+
+        *)
+          printf "${PROG} (error): HTTP response code for DELETE command was: \"%s\"; expected 204 (\"No Content\"); bailing out\n" \
+                 "${t_http_code}" 1>&2
+          exit 1
+          ;;
+    esac
 fi
-
-exit 88
-
 
 MY_CURL_OPTS=()  # (re)set
 MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
@@ -268,7 +335,7 @@ fi
 # to be the name of the authenticated user; that is implied by the
 # credentials)
 #
-set -x
+#set -x
 
 # We are expecting an HTTP 201 if the new repository was successfully
 # created. We'll treat any other response code as an error.
