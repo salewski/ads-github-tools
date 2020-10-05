@@ -29,7 +29,16 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (None)
+*** issue 49: update contact email
+
+    https://github.com/salewski/ads-github-tools/issues/49
+
+    The old contact email address 'salewski@att.net' /should/ still work, but
+    the preferred address to use going forward is 'ads@salewski.email'. Note
+    that the author has experienced a fair amount of mail lossage this year
+    (2020) due to overly-aggressive mail filtering by the AT&T mail system;
+    lots of legit mail does not get through, and there is no indication of the
+    blockage. For best results, use the new address.
 
 
 * ads-github-tools 0.3.0 (2020-04-09)

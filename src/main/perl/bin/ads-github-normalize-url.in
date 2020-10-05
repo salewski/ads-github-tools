@@ -2,7 +2,7 @@
 # -*- perl -*-
 # @configure_input@
 
-# Copyright (c) 2016 Alan D. Salewski <salewski@att.net>
+# Copyright (c) 2016, 2020 Alan D. Salewski <ads@salewski.email>
 #
 #     This program is free software; you can redistribute it and/or modify
 #     it under the terms of the GNU General Public License as published by
@@ -152,7 +152,7 @@ EOH
 sub print_version {
     print <<"EOV";
 $PROG $RELEASE_STRING
-Copyright (C) 2016 Alan D. Salewski
+Copyright (C) 2016, 2020 Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
@@ -431,14 +431,14 @@ HTTP proxy servers)
 
 =over 4
 
-=item Alan D. Salewski  <salewski@att.net>
+=item Alan D. Salewski  <ads@salewski.email>
 
 =back
 
 
 =head1 COPYRIGHT
 
-Copyright 2016 Alan D. Salewski
+Copyright 2016, 2020 Alan D. Salewski
 
 =cut
 

@@ -19,7 +19,7 @@ dnl     [AC_]PACKAGE_URL
 dnl
 AC_INIT([[ADS GitHub Tools]],
         [[0.3.1-snapshot]],
-        [[Alan D. Salewski <salewski@att.net>]],
+        [[Alan D. Salewski <ads@salewski.email>]],
         [[ads-github-tools]],
         [[https://github.com/salewski/ads-github-tools]])
 

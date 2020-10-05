@@ -1,7 +1,7 @@
 This is the LICENSE file for ads-github-tools, a collection of tools for
 interacting with the GitHub service API from the command line.
 
-Copyright (C) 2016  Alan D. Salewski <salewski@att.net>
+Copyright (C) 2016, 2017, 2019, 2020  Alan D. Salewski <ads@salewski.email>
 
 This collection of programs is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License as published by
