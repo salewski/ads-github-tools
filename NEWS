@@ -29,6 +29,44 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
+*** issue 42: adapt for github deprecating password authentication, OAuth authz & app APIs
+
+    https://github.com/salewski/ads-github-tools/issues/42
+
+    GitHub has officially deprecated password-based authentication, and it
+    will be disabled entirely on [2020-11-13 Fri]:
+
+        https://developer.github.com/changes/2020-02-14-deprecating-password-auth/
+
+    The 'ads-github-tools' programs were reviewed to determine the impact, if
+    any, that those deprecations might have. The are not any application
+    behavioral changes related to deprecations because the ads-github-tools
+    were not using any of the deprecated authn or authz APIs.
+
+    However, anyone that is using their GitHub user password in their ~/.netrc
+    file will need to change their config to use what GitHub calls a "personal
+    access token", instead. There are no known users that are not using a
+    personal access token already, but if you happen to be one you will want
+    to check out the official GitHub docs on the subject:
+
+        https://docs.github.com/en/free-pro-team@latest/github/authenticating-to-github/creating-a-personal-access-token
+
+    The executive summary is that you use a "personal access token" in
+    basically the same way that you would use a password: you put it in your
+    ~/.netrc file as the value for the 'password' field. It is a better
+    approach than using the password itself, though, because the token can be
+    configured to have more constrained permissions than the password; you
+    decide what it can do at the time you create the token. (You can also
+    delete and replace a personal access token with less disruption then you
+    can change the password on your account if that password were used by
+    various tools.)
+
+    You may wish to create a token that is not able to perform certain actions
+    (e.g., deleting repositories). That will have a minor impact on the
+    ads-github-tools, but they will simply tell you when they are not able to
+    perform some action.
+
+
 *** issue 49: update contact email
 
     https://github.com/salewski/ads-github-tools/issues/49

@@ -36,20 +36,37 @@
 #
 # HINT: The relevant line ~/.netrc file content should have the form:
 #
-#     machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PASSWORD
+#     machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
 #
 # CAVEAT: Use of the netrc(5) configuration means that this tool is ultimately
-# using username/password with the GitHub API. Though all communication is
-# conducted over HTTPS (so is encrypted "on the wire"), this authentication
-# mechanism allows this tool to access the full power of the GitHub API.
+# using HTTP Basic authentication (username/password) with the GitHub
+# API. Though all communication is conducted over HTTPS (so is encrypted "on
+# the wire"), this authentication mechanism (available through 2020-11-13; see
+# below) allows this tool to access the full power of the GitHub API.
+#
+# UPDATE (2020-10-05): GitHub has officially deprecated password-based
+#        authentication, and it will be disabled entirely on 2020-11-13:
+#
+#            https://developer.github.com/changes/2020-02-14-deprecating-password-auth/
+#
+#        A better approach (which you were probably using already, anyway) is
+#        to create what GitHub calls a "personal access token":
+#
+#            https://docs.github.com/en/free-pro-team@latest/github/authenticating-to-github/creating-a-personal-access-token
+#
+#        You use a "personal access token" in basically the same way that you
+#        would use a password (you put it in your ~/.netrc file as the value
+#        for the 'password' field), but the token itself can be configured to
+#        have more constrained permissions (you decide what it can do at the
+#        time you create the token).
+#
+#        You may wish to create a token that is not able to perform certain
+#        actions (e.g., deleting repositories). That will have a minor impact
+#        on the ads-github-tools, but they will simply tell you when they are
+#        not able to perform some action.
 #
 # DO NOT USE THIS TOOL UNLESS YOU TRUST THAT IT IS NOT ABUSING THIS TRUST.
 #
-# Use of the OAuth mechanisms would allow for the access needed by this
-# program while preventing use of the access it does not need. I'm not
-# worrying about that at the moment though, as I'm the only user, and I expect
-# that anything more elaborate should probably be integrated into a more
-# featureful tool (such as 'git-hub', which already has OAuth support).
 #
 # Motivation
 # ==========
