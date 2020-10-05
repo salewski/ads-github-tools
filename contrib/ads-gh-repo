@@ -18,6 +18,8 @@
 declare -r PROG='ads-gh-repo'
 
 declare -r GITHUB_REPO_OWNER='salewski'
+declare -r MY_DEFAULT_BRANCH_NAME='whatever'
+
 declare -r NEW_REPO_NAME='aljunk-testing-repo-001'
 
 #BE_VERBOSE=false
@@ -65,12 +67,19 @@ json_create=$(cat - <<EOF
 {
     "name":           "${NEW_REPO_NAME}",
     "private":        "true",
-    "default_branch": "whatever",
+    "default_branch": "${MY_DEFAULT_BRANCH_NAME}",
 
     "description":    "just trying something"
 }
 EOF
 )
+
+# XXX: At the time of writing (2020-10-04), the 'default_branch' param in the
+#      above is ignored by the GitHub API at the time of repo creation, even
+#      though a 'default_branch' key is returned in the response. The value of
+#      the key in the response does not reflect the value we provided, so the
+#      code below jumps through hoops to rename the branch locally, and then
+#      synchronize the remote repo with the same changes.
 
 
 # Common global options for use in every 'curl' invocation. Specific
@@ -347,7 +356,7 @@ fi
 t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
                    https://api.github.com/user/repos )
 t_estat=$?
-set +x
+# set +x
 
 if test $t_estat -ne 0; then
     printf "${PROG} (error): was error while invoking curl(1) to create repo; bailing out\n" 1>&2
@@ -370,11 +379,49 @@ else
     exit 1
 fi
 
-if test -s "${MY_TMP_CURL_OUT_FPATH}"; then
-    if $DO_EMIT_NEW_REPO_JSON; then
-        cat "${MY_TMP_CURL_OUT_FPATH}"
-    fi
+if test -s "${MY_TMP_CURL_OUT_FPATH}"; then :; else
+    printf "${PROG} (error): repo created, but JSON response not available; bailing out\n" 1>&2
+    exit 1
 fi
+
+# FIXME: Is this really useful?
+if $DO_EMIT_NEW_REPO_JSON; then
+    cat "${MY_TMP_CURL_OUT_FPATH}"
+fi
+
+
+read -r is_private is_fork dflt_branch_name \
+  < <(jq -r '"\(.private) \(.fork) \(.default_branch)"' < "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    # Hopefully some other (more useful) error message was also emitted by
+    # jq(1) or bash(1)...
+    printf "${PROG} (error): was unable to extract data from JSON response; bailing out\n" 1>&2
+    exit 1
+fi
+
+if test "${dflt_branch_name}" = "${MY_DEFAULT_BRANCH_NAME}"; then
+
+    # AUTHOR NOTE (2020-10-04): If somebody encounters this scenario in the
+    # wild before the author does, please open an issue on GitHub to let him
+    # know about it. It would indicate a (probably good) change in the
+    # behavior of the GitHub API that this program should be adapted to
+    # interpret.
+    #
+    #     https://github.com/salewski/ads-github-tools/issues
+    #
+    printf "${PROG} (warning): unexpected success: GitHub API honored our initial 'default_branch' request\n" 1>&2
+    # Keep going...
+else
+    # Since our requested default branch name was ignored, we'll check out the
+    # repo, rename it locally, and then sync that state to the remote repo.
+
+#MY_TMP_GIT_REPO_FPATH
+
+# AL.DEBUG working here
+
+fi
+
+
 
 if $DEBUGGING; then
     printf "${PROG} (debug): cleaning up tmp directory: %s\n" "${MY_TMP_CURL_OUT_FPATH}" 1>&2
