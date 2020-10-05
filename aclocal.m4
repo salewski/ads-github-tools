@@ -772,7 +772,9 @@ AC_SUBST([am__untar])
 ]) # _AM_PROG_TAR
 
 dnl -*- autoconf -*-
-
+dnl SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
+dnl
 dnl This macro provides for a new 'configure' option:
 dnl
 dnl     --with-perl-includes=DIR[:DIR...]
@@ -1001,6 +1003,8 @@ AC_DEFUN([ads_PERL_INCLUDES], [
 ])
 
 dnl -*- autoconf -*-
+dnl SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
 dnl 
 dnl This file provides the 'ads_PERL_MODULE' autoconf macro, which may be used
 dnl to add checks in your 'configure.ac' file for a specific Perl module.
@@ -1268,7 +1272,9 @@ dnl FIXME: Maybe provide an autoconf flag indicating whether or not
 dnl        the Perl module was found.
 
 dnl -*- autoconf -*-
-
+dnl SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
+dnl
 dnl ads_PROG_PERL([required_perl_version])
 dnl
 dnl This macro tests for the existence of a perl interpreter on the target
