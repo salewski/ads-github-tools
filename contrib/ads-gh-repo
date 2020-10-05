@@ -46,7 +46,8 @@ if test -z "${MY_TMP_DIR}"; then
     exit 1
 fi
 
-MY_CURL_TMP_OUT_FPATH="${MY_TMP_DIR}/curl.out"
+declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
+declare -r MY_TMP_GIT_REPO_FPATH="${MY_TMP_DIR}/repo.git"
 
 
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
@@ -132,7 +133,7 @@ MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
 # We always write the (JSON) output to a file in our temporary directory...
 #
 MY_CURL_DEFAULT_OPTS+=( '--output' )
-MY_CURL_DEFAULT_OPTS+=( "${MY_CURL_TMP_OUT_FPATH}" )
+MY_CURL_DEFAULT_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
 
 # ...and write the HTTP response status to stdout. This allows for robust
 # error handling. Also, we cannot really know how to interpret the output
@@ -369,13 +370,13 @@ else
     exit 1
 fi
 
-if test -s "${MY_CURL_TMP_OUT_FPATH}"; then
+if test -s "${MY_TMP_CURL_OUT_FPATH}"; then
     if $DO_EMIT_NEW_REPO_JSON; then
-        cat "${MY_CURL_TMP_OUT_FPATH}"
+        cat "${MY_TMP_CURL_OUT_FPATH}"
     fi
 fi
 
 if $DEBUGGING; then
-    printf "${PROG} (debug): cleaning up tmp directory: %s\n" "${MY_CURL_TMP_OUT_FPATH}" 1>&2
+    printf "${PROG} (debug): cleaning up tmp directory: %s\n" "${MY_TMP_CURL_OUT_FPATH}" 1>&2
 fi
 rm -fr "${MY_TMP_DIR}"
