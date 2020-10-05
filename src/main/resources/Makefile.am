@@ -1,5 +1,8 @@
 ## Process this file with automake to produce Makefile.in   -*-Makefile-*-
 
+## SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+## SPDX-License-Identifier: GPL-2.0-or-later
+
 noinst_DATA = adsgithubtools-perl5-inc-begin-block.snippet
 
 ## Ensure that our input file makes it into the distribution tarball

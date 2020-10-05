@@ -1,4 +1,6 @@
 dnl -*- autoconf -*-
+dnl SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
 dnl 
 dnl This file provides the 'ads_PERL_MODULE' autoconf macro, which may be used
 dnl to add checks in your 'configure.ac' file for a specific Perl module.

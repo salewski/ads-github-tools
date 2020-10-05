@@ -1,5 +1,7 @@
 dnl -*- autoconf -*-
-
+dnl SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-License-Identifier: GPL-2.0-or-later
+dnl
 dnl This macro provides for a new 'configure' option:
 dnl
 dnl     --with-perl-includes=DIR[:DIR...]
