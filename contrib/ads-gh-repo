@@ -56,6 +56,11 @@ declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v
 
 # CAREFUL: Interpolating heredoc
 #
+# Note that we have 'auto_init' set to true to cause an initial commit to be
+# made with an empty README.md file. We need to have at least one commit to
+# reify the default branch; otherwise we will not be able to rename it below
+# (git only makes the branch real upon the first commit).
+#
 # This requires 'nebula-preview' header, and then overrides 'private' param
 # (if both are provided).
 #
@@ -65,6 +70,7 @@ declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v
 #
 json_create=$(cat - <<EOF
 {
+    "auto_init":      "true",
     "name":           "${NEW_REPO_NAME}",
     "private":        "true",
     "default_branch": "${MY_DEFAULT_BRANCH_NAME}",
@@ -167,7 +173,7 @@ MY_CURL_OPTS+=( '--get' )
 t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
                    "https://api.github.com/repos/${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}" )
 t_estat=$?
-set +x
+# set +x
 
 if test $t_estat -ne 0; then
     printf "${PROG} (error): was error while invoking curl(1) to retrieve existing repo; bailing out\n" 1>&2
@@ -389,6 +395,7 @@ if $DO_EMIT_NEW_REPO_JSON; then
     cat "${MY_TMP_CURL_OUT_FPATH}"
 fi
 
+set -x
 
 read -r is_private is_fork dflt_branch_name \
   < <(jq -r '"\(.private) \(.fork) \(.default_branch)"' < "${MY_TMP_CURL_OUT_FPATH}")
@@ -405,7 +412,7 @@ if test "${dflt_branch_name}" = "${MY_DEFAULT_BRANCH_NAME}"; then
     # wild before the author does, please open an issue on GitHub to let him
     # know about it. It would indicate a (probably good) change in the
     # behavior of the GitHub API that this program should be adapted to
-    # interpret.
+    # interpret more accurately.
     #
     #     https://github.com/salewski/ads-github-tools/issues
     #
@@ -415,12 +422,187 @@ else
     # Since our requested default branch name was ignored, we'll check out the
     # repo, rename it locally, and then sync that state to the remote repo.
 
-#MY_TMP_GIT_REPO_FPATH
+    git clone 'git@github.com:'"${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}.git" "${MY_TMP_GIT_REPO_FPATH}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable while trying to clone newly created repo; bailing out\n" 1>&2
+        exit 1
+    fi
 
-# AL.DEBUG working here
+    (
+      cd "${MY_TMP_GIT_REPO_FPATH}"
+      if test $? -ne 0; then
+          printf "${PROG} (error): was unable to cd to directory of newly created repo; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
 
+      # We are currently on the default branch. Let's rename it it.
+      #
+      git branch --move "${dflt_branch_name}" "${MY_DEFAULT_BRANCH_NAME}"
+      if test $? -ne 0; then
+          printf "${PROG} (error): was unable to rename branch locally; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      # Let the repo represented by our 'origin' remote know that there's a new branch
+      git push --set-upstream origin "${MY_DEFAULT_BRANCH_NAME}"
+      if test $? -ne 0; then
+          printf "${PROG} (error): was unable to push new branch to origin; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      # locally: Switch our default branch
+      git remote set-head origin "${MY_DEFAULT_BRANCH_NAME}"
+      if test $? -ne 0; then
+          printf "${PROG} (error): was unable to switch default branch locally; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      # Note that our local repo will still have a remote ref for the original
+      # repo branch until we tell the remote to delete it below.
+
+      # remotely: Change the default branch for the repo
+      json_patch_dflt_name=$(cat - <<EOF
+{
+    "default_branch": "${MY_DEFAULT_BRANCH_NAME}"
+}
+EOF
+)
+
+      MY_CURL_OPTS=()  # (re)set
+      MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+      MY_CURL_OPTS+=( '--data' )  # implies POST (overridden below)
+      MY_CURL_OPTS+=( "${json_patch_dflt_name}" )
+
+      MY_CURL_OPTS+=( '--request' )  # -X
+      MY_CURL_OPTS+=( 'PATCH'     )  # override POST; use PATCH instead
+
+      if $BE_VERBOSE; then
+          printf "${PROG} (info): remotely: attempting to PATCH dflt branch name for GitHup repo: %s/%s\n" \
+                 "${GITHUB_REPO_OWNER}" \
+                 "${NEW_REPO_NAME}" 1>&2
+      fi
+
+      # "Update a repository"
+      #     https://developer.github.com/v3/repos/#update-a-repository
+      #     https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#update-a-repository
+      #
+      # Known possible responses:
+      #     200 OK
+      #     403 Forbidden
+      #     404 Not Found
+      #     422 Unprocessable Entity
+      #
+      # On success, the returned JSON response should reflect the changes we
+      # attempted to "PATCH in".
+      #
+      t_http_code=$(curl "${MY_CURL_OPTS[@]}" \
+                         "https://api.github.com/repos/${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}" )
+      t_estat=$?
+      if test $t_estat -ne 0; then
+          printf "${PROG} (error): was error while invoking curl(1) to PATCH existing repo; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+      if test -z "${t_http_code}"; then
+          printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted for PATCH; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      case ${t_http_code} in
+        '200')  # "OK"
+            if $BE_VERBOSE; then
+                # CAREFUL: We'll note that the PATCH operation succeeded, but
+                #          don't want to suggest that the actual default
+                #          branch change succeeded until we confirm below by
+                #          reading the expected values back in the JSON
+                #          response we received.
+                printf "${PROG} (info): successfully PATCHed existing GitHup repo: %s/%s\n" \
+                       "${GITHUB_REPO_OWNER}" \
+                       "${NEW_REPO_NAME}" 1>&2
+            fi
+            ;;
+
+        '403')
+            printf "${PROG} (error): curl(1) PATCH resulted in a 403 (\"Forbidden\"); was unable to patch repo: %s/%s; bailing out\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            exit 1  # from subshell
+            ;;
+
+        '404')
+            # This should only happen if some other process is attempting to
+            # modify the repo at the same time we are.
+            #
+            printf "${PROG} (error): curl(1) PATCH resulted in a 404 (\"Not Found\"); existing GitHup repo deleted by some other means (not us): %s/%s; bailing out\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            exit 1  # from subshell
+            ;;
+
+        '422')  # "Unprocessable Entity"
+            # This one is probably a bug in the current program related to not
+            # structuring our PATCH request correctly (including problems
+            # related to encoding the data correctly).
+            #
+            printf "${PROG} (error): curl(1) PATCH resulted in a 422 (\"Unprocessable Entity\"); was unable to patch repo: %s/%s; bailing out\n" \
+                   "${GITHUB_REPO_OWNER}" \
+                   "${NEW_REPO_NAME}" 1>&2
+            exit 1  # from subshell
+            ;;
+
+        *)
+          printf "${PROG} (error): HTTP response code for PATCH command was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                 "${t_http_code}" 1>&2
+          exit 1  # from subshell
+          ;;
+      esac
+
+      # Ensure the default_branch name in-use (as reflected in the JSON
+      # response to our PATCH operation) actually reflects the name we
+      # requested.
+      read -r rsp_dflt_branch_name \
+           < <(jq -r '"\(.default_branch)"' < "${MY_TMP_CURL_OUT_FPATH}")
+      if test $? -ne 0; then
+          # Hopefully some other (more useful) error message was also emitted
+          # by jq(1) or bash(1)...
+          printf "${PROG} (error): was unable to extract data from PATCH JSON response; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      if test "${rsp_dflt_branch_name}" = "${MY_DEFAULT_BRANCH_NAME}"; then
+          printf "${PROG} (info): successfully changed default branch for existing GitHup repo: %s/%s\n" \
+                 "${GITHUB_REPO_OWNER}" \
+                 "${NEW_REPO_NAME}" 1>&2
+      else
+          if test "${rsp_dflt_branch_name}" = "${dflt_branch_name}"; then
+              printf "${PROG} (error): PATCH op to change default branch name succeeded, but request was ignored by the GitHub API; bailing out\n" 1>&2
+              exit 1  # from subshell
+          fi
+
+          printf "${PROG} (error): PATCH op to change default branch name succeeded, but new default branch name is unexpected value (\"%s\"); bailing out\n" \
+                 "${rsp_dflt_branch_name}" 1>&2
+          exit 1  # from subshell
+      fi
+
+      # remotely: Delete old default branch from GitHub repo
+      git push origin --delete "${dflt_branch_name}"
+      if test $? -ne 0; then
+          printf "${PROG} (error): was unable to delete old default branch remotely; bailing out\n" 1>&2
+          exit 1  # from subshell
+      fi
+
+      if $BE_VERBOSE; then
+          printf "${PROG} (info): successfully changed default branch for GitHup repo: %s/%s\n" \
+                 "${GITHUB_REPO_OWNER}" \
+                 "${NEW_REPO_NAME}" 1>&2
+      fi
+      exit 0  # from subshell
+    )
+    if test $? -ne 0; then
+        # Error message already printed in subshell
+        exit 1
+    fi
 fi
-
 
 
 if $DEBUGGING; then
