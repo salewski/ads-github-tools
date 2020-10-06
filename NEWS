@@ -24,7 +24,40 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (None)
+*** issue 44: ads-github-show-rate-limits: http response code not checked
+
+    https://github.com/salewski/ads-github-tools/issues/44
+
+    The 'ads-github-show-rate-limits' program is now careful to check not only
+    the curl(1) exit status of the 'GET /rate_limit' request, but also the
+    HTTP response status. Previously it was obtaining the JSON response on the
+    curl(1) stdout, and had no way to determine what the HTTP response code
+    was. The new behavior is to follow our pattern of saving the raw response
+    output to a temporary file, and having curl write the HTTP response code
+    to stdout; this allows us to deal with both aspects independently.
+
+    When the 'GET /rate_limit' call results in a non-success status, the
+    program now emits and error message and exits with a non-zero status, as
+    one would expect. If a JSON response payload was returned, it will be
+    printed beneath the error message to provide additional context for the
+    failure.
+
+    Ex. 1:
+    :    ads-github-show-rate-limits (error): HTTP response code was: "401"; expected 200 ("OK"); bailing out
+    :        HTTP response payload may contain additional info:
+    :            {"message":"Bad credentials","documentation_url":"https://docs.github.com/rest"}
+
+    Ex. 2:
+    :    ads-github-show-rate-limits (error): HTTP response code was: "404"; expected 200 ("OK"); bailing out
+    :        HTTP response payload may contain additional info:
+    :            {"message":"Not Found","documentation_url":"https://docs.github.com/rest"}
+
+    If no response payload was returned, that fact will be explicitly stated,
+    as well:
+
+    Ex. 3:
+    :    ads-github-show-rate-limits (error): HTTP response code was: "500"; expected 200 ("OK"); bailing out
+    :        (HTTP response payload was empty)
 
 
 ** improvements

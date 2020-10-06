@@ -180,22 +180,29 @@ declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v
 # particular tool by setting an environment variable named after the tool
 # (with hyphen chars changed to underscores).
 
-CAT_PROG="${CAT:-@CAT@}"
-
-CURL_PROG="${CURL:-@CURL_PROG@}"
-
-EXPR_PROG="${EXPR:-@EXPR_PROG@}"
-
 # jq - command line JSON parser and manipulation language
 #      see: https://github.com/stedolan/jq
 #
 JQ_PROG="${JQ:-@JQ_PROG@}"
+RM_PROG="${RM:-@RM@}"
+
+CAT_PROG="${CAT:-@CAT@}"
+
+CURL_PROG="${CURL:-@CURL_PROG@}"
+EXPR_PROG="${EXPR:-@EXPR_PROG@}"
+
+MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 
 declare -a NEEDED_EXTERNAL_PROGS=(
+    "${JQ_PROG}"
+    "${RM_PROG}"
+
     "${CAT_PROG}"
+
     "${CURL_PROG}"
     "${EXPR_PROG}"
-    "${JQ_PROG}"
+
+    "${MKTEMP_PROG}"
 )
 
 
@@ -252,7 +259,10 @@ trap 'f_cleanup' EXIT
 f_print_help () {
 
     "${CAT_PROG}" <<EOF
-usage: $PROG [OPTION...]
+usage: $PROG { -h | --help }
+  or:  $PROG { -V | --version }
+  or:  $PROG [OPTION...]
+
 Requests user's rate limit information from GitHub and displays it on stdout
 
 Mandatory arguments to long options are mandatory for short options, too.
@@ -709,8 +719,37 @@ if [[ "${gl_const_http_accept_github_version}" =~ $re_starts_with_accept ]]; the
     exit 1
 fi
 if $BE_VERBOSE; then
-    printf "${PROG} (info): configured HTTP 'Accept:' header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
+    printf "${PROG} (info): configured HTTP header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
 fi
+
+
+MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
+if test $? -ne 0; then
+    printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
+    exit 1
+fi
+#
+# This should be a "can't happen" scenario, but since we do a 'rm -fr ...' on
+# the value when we are done, we want to be belt-and-suspenders about it...
+#
+if test -z "${MY_TMP_DIR}"; then
+    printf "${PROG} (error) temporary directory path is empty; bailing out\n" 1>&2
+    exit 1
+fi
+function f_cleanup_rmfr_tmpdir () {
+    local -a t_rm_opts=()
+    t_rm_opts+=('-f')
+    t_rm_opts+=('-r')
+    if $DEBUGGING; then
+        t_rm_opts+=('-v')  # verbose
+    fi
+    "${RM_PROG}" "${t_rm_opts[@]}" "${MY_TMP_DIR}"
+    # Ignore exit status -- Is a cleanup hook, so do not exit the process if
+    # 'rm' failed; keep going...
+}
+F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
+
+declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
 
 
 # Note that the gl_const_http_accept_github_version value is known to always
@@ -731,9 +770,9 @@ MY_CURL_OPTS+=( '--silent' )
 MY_CURL_OPTS+=( '--show-error' )
 
 
-# Force use of TLS 1.2. Writing in 2016, all previous versions are known to be
-# broken and susceptible to known attacks. Note that the '--tlsv1.2' option
-# was added in curl 7.34.0
+# Force use of TLS 1.2 (or later). Writing in 2016, all previous versions are
+# known to be broken and susceptible to known attacks. Note that the
+# '--tlsv1.2' option was added in curl 7.34.0
 #
 # This is absolutely essential since we're using HTTP Basic Auth (see below).
 #
@@ -771,21 +810,72 @@ MY_CURL_OPTS+=( "$PROG"        )
 MY_CURL_OPTS+=( '--header' )
 MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 
+# We always write the (JSON) output to a file in our temporary directory...
+#
+MY_CURL_OPTS+=( '--output' )
+MY_CURL_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
 
+# ...and write the HTTP response status to stdout. This allows for robust
+# error handling. Also, we cannot really know how to interpret the output
+# returned from the remote server until we have examined (at least) the HTTP
+# response code.
+#
+MY_CURL_OPTS+=( '--write-out'  )
+MY_CURL_OPTS+=( '%{http_code}' )
 
 if $BE_VERBOSE; then
     printf "${PROG} (info): requesting /rate_limit\n" 1>&2
 fi
 
-t_gh_json_service_response=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
-                                             --get                \
-                                             "${MY_GITHUB_RATE_LIMIT_URL}" )
+# t_gh_json_service_response=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+#                                              --get                \
+#                                              "${MY_GITHUB_RATE_LIMIT_URL}" )
+
+t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+                              --get                \
+                              "${MY_GITHUB_RATE_LIMIT_URL}" )
 if test $? -ne 0; then
     # Hopefully 'curl' emitted a meaningful error message, too...
     printf "${PROG} (error): was unable to obtain GitHub rate limit; bailing out\n" 1>&2
     exit 1
 fi
+if test -z "${t_http_code}"; then
+    printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+    exit 1
+fi
 
+if $DEBUGGING; then
+    printf "${PROG} (debug): GET /rate_limit: HTTP response status: %s\n" "${t_http_code}" 1>&2
+fi
+
+case ${t_http_code} in
+    '200')  # "OK"
+        ;;
+    *)
+        if test -s "${MY_TMP_CURL_OUT_FPATH}"; then
+            printf "${PROG} (error): HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n"\
+"    HTTP response payload may contain additional info:\n        %s\n" \
+                   "${t_http_code}" \
+                   "$("${CAT_PROG}" "${MY_TMP_CURL_OUT_FPATH}")" 1>&2
+        else
+            printf "${PROG} (error): HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n"\
+"    (HTTP response payload was empty)\n" \
+                   "${t_http_code}" 1>&2
+        fi
+        exit 1
+        ;;
+esac
+
+t_gh_json_service_response=$(cat "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    printf "${PROG} (error): was unable to read JSON response from temporary file (\"%s\"); bailing out" \
+           "${MY_TMP_CURL_OUT_FPATH}" 1>&2
+    exit 1
+fi
+if test -z "${t_gh_json_service_response}"; then
+    printf "${PROG} (error): JSON response is empty; bailing out\n" 1>&2
+    exit 1
+fi
 
 if test "${OUTPUT_FORMAT}" = 'JSON'; then
     echo "${t_gh_json_service_response}"

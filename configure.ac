@@ -146,6 +146,11 @@ if test -z "$JQ_PROG"; then
     AC_MSG_ERROR([jq program not found])
 fi
 
+AC_PATH_PROG([MKTEMP_PROG], [mktemp])
+if test -z "$MKTEMP_PROG"; then
+    AC_MSG_ERROR([mktemp program not found])
+fi
+
 AC_PATH_PROG([SED], [sed])
 if test -z "$SED"; then
     AC_MSG_ERROR([sed not found])
@@ -331,6 +336,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
+  -e '"'"'s,[@]MKTEMP_PROG[@],$(MKTEMP_PROG),g'"'"' \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
