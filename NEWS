@@ -60,6 +60,19 @@ which they were fixed will be noted here, as well.
     :        (HTTP response payload was empty)
 
 
+*** issue 53: fix perms on *.in template files in src/main/bash/bin/
+
+    https://github.com/salewski/ads-github-tools/issues/53
+
+    This was a minor in-tree cleanup activity. It was noticed that the *.in
+    template files had their executable bit set, which was misleading. Those
+    files are not intended to be directly executed, but rather are filtered at
+    build time to produce the programs that /are/ directly executable. This
+    was probably "origin cruft"; each of the programs was probably first
+    implemented as a shell script which was then parameterized and otherwise
+    modified to create the *.in template.
+
+
 ** improvements
 
 *** issue 42: adapt for github deprecating password authentication, OAuth authz & app APIs
