@@ -1,0 +1,1953 @@
+#!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-whoami: Show the currently authenticated GitHub user.
+#
+# This program similar in spirit to the Unix whoami(1) and id(1) commands, but
+# shows information about the authenticated GitHub user (as understood by the
+# GitHub API). Obtains its direct information via the GitHub v3 API call:
+#
+#     GET /user
+#
+# Default output is plain text for interactive command line use, but we
+# also provide a knob to have the raw JSON response emitted, as well
+# (similar to how ads-github-show-rate-limits(1) works).
+#
+# How it works
+# ============
+# Makes an authenticated HTTPS 'GET' request to the GitHub API (using curl) to
+# obtain the response body that contains a JSON representation of the
+# authenticated GitHub user.  The GitHub user information is parsed out of the
+# JSON structure and presented to the user.
+#
+# The default output (whitespace delimited columns of plain text) is suitable
+# for a user working interactively in a shell and for use in a Unix shell
+# pipeline.
+#
+# The --output-format=WORD option can be used to request output in different
+# formats. At the time of writing (2020-10-07), only two formats are
+# supported: 'text' and 'json'.
+#
+# FIXME: A future version should provide options to allow the user to request
+#        output in additional specific formats (edn, transit).
+#
+# All requests are made over HTTPS.
+#
+# Authentication
+# ==============
+# No authentication data is used directly; the curl(1) '-n' (--netrc) option
+# is used, so the user is expected to store the necessary GitHub credentials
+# in a ~/.netrc file. For details on setting that up, see curl(1) and
+# netrc(5). Note that curl will not use the ~/.netrc file if the permissions
+# allow reading by group or other.
+#
+# HINT: The relevant line ~/.netrc file content should have the form:
+#
+#     machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
+#
+# CAVEAT: Use of the netrc(5) configuration means that this tool is ultimately
+# using HTTP Basic authentication (username/password) with the GitHub
+# API. Though all communication is conducted over HTTPS (so is encrypted "on
+# the wire"), this authentication mechanism (available through 2020-11-13; see
+# below) allows this tool to access the full power of the GitHub API.
+#
+# UPDATE (2020-10-05): GitHub has officially deprecated password-based
+#        authentication, and it will be disabled entirely on 2020-11-13:
+#
+#            https://developer.github.com/changes/2020-02-14-deprecating-password-auth/
+#
+#        A better approach (which you were probably using already, anyway) is
+#        to create what GitHub calls a "personal access token":
+#
+#            https://docs.github.com/en/free-pro-team@latest/github/authenticating-to-github/creating-a-personal-access-token
+#
+#        You use a "personal access token" in basically the same way that you
+#        would use a password (you put it in your ~/.netrc file as the value
+#        for the 'password' field), but the token itself can be configured to
+#        have more constrained permissions (you decide what it can do at the
+#        time you create the token).
+#
+#        You may wish to create a token that is not able to perform certain
+#        actions (e.g., deleting repositories). That will have a minor impact
+#        on the ads-github-tools, but they will simply tell you when they are
+#        not able to perform some action.
+#
+# DO NOT USE THIS TOOL UNLESS YOU TRUST THAT IT IS NOT ABUSING THIS TRUST.
+#
+#
+# Motivation
+# ==========
+# When working with the programs provided by the 'ads-github-tools' project
+# (or really any tool that makes calls to the GitHub API) you will want to be
+# able to confirm that the GitHub API recognizes your user in the way that you
+# expect.
+#
+# Separately, some tools (both those within the 'ads-github-tools' project,
+# and those you might write yourself) need a reliable way to obtain the
+# username of the authenticated user (a.k.a. 'owner') because it must be
+# specified in some contexts; for example:
+#
+#     GET /repos/{owner}/{repo}
+#
+# Q: Couldn't the username simply be inferred by context, or explicitly configured?
+#
+# A: In some contexts, it might be possible to infer the username. For
+#    example, when in a git working directory, there may be a git "remote"
+#    that could be used (by convention) from which the username could be
+#    parsed. Or direct git configuration could be leveraged to store the
+#    username explicitly (that is the approach used by git-hub(1)).
+#
+#    For programs that rely on curl(1) and its use of the ~/.netrc file (such
+#    as the 'ads-github-tools'), neither of those approaches is foolproof:
+#
+#        * Inferring based on data from the git working directory is only
+#          possible if there is already a git working directory, which is not
+#          always the case for operations performed by the 'ads-github-tools'.
+#
+#        * The name configured in the git configuration might not match
+#          'login' field as it appears in the relevant entry of the ~/.netrc
+#          file.
+#
+#
+# TODO
+# ====
+#
+#     * (Maybe) add additional output formats (edn, transit, others?)
+#       controlled by the -O (--output-format=WORD) option.
+#
+# See Also:
+# =========
+#
+#     * The 'Users' section of the GitHub API (v3)
+#       https://developer.github.com/v3/users/
+#       https://docs.github.com/en/free-pro-team@latest/rest/reference/users
+#
+#     * The 'git-hub' tool:
+#       https://github.com/sociomantic-tsunami/git-hub
+#
+#     * id(1)
+#
+#     * whoami(1) -- Note that the default output of 'whoami' is the same as
+#                    that of 'id -u -n'
+
+declare -r PROG='ads-github-whoami'
+
+declare -r COPYRIGHT_DATES='2020'
+
+set -o pipefail
+
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
+
+declare -r VERSION='@VERSION@'  # value filtered-in at build time
+
+declare -r gl_const_build_date='@BUILD_DATE@'  # value filtered-in at build time
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
+
+BE_VERBOSE=false # info-level output; override with one '-v' opt
+
+# This one implies BE_VERBOSE, too
+DEBUGGING=false  # debug-level output; override with two '-v' opts
+
+
+RE_BLANK='^[[:space:]]*$'
+RE_EMPTY='^$'
+
+# Note that these are mutually exclusive; at most, only one will be in effect
+# at a time. Initially none of them are in effect.
+#
+DO_LONG=false      # enable with one '-l' (--long) opt
+DO_LOONG=false     # enable with two '-l' (--long) opts
+DO_LOOONG=false    # enable with three '-l' (--long) opts
+DO_LOOOONG=false   # enable with four or more '-l' (--long) opts
+
+
+# Keys are internal values used by the program; values are allowed names for user-specified formats.
+declare -A LEGIT_OUTPUT_FORMAT_SYM_TO_NAME=()
+LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['JSON']='json'  # -O json
+LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['TEXT']='text'  # the default
+
+DFLT_OUTPUT_FORMAT=${LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['TEXT']}
+
+OUTPUT_FORMAT=    # set with '-O' (--output-format=WORD)
+
+
+declare -r gl_const_re_all_digits='^[[:digit:]]{1,}$'
+
+
+# Folks using GitHub Enterprise might access their API at a different
+# location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
+# URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
+# credentials being transmitted in cleartext!).
+#
+# This is NOT declared read-only here because there is some minor fixup that
+# we attempt so users do not need to be concerned with whether or not the URL
+# ends with a slash. For our purposes we need the value to end with a slash,
+# and will add a slash to the end if it is not specified here.
+#
+declare    gl_const_github_api_base_url='https://api.github.com/'
+
+# We'll help future-proof this program by explicitly requesting version 3 of
+# the GitHub API (although it is the default at the time of writing
+# (2020-10)).
+#
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+
+# By default we'll use the external programs found at configure-time (values
+# are filtered-in here at build time). But we allow the user to override any
+# particular tool by setting an environment variable named after the tool
+# (with hyphen chars changed to underscores).
+
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+JQ_PROG="${JQ:-@JQ_PROG@}"
+RM_PROG="${RM:-@RM@}"
+
+CAT_PROG="${CAT:-@CAT@}"
+
+CURL_PROG="${CURL:-@CURL_PROG@}"
+DATE_PROG="${DATE:-@DATE_PROG@}"
+
+MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
+
+declare -a NEEDED_EXTERNAL_PROGS=(
+    "${JQ_PROG}"
+    "${RM_PROG}"
+
+    "${CAT_PROG}"
+
+    "${CURL_PROG}"
+
+    "${MKTEMP_PROG}"
+)
+
+
+declare -a F_CLEANUP_HOOK_NAMES=()
+
+function f_add_cleanup_hook_name () {
+    F_CLEANUP_HOOK_NAMES+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#F_CLEANUP_HOOK_NAMES[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#F_CLEANUP_HOOK_NAMES[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${F_CLEANUP_HOOK_NAMES[$idx]}
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): running cleanup hook: [%s]\n" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf "$PROG (warn): HUP signal caught; bailing out\n"  1>&2; f_cleanup_and_die' HUP
+trap 'printf "$PROG (warn): INT signal caught; bailing out\n"  1>&2; f_cleanup_and_die' INT
+trap 'printf "$PROG (warn): QUIT signal caught; bailing out\n" 1>&2; f_cleanup_and_die' QUIT
+trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+f_print_help () {
+
+    "${CAT_PROG}" <<EOF
+usage: $PROG { -h | --help }
+  or:  $PROG { -V | --version }
+  or:  $PROG [OPTION...]
+
+Show the currently authenticated GitHub user
+
+Mandatory arguments to long options are mandatory for short options, too.
+
+  -h, --help                Print this help message on stdout
+  -V, --version             Print the version of the program on stdout
+
+  -l, --long                Use a long listing format.
+                              Two or more -l options makes the listing even longer.
+
+  -O, --output-format=WORD  Emit output in the format specified by WORD [default: text]
+                              Valid values for WORD include: 'text' and 'json'
+
+  -v, --verbose             Print program progress messages on stderr. Specify multiple
+                              times to increase verbosity: info, debug, and tracing (set -x)
+
+      --                    Signals the end of options and disables further options processing.
+
+Report bugs to $MAINTAINER.
+EOF
+}
+
+f_print_version () {
+    "${CAT_PROG}" <<EOF
+${PROG} ${gl_const_release}
+Copyright (C) ${COPYRIGHT_DATES} Alan D. Salewski
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+# Invoked by our accumulating '-v' (--verbose) option. Increases the program
+# output verbosity level by "one stage".
+#
+# If we have not yet increased the verbosity, then enables info-level output
+# ($BE_VERBOSE).
+#
+# If we are currently at info-level verbosity, then enables debug-level output
+# ($DEBUGGING).
+#
+# If we are currently at debug-level verbosity, then enables trace-level
+# output (set -x).
+#
+# If we are already at trace-level verbosity, then this function has no effect
+# (is effectively a NOOP).
+#
+f_maybe_increase_verbosity () {
+
+    if $BE_VERBOSE; then
+
+        # We are (at least) at info-level verbosity currently.
+        if $DEBUGGING; then
+            # We are (at least) at debug-level verbosity currently.
+
+            case $- in
+                *x* )
+                    : $PROG \(trace: $LINENO\): tracing already enabled
+                    ;;
+                * )
+                    printf "${PROG} (debug): additional verbosity requested; enabling trace-level output\n" 1>&2
+                    set -x
+                    ;;
+            esac
+        else
+            printf "${PROG} (info): additional verbosity requested; enabling debug-level output\n" 1>&2
+            DEBUGGING=true
+        fi
+    else
+        printf "${PROG} (info): verbose output requested; enabling info-level output\n" 1>&2
+        BE_VERBOSE=true
+    fi
+}
+
+
+# Checks if FORMAT_NAME is one of the legitimate names for an output format
+# (all legit format names are present as values in our $LEGIT_OUTPUT_FORMAT_SYM_TO_NAME
+# associative array).
+#
+# If the provided FORMAT_NAME is legit, then $OUTPUT_FORMAT will be set to its
+# corresponding internal name (the corresponding key in $LEGIT_OUTPUT_FORMAT_SYM_TO_NAME).
+#
+# Otherwise a message is printed on stderr and the program exits with an error status.
+#
+# @param CLI_OPT_NAME - (required) The name of the command line option to which FORMAT_NAME was provided as an argument
+#
+# @param FORMAT_NAME  - (required) A a user-provided format name value.
+#
+f_set_output_format_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local -r __cli_opt_name=$1
+    local -r __format_name_to_check=$2
+
+    # We will use this to display a comma-separated list of the legit options
+    # in the event that we need to emit an error message.
+    #
+    local __t_flattened_format_opt_names=''
+
+    for __t_key_name in "${!LEGIT_OUTPUT_FORMAT_SYM_TO_NAME[@]}"; do
+
+        __t_legit_format_name="${LEGIT_OUTPUT_FORMAT_SYM_TO_NAME["${__t_key_name}"]}"
+
+        if test "${__t_legit_format_name}" = "${__format_name_to_check}"; then
+            OUTPUT_FORMAT=${__t_key_name}
+            return 0  # success
+        fi
+
+        if test -n "${__t_flattened_format_opt_names}"; then
+            __t_flattened_format_opt_names="${__t_flattened_format_opt_names}"', '  # append comma-space
+        fi
+        __t_flattened_format_opt_names="${__t_flattened_format_opt_names}${__t_legit_format_name}"
+    done
+
+    printf "${PROG} (error): invalid format name \"%s\" provided for '%s' option; valid values include: [%s]; bailing out\n" \
+           "${__format_name_to_check}" \
+           "${__cli_opt_name}"         \
+           "${__t_flattened_format_opt_names}" 1>&2
+
+    # This is the "...or die" part...
+    exit 1
+}
+
+
+pos_last_plus_one=$(( $# + 1 ))
+
+# Each value is one or zero, which indicates whether or not the option is
+# expected to have an argument.
+#
+declare -A longopt_spec=(
+    ['help']=0       # (no short-form equivalent)
+    ['version']=0    # -V
+
+    ['long']=0           # -l
+    ['output-format']=1  # -O
+
+    ['verbose']=0    # -v
+)
+
+# internal sanity check
+for one_key in "${!longopt_spec[@]}"; do
+    one_val=${longopt_spec[${one_key}]}
+    if [[ $one_val =~ ^[01]$ ]]; then :; else
+        printf "${PROG} (BUG) [line $LINENO]: value (%s) for longopt key '%s' must be either 0 or 1; bailing out\n" \
+               "${one_val}" "${one_key}" 1>&2
+        exit 1
+    fi
+done
+
+if test $# -gt 0; then
+
+    # Using getopts in "silent mode". Note that adding '-' to the optstring allows us to
+    # process GNU-style long-form options; that option is specified to take an argument to
+    # cause getopts to place whatever follows the second '-' character into OPTARG.
+    #
+    # Note that getopts will automatically stop processsing options upon encountering
+    # '--', but we still need to deal with the pathological form --=BLAH (no option name,
+    # just a value using the equals-sign syntax).
+    #
+    while getopts ':-:hlO:Vv' opt
+    do
+        : $PROG \(trace: $LINENO\): opt is: $opt
+        : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+        : $PROG \(trace: $LINENO\): OPTIND is: $OPTIND
+
+        if test "${opt}" = '-'; then
+
+            # Intercepting processing of long-form option. This conditional
+            # block will set up the 'opt', 'OPTARG', and 'OPTIND' variables for
+            # the code that follows, just as if getopts had the capability to
+            # process long-form options.
+
+            # OPTARG here is one of:
+            #
+            #     =BLAH    (which means user specified '--=BLAH')
+            # or:
+            #     foo
+            # or:
+            #     foo=FOOVAL
+
+            if [[ ${OPTARG} =~ .*=.* ]]; then
+
+                : $PROG \(trace: $LINENO\): OPTARG is name=value style
+
+                # Keep everything up to the first '=' sign. Note that if the
+                # option was specified as: --foo=FOOVAL, then $opt here will be
+                # 'foo' (no hyphen chars).
+                opt=${OPTARG/=*/}
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                : $PROG \(trace: $LINENO\): a long option name must be at least two characters in length
+                if test ${#opt} -le 1; then
+                    printf "${PROG} (error): invalid long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): unrecognized long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # Since we know the option was specified in --foo=BAR form, the
+                # option was specified erroneously unless the option's long-form
+                # spec indicates that it can accept an argument.
+                #
+                if test ${longopt_spec[${opt}]} -ne 1; then
+                    printf "${PROG} (error): option '--%s' does not take an argument; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                OPTARG=${OPTARG#*=}  # keep everything after the first '=' sign
+                : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+
+                # All of our command line options that accept arguments
+                # require the values for those arguments to be non-empty
+                # strings.
+                if [[ "${OPTARG}" =~ $RE_BLANK ]]; then
+                    printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+            else
+                : $PROG \(trace: $LINENO\): OPTARG is name-only style
+
+                opt="$OPTARG"
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                if test -z "${opt}"; then
+
+                    # This should be a "can't happen" scenario; since bash's 'getopts'
+                    # implementation should directly handle the magic '--' token, we
+                    # should never fall through here.
+
+                    printf "${PROG} (BUG) [line $LINENO]: received empty OPTARG, which means getopts did not handle the stand-alone '--' token; bailing out\n" 1>&2
+                    exit 1
+                fi
+
+                : $PROG \(trace: $LINENO\): a non-empty long option name must be at least two characters in length
+                if test ${#opt} -lt 2; then
+                    printf "${PROG} (error): invalid long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                : $PROG \(trace: $LINENO\): a long option name must be one that the program is expecting
+                if $t_exists; then :; else
+
+                    printf "${PROG} (error): invalid long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # We know the option was specified in one of the following forms:
+                #
+                #     --foo
+                # or:
+                #     --foo FOOVAL
+                #
+                # The option's long-form spec will tell us whether or not an argument is
+                # expected for the option.
+                #
+                if test ${longopt_spec[${opt}]} -eq 1; then
+
+                    # If bumping OPTIND would put us more than one beyond the "last pos
+                    # plus one", then there is no argument provided at position OPTIND for
+                    # us to consume.
+                    #
+                    if (( $(( $OPTIND + 1 )) > pos_last_plus_one )); then
+
+                        printf "${PROG} (error): missing argument for option --${OPTARG}\n" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+
+                    OPTARG=${@:${OPTIND}:1}
+                    (( ++OPTIND ))
+                    : $PROG \(trace: $LINENO\): manually incremented OPTIND to: $OPTIND
+
+                    # All of our command line options that accept arguments
+                    # require the values for those arguments to be non-empty
+                    # strings.
+                    if [[ "${OPTARG}" =~ $RE_BLANK ]]; then
+                        printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${OPTARG}" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+                fi
+            fi
+        fi
+
+        : $PROG \(trace: $LINENO\): opt is: $opt
+        : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+        : $PROG \(trace: $LINENO\): OPTIND is: $OPTIND
+
+        # Normal getopts style processing happens beneath here, with the slight
+        # twist that 'opt' may contain a long-form option name.
+
+        case $opt in
+
+            # Note that 'h' here means '--human-readable', not '--help'; see below.
+            #
+            'h' | 'help' )
+                # print help message
+                f_print_help
+                exit 0
+                ;;
+
+            'V' | 'version' )
+                # print program version info
+                f_print_version
+                exit 0
+                ;;
+
+            'v' | 'verbose' )
+                # Accumulating 'verbose' opt. A single -v opt simply turns
+                # BE_VERBOSE on (info level output); two '-v' opts turns on
+                # $DEBUGGING (debug level output); three or more '-v' opts turns
+                # tracing on. Note that if you intend to turn tracing on, you'll
+                # probably want your -v opts to be the first opts on the command
+                # line (so they take effect earlier).
+                #
+                f_maybe_increase_verbosity
+                ;;
+
+            'long' | 'l' )
+                # Increasingly-long 'long' opt. User requests
+                # increasingly-long output by specifying additional '-l'
+                # (--long) options on the command line. Currently five levels
+                # are supported: none, 1x, 2x, and 3x, and 4x. Additional '-l'
+                # opts are accepted, but (currently) anything more than four
+                # will not affect the output produced. Allows us to optimize
+                # for the common case, yet still keep noisy-looking,
+                # less-often-valuable information within easy reach.
+                #
+                # The DO_LO*NG options are mutually exclusive (they do not
+                # "accumulate" the way the '-v' opts do; if 'DO_LOOONG' is
+                # in-effect, then 'DO_LONG' is not).
+                #
+                # Design note: We could simplify the code here a bit by using
+                #              a single mode flag (e.g.,
+                #              'LONG=none|1x|2x|3x|4x', but that makes the
+                #              feature more cumbersome to use in the places
+                #              that it is tested (even if we provide functions
+                #              for it).
+                #
+                if $DO_LOOOONG; then
+                    : $PROG \(trace: $LINENO\): 4x-long output already enabled
+                else
+                    if $DO_LOOONG; then
+                        # We've seen at least three '-l' opts before
+
+                        DO_LOOONG=false  # disable 3x
+                        DO_LOOOONG=true  # enable  4x
+                        if $DEBUGGING; then
+                            printf "${PROG} (debug): 4x-long output enabled\n" 1>&2
+                        fi
+                    else
+                        if $DO_LOONG; then
+                            # We've seen at least two '-l' opts before
+
+                            DO_LOONG=false  # disable 2x
+                            DO_LOOONG=true  # enable  3x
+                            if $DEBUGGING; then
+                                printf "${PROG} (debug): 3x-long output enabled\n" 1>&2
+                            fi
+                        else
+
+                            if $DO_LONG; then
+                                # We've see a single '-l' opt thus far
+
+                                DO_LONG=false  # disable 1x
+                                DO_LOONG=true  # enable  2x
+                                if $DEBUGGING; then
+                                    printf "${PROG} (debug): 2x-long output enabled\n" 1>&2
+                                fi
+                            else
+                                # This is the first '-l' opt we've seen
+                                DO_LONG=true
+                                if $DEBUGGING; then
+                                    printf "${PROG} (debug): 1x-long output enabled\n" 1>&2
+                                fi
+                            fi
+                        fi
+                    fi
+                fi
+                ;;
+
+
+            'O' | 'output-format' )
+                t_local_opt_string='-'"${opt}"  # correct for single-letter option name
+                if test "${#opt}" -gt 1; then
+                    t_local_opt_string='-'"${t_local_opt_string}"  # correct for long-form option name
+                fi
+                f_set_output_format_or_die "${t_local_opt_string}" "${OPTARG}"
+                ;;
+
+
+            ':')  # getopts put : in opt
+                  # Note that we need to restore the leading '-' that getopts
+                  # has sliced off.
+                  printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            '?')  # getopts put ? in opt
+                  # Unrecognized option. Note that we need to restore the
+                  # leading '-' that getopts has sliced off.
+                  printf "${PROG} (error): unrecognized option '-%s'; bailing out\n" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            * )   printf "${PROG} (BUG) [line $LINENO]: unhandled option case; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                  ;;
+
+        esac
+    done
+fi
+
+# shift off all arguments already handled
+let ii=1;  # shell OPTIND index starts at 1
+while (( ii < ${OPTIND} )); do
+    shift
+    (( ++ii ))
+    : $PROG \(trace: $LINENO\): ii is now: $ii
+done
+
+if test $# -gt 0; then
+    printf "${PROG} (error): unrecognized command line parameters: \"%s\"; bailing out\n" "$*" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+
+
+if test -z "${OUTPUT_FORMAT}"; then
+    OUTPUT_FORMAT=$DFLT_OUTPUT_FORMAT
+fi
+
+
+# Refuse to run if we do not recognize the URL as something that will be
+# encrypted on the wire. This is intended to help prevent accidentally
+# transmitting HTTP Basic Auth credentials in cleartext.
+#
+re_starts_with_https='^https://'
+if test -z "${gl_const_github_api_base_url}"; then
+    printf "${PROG} (error): GitHub API base URL is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_github_api_base_url}" =~ $re_starts_with_https ]]; then :; else
+    printf "${PROG} (error): configured GitHub API base URL (\"%s\") does not start with 'https://'; bailing out\n" "${gl_const_github_api_base_url}" 1>&2
+    exit 1
+fi
+#
+re_ends_with_slash='.*[/]$'
+if [[ "${gl_const_github_api_base_url}" =~ $re_ends_with_slash ]]; then :; else
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (\"%s\") does not end with a slash; appending slash character\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+    gl_const_github_api_base_url="${gl_const_github_api_base_url}/"
+    declare -r gl_const_github_api_base_url
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): configured GitHub API base URL (modified) is now: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+    fi
+fi
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured GitHub API base URL: \"%s\"\n" "${gl_const_github_api_base_url}" 1>&2
+fi
+
+
+re_starts_with_accept='Accept:[[:space:]]'
+if test -z "${gl_const_http_accept_github_version}"; then
+    printf "${PROG} (error): HTTP 'Accept:' header for GitHub API version is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${gl_const_http_accept_github_version}" =~ $re_starts_with_accept ]]; then :; else
+    printf "${PROG} (error): configured HTTP 'Accept:' header (\"%s\") for GitHub API version does not start with 'Accept: '; bailing out\n" "${gl_const_http_accept_github_version}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf "${PROG} (info): configured HTTP header for GitHub API version: \"%s\"\n" "${gl_const_http_accept_github_version}" 1>&2
+fi
+
+
+MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
+if test $? -ne 0; then
+    printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
+    exit 1
+fi
+#
+# This should be a "can't happen" scenario, but since we do a 'rm -fr ...' on
+# the value when we are done, we want to be belt-and-suspenders about it...
+#
+if test -z "${MY_TMP_DIR}"; then
+    printf "${PROG} (error) temporary directory path is empty; bailing out\n" 1>&2
+    exit 1
+fi
+function f_cleanup_rmfr_tmpdir () {
+    local -a t_rm_opts=()
+    t_rm_opts+=('-f')
+    t_rm_opts+=('-r')
+    if $DEBUGGING; then
+        t_rm_opts+=('-v')  # verbose
+    fi
+    "${RM_PROG}" "${t_rm_opts[@]}" "${MY_TMP_DIR}"
+    # Ignore exit status -- Is a cleanup hook, so do not exit the process if
+    # 'rm' failed; keep going...
+}
+F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
+
+declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
+
+
+# Note that the gl_const_http_accept_github_version value is known to always
+# end with a slash character.
+#
+#     GET /user
+#
+# https://developer.github.com/v3/users/#get-the-authenticated-user
+# https://docs.github.com/en/free-pro-team@latest/rest/reference/users#get-the-authenticated-user
+#
+MY_GITHUB_USER_URL="${gl_const_github_api_base_url}user"
+
+
+# Common global options for use in every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify this array.
+#
+declare -a MY_CURL_OPTS=()
+
+# This disables output of curl's progress meter /and/ output of error messages...
+MY_CURL_OPTS+=( '--silent' )
+# ...but this re-enables output of the error messages.
+MY_CURL_OPTS+=( '--show-error' )
+
+
+# Force use of TLS 1.2 (or later). Writing in 2020, all previous versions are
+# known to be broken and susceptible to known attacks. Note that the
+# '--tlsv1.2' option was added in curl 7.34.0
+#
+# This is absolutely essential since we're using HTTP Basic Auth (see below).
+#
+MY_CURL_OPTS+=( '--tlsv1.2' )
+
+# Allow ONLY https, for both the initial request and for redirects
+MY_CURL_OPTS+=( '--proto')
+MY_CURL_OPTS+=( 'https')
+MY_CURL_OPTS+=( '--proto-redir')
+MY_CURL_OPTS+=( 'https')
+
+
+# Tell curl to use HTTP Basic Authentication. This is the curl default, but
+# we're explicit about what we expect (and want to avoid any surprises from
+# weirdo ~/.curlrc files).
+#
+# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+#
+MY_CURL_OPTS+=( '--basic' )
+
+
+# User's authentication credentials will be obtained from the user's ~/.netrc
+# file. See curl(1) and netrc(5)
+#
+MY_CURL_OPTS+=( '--netrc'  )
+
+MY_CURL_OPTS+=( '--user-agent' )
+MY_CURL_OPTS+=( "$PROG"        )
+
+
+# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+# 2020, v3 is the default, but there is also a 'GraphQL API v4' version which
+# we do not use here. Some newer version may become the default in the future,
+# so we are explicit about which version we are using.
+#
+MY_CURL_OPTS+=( '--header' )
+MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+# We always write the (JSON) output to a file in our temporary directory...
+#
+MY_CURL_OPTS+=( '--output' )
+MY_CURL_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
+
+# ...and write the HTTP response status to stdout. This allows for robust
+# error handling. Also, we cannot really know how to interpret the output
+# returned from the remote server until we have examined (at least) the HTTP
+# response code.
+#
+MY_CURL_OPTS+=( '--write-out'  )
+MY_CURL_OPTS+=( '%{http_code}' )
+
+MY_CURL_OPTS+=( '--get' )
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): requesting /user\n" 1>&2
+fi
+t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+                              "${MY_GITHUB_USER_URL}" )
+if test $? -ne 0; then
+    # Hopefully 'curl' emitted a meaningful error message, too...
+    printf "${PROG} (error): curl(1) command failed while attempting to obtain the authenticated GitHub user; bailing out\n" 1>&2
+    exit 1
+fi
+if test -z "${t_http_code}"; then
+    printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+    exit 1
+fi
+
+if $DEBUGGING; then
+    printf "${PROG} (debug): GET /user: HTTP response status: %s\n" "${t_http_code}" 1>&2
+fi
+
+case ${t_http_code} in
+    '200')  # "OK"
+        ;;
+    *)
+        if test -s "${MY_TMP_CURL_OUT_FPATH}"; then
+            printf "${PROG} (error): HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n"\
+"    HTTP response payload may contain additional info:\n        %s\n" \
+                   "${t_http_code}" \
+                   "$("${CAT_PROG}" "${MY_TMP_CURL_OUT_FPATH}")" 1>&2
+        else
+            printf "${PROG} (error): HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n"\
+"    (HTTP response payload was empty)\n" \
+                   "${t_http_code}" 1>&2
+        fi
+        exit 1
+        ;;
+esac
+
+t_gh_json_service_response=$("${CAT_PROG}" "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    printf "${PROG} (error): was unable to read JSON response from temporary file (\"%s\"); bailing out" \
+           "${MY_TMP_CURL_OUT_FPATH}" 1>&2
+    exit 1
+fi
+if test -z "${t_gh_json_service_response}"; then
+    printf "${PROG} (error): JSON response is empty; bailing out\n" 1>&2
+    exit 1
+fi
+
+if test "${OUTPUT_FORMAT}" = 'JSON'; then
+    echo "${t_gh_json_service_response}"
+    exit $?  # We're done
+fi
+
+
+# The json structure emitted for the 'GET /user' endpoint comes in two
+# different forms: publicly visible user data and combined-public-and-private
+# user data; which structure is returned depends on two things:
+#
+#     1. Whether or not the user making the request is authenticated (always
+#        true in our use case -- we only make authenticated API calls)
+#
+#     2. Whether or not the OAuth or personal access token is allowed to
+#        access the 'user' scope (the operative permission name is 'read:user')
+#
+# We therefore always have the data from (1) available, and only sometimes may
+# have access to the data from (2) (even when authtenticated).
+#
+#
+# 1. Response with public and private profile information
+#    ----------------------------------------------------
+#
+#    Lists public and private profile information when authenticated through
+#    basic auth or OAuth with the 'user' scope.
+#
+#        {
+#            "login": "octocat",
+#            "id": 1,
+#            "node_id": "MDQ6VXNlcjE=",
+#            "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+#            "gravatar_id": "",
+#            "url": "https://api.github.com/users/octocat",
+#            "html_url": "https://github.com/octocat",
+#            "followers_url": "https://api.github.com/users/octocat/followers",
+#            "following_url": "https://api.github.com/users/octocat/following{/other_user}",
+#            "gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
+#            "starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
+#            "subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+#            "organizations_url": "https://api.github.com/users/octocat/orgs",
+#            "repos_url": "https://api.github.com/users/octocat/repos",
+#            "events_url": "https://api.github.com/users/octocat/events{/privacy}",
+#            "received_events_url": "https://api.github.com/users/octocat/received_events",
+#            "type": "User",
+#            "site_admin": false,
+#            "name": "monalisa octocat",
+#            "company": "GitHub",
+#            "blog": "https://github.com/blog",
+#            "location": "San Francisco",
+#            "email": "octocat@github.com",
+#            "hireable": false,
+#            "bio": "There once was...",
+#            "twitter_username": "monatheoctocat",
+#            "public_repos": 2,
+#            "public_gists": 1,
+#            "followers": 20,
+#            "following": 0,
+#            "created_at": "2008-01-14T04:33:35Z",
+#            "updated_at": "2008-01-14T04:33:35Z",
+#            "private_gists": 81,
+#            "total_private_repos": 100,
+#            "owned_private_repos": 100,
+#            "disk_usage": 10000,
+#            "collaborators": 8,
+#            "two_factor_authentication": true,
+#            "plan": {
+#                "name": "Medium",
+#                "space": 400,
+#                "private_repos": 20,
+#                "collaborators": 0
+#            }
+#        }
+#
+#
+# 2. Response with public profile information
+#    ----------------------------------------
+#
+#    Lists public profile information when authenticated through OAuth without
+#    the user scope.
+#
+#        {
+#            "login": "octocat",
+#            "id": 1,
+#            "node_id": "MDQ6VXNlcjE=",
+#            "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+#            "gravatar_id": "",
+#            "url": "https://api.github.com/users/octocat",
+#            "html_url": "https://github.com/octocat",
+#            "followers_url": "https://api.github.com/users/octocat/followers",
+#            "following_url": "https://api.github.com/users/octocat/following{/other_user}",
+#            "gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
+#            "starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
+#            "subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+#            "organizations_url": "https://api.github.com/users/octocat/orgs",
+#            "repos_url": "https://api.github.com/users/octocat/repos",
+#            "events_url": "https://api.github.com/users/octocat/events{/privacy}",
+#            "received_events_url": "https://api.github.com/users/octocat/received_events",
+#            "type": "User",
+#            "site_admin": false,
+#            "name": "monalisa octocat",
+#            "company": "GitHub",
+#            "blog": "https://github.com/blog",
+#            "location": "San Francisco",
+#            "email": "octocat@github.com",
+#            "hireable": false,
+#            "bio": "There once was...",
+#            "twitter_username": "monatheoctocat",
+#            "public_repos": 2,
+#            "public_gists": 1,
+#            "followers": 20,
+#            "following": 0,
+#            "created_at": "2008-01-14T04:33:35Z",
+#            "updated_at": "2008-01-14T04:33:35Z"
+#        }
+#
+# First we'll parse out all but one of the publicly-visible fields, since that
+# grabs the bulk of them.
+#
+# We read the 'name' field last because it may contain multiple tokens, but
+# 'read' clumps them all together into the last variable named ('ghu_name').
+#
+# For the same reason, we read the 'bio' field in a separate 'read' invocation.
+#
+# Any fields for which the data value is 'null' in the JSON response (or any
+# field whose key name we have mistyped :-) will have the value of '-' (a
+# single hyphen char; ordinarily we would use 'empty', but we need placeholder
+# tokens for each field in the output, anyway, so this kills two birds with
+# one stone). Note that we program defensively for this case even in fields
+# for which we never expect to actually receive a null value.
+#
+read -r \
+  ghu_login      \
+  ghu_id         \
+  ghu_node_id    \
+  ghu_html_url   \
+  ghu_type       \
+  ghu_site_admin \
+  ghu_company    \
+  ghu_blog       \
+  ghu_location   \
+  ghu_email      \
+  ghu_hireable   \
+  ghu_public_repos  \
+  ghu_public_gists  \
+  ghu_followers     \
+  ghu_following     \
+  ghu_created_at    \
+  ghu_updated_at    \
+  ghu_name          \
+  < <("${JQ_PROG}" -r ''\
+'"\(if ((null == .login)        or ("" == .login))        then "-" else .login        end)'\
+' \(if ((null == .id)           or ("" == .id))           then "-" else .id           end)'\
+' \(if ((null == .node_id)      or ("" == .node_id))      then "-" else .node_id      end)'\
+' \(if ((null == .html_url)     or ("" == .html_url))     then "-" else .html_url     end)'\
+' \(if ((null == .type)         or ("" == .type))         then "-" else .type         end)'\
+' \(if ((null == .site_admin)   or ("" == .site_admin))   then "-" else .site_admin   end)'\
+' \(if ((null == .company)      or ("" == .company))      then "-" else .company      end)'\
+' \(if ((null == .blog)         or ("" == .blog))         then "-" else .blog         end)'\
+' \(if ((null == .location)     or ("" == .location))     then "-" else .location     end)'\
+' \(if ((null == .email)        or ("" == .email))        then "-" else .email        end)'\
+' \(if ((null == .hireable)     or ("" == .hireable))     then "-" else .hireable     end)'\
+' \(if ((null == .public_repos) or ("" == .public_repos)) then "-" else .public_repos end)'\
+' \(if ((null == .public_gists) or ("" == .public_gists)) then "-" else .public_gists end)'\
+' \(if ((null == .followers)    or ("" == .followers))    then "-" else .followers    end)'\
+' \(if ((null == .following)    or ("" == .following))    then "-" else .following    end)'\
+' \(if ((null == .created_at)   or ("" == .created_at))   then "-" else .created_at   end)'\
+' \(if ((null == .updated_at)   or ("" == .updated_at))   then "-" else .updated_at   end)'\
+' \(if ((null == .name)         or ("" == .name))         then "-" else .name         end)'\
+'"' < "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    # Hopefully some other (more useful) error message was also emitted by
+    # jq(1) or bash(1)...
+    printf "${PROG} (error): was unable to extract public user data from JSON response; bailing out\n" 1>&2
+    exit 1
+fi
+
+read -r ghu_bio < <("${JQ_PROG}" -r '"\(if ((null == .bio) or ("" == .bio)) then "-" else .bio end)"' < "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    # Hopefully some other (more useful) error message was also emitted by
+    # jq(1) or bash(1)...
+    printf "${PROG} (error): was unable to extract public 'bio' user data from JSON response; bailing out\n" 1>&2
+    exit 1
+fi
+
+
+# Parse out private user fields, if available; else use default value '-' for
+# each.
+read -r \
+  ghu_private_gists       \
+  ghu_total_private_repos \
+  ghu_owned_private_repos \
+  ghu_disk_usage          \
+  ghu_collaborators       \
+  ghu_two_factor_authentication \
+\
+  ghu_plan_name           \
+  ghu_plan_space          \
+  ghu_plan_private_repos  \
+  ghu_plan_collaborators  \
+  < <("${JQ_PROG}" -r ''\
+'"\(if ((null == .private_gists)             or ("" == .private_gists))             then "-" else .private_gists end)'\
+' \(if ((null == .total_private_repos)       or ("" == .total_private_repos))       then "-" else .total_private_repos end)'\
+' \(if ((null == .owned_private_repos)       or ("" == .owned_private_repos))       then "-" else .owned_private_repos end)'\
+' \(if ((null == .disk_usage)                or ("" == .disk_usage))                then "-" else .disk_usage end)'\
+' \(if ((null == .collaborators)             or ("" == .collaborators))             then "-" else .collaborators end)'\
+' \(if ((null == .two_factor_authentication) or ("" == .two_factor_authentication)) then "-" else .two_factor_authentication end)'\
+\
+' \(if ((null == .plan) or (null == .plan.name)          or ("" == .plan.name))          then "-" else .plan.name end)'\
+' \(if ((null == .plan) or (null == .plan.space)         or ("" == .plan.space))         then "-" else .plan.space end)'\
+' \(if ((null == .plan) or (null == .plan.private_repos) or ("" == .plan.private_repos)) then "-" else .plan.private_repos end)'\
+' \(if ((null == .plan) or (null == .plan.collaborators) or ("" == .plan.collaborators)) then "-" else .plan.collaborators end)'\
+'"' < "${MY_TMP_CURL_OUT_FPATH}")
+if test $? -ne 0; then
+    # Hopefully some other (more useful) error message was also emitted by
+    # jq(1) or bash(1)...
+    printf "${PROG} (error): was unable to extract private user data from JSON response; bailing out\n" 1>&2
+    exit 1
+fi
+
+:
+: ---- public
+: $PROG \(trace: $LINENO\): ghu_login: ${ghu_login}
+: $PROG \(trace: $LINENO\): ghu_id: ${ghu_id}
+: $PROG \(trace: $LINENO\): ghu_node_id: ${ghu_node_id}
+: $PROG \(trace: $LINENO\): ghu_html_url: ${ghu_html_url}
+: $PROG \(trace: $LINENO\): ghu_type: ${ghu_type}
+: $PROG \(trace: $LINENO\): ghu_site_admin: ${ghu_site_admin}
+: $PROG \(trace: $LINENO\): ghu_company: ${ghu_company}
+: $PROG \(trace: $LINENO\): ghu_blog: ${ghu_blog}
+: $PROG \(trace: $LINENO\): ghu_location: ${ghu_location}
+: $PROG \(trace: $LINENO\): ghu_email: ${ghu_email}
+: $PROG \(trace: $LINENO\): ghu_hireable: ${ghu_hireable}
+: $PROG \(trace: $LINENO\): ghu_public_repos: ${ghu_public_repos}
+: $PROG \(trace: $LINENO\): ghu_public_gists: ${ghu_public_gists}
+: $PROG \(trace: $LINENO\): ghu_followers: ${ghu_followers}
+: $PROG \(trace: $LINENO\): ghu_following: ${ghu_following}
+: $PROG \(trace: $LINENO\): ghu_created_at: ${ghu_created_at}
+: $PROG \(trace: $LINENO\): ghu_updated_at: ${ghu_updated_at}
+:
+: ---- private \(top-level\)
+: $PROG \(trace: $LINENO\): ghu_private_gists: ${ghu_private_gists}
+: $PROG \(trace: $LINENO\): ghu_total_private_repos: ${ghu_total_private_repos}
+: $PROG \(trace: $LINENO\): ghu_owned_private_repos: ${ghu_owned_private_repos}
+: $PROG \(trace: $LINENO\): ghu_disk_usage: ${ghu_disk_usage}
+: $PROG \(trace: $LINENO\): ghu_collaborators: ${ghu_collaborators}
+: $PROG \(trace: $LINENO\): ghu_two_factor_authentication: ${ghu_two_factor_authentication}
+: $PROG \(trace: $LINENO\): ghu_name: ${ghu_name}
+: $PROG \(trace: $LINENO\): ghu_bio: ${ghu_bio}
+:
+: ---- private \(plan\)
+: $PROG \(trace: $LINENO\): ghu_plan_name: ${ghu_plan_name}
+: $PROG \(trace: $LINENO\): ghu_plan_space: ${ghu_plan_space}
+: $PROG \(trace: $LINENO\): ghu_plan_private_repos: ${ghu_plan_private_repos}
+: $PROG \(trace: $LINENO\): ghu_plan_collaborators: ${ghu_plan_collaborators}
+
+
+if test '-' = "${ghu_name}"; then
+    ghu_name_disp=${ghu_name}
+else
+    ghu_name_disp='"'"${ghu_name}"'"'
+fi
+declare -r ghu_name_disp
+
+if test '-' = "${ghu_email}"; then
+    ghu_email_disp=${ghu_email}
+else
+    ghu_email_disp="<${ghu_email}>"
+fi
+declare -r ghu_email_disp
+
+# For the MFA flag, we want to help the user avoid mistaking the value '-' as
+# meaning "false" or "MFA not set". This is more important for a
+# security-relevant field such as this than most of the others, so we'll spell
+# it out.
+#
+if test '-' = "${ghu_two_factor_authentication}"; then
+    ghu_two_factor_authentication_disp='[DATA NOT AVAILABLE]'
+else
+    if test 'true' = "${ghu_two_factor_authentication}"; then
+        ghu_two_factor_authentication_disp='yes'
+    elif test 'false' = "${ghu_two_factor_authentication}"; then
+        ghu_two_factor_authentication_disp='no'
+    else
+        ghu_two_factor_authentication_disp=${ghu_two_factor_authentication}
+    fi
+fi
+declare -r ghu_two_factor_authentication_disp
+
+if ! $DO_LONG   \
+&& ! $DO_LOONG  \
+&& ! $DO_LOOONG \
+&& ! $DO_LOOOONG; then
+    # This simplest case: The user has not requested any particular data, so
+    # we'll just emit the username (a.k.a. "owner") field.
+    printf '%-s\n' "${ghu_login}"
+
+else
+    # "Long" output was requested. One or more '-l' (--long') options was
+    # specified on the command line.
+    #
+    # The output emitted will be constructed in phases, based "how much" long
+    # output was requested. Each successive level builds upon the the earlier
+    # levels; this ensures we emit a strict superset as we increase the amount
+    # of data displayed.
+    #
+    # XXX: This is structured to make it easier to determine whether or not
+    #      the implementation is correct, but the output format is not (yet)
+    #      set in stone (so do not rely on it in anything that will be
+    #      expensive to change, if needed). We reserve the right to change
+    #      what the different levels of long output mean; the current
+    #      implementation is just what seems like a reasonable first attempt
+    #      at the time of writing.
+
+    ostr=''
+
+    # 1x long output: Show basic contact information for user, if available.
+    printf -v ostr '%-s  %s  %-s %s' \
+           "${ghu_login}" \
+           "${ghu_id}"    \
+           "${ghu_name_disp}" \
+           "${ghu_email_disp}"
+
+    : $PROG \(trace: $LINENO\): 1x long, ostr is: @@@[[[___"${ostr}"___]]]@@@
+
+    if $DO_LONG; then :; else
+
+        # Generate a horizontal separator that is as wide as the first line in
+        # our output string.
+        #
+        sepval='    '  # four spaces
+        sepchunks=$(( ${#ostr} - ${#sepval} ))
+        while test ${#sepval} -lt ${#ostr}; do
+            sepval="${sepval}"$'\u2500'  # U+2500: BOX DRAWINGS LIGHT HORIZONTAL
+        done
+
+        # DO_LOONG or DO_LOOONG is in-effect
+        #
+        # Build upon our 1x output already constructed.
+
+        t_max_numeric=0
+        test ${#ghu_public_repos} -gt ${t_max_numeric} && t_max_numeric=${#ghu_public_repos}
+        test ${#ghu_public_gists} -gt ${t_max_numeric} && t_max_numeric=${#ghu_public_gists}
+        test ${#ghu_followers}    -gt ${t_max_numeric} && t_max_numeric=${#ghu_followers}
+        test ${#ghu_following}    -gt ${t_max_numeric} && t_max_numeric=${#ghu_following}
+
+        if [[ ${ghu_total_private_repos} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_total_private_repos} -gt ${t_max_numeric} && t_max_numeric=${#ghu_total_private_repos}
+        fi
+        if [[ ${ghu_owned_private_repos} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_owned_private_repos} -gt ${t_max_numeric} && t_max_numeric=${#ghu_owned_private_repos}
+        fi
+
+        if [[ ${ghu_private_gists} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_private_gists} -gt ${t_max_numeric} && t_max_numeric=${#ghu_private_gists}
+        fi
+
+        if [[ ${ghu_collaborators} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_collaborators} -gt ${t_max_numeric} && t_max_numeric=${#ghu_collaborators}
+        fi
+
+        if [[ ${ghu_plan_space} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_plan_space} -gt ${t_max_numeric} && t_max_numeric=${#ghu_plan_space}
+        fi
+        if [[ ${ghu_disk_usage} =~ $gl_const_re_all_digits ]]; then
+            test ${#ghu_disk_usage} -gt ${t_max_numeric} && t_max_numeric=${#ghu_disk_usage}
+        fi
+
+        # 2x long output: In addition to basic contact information for the
+        # user, also show (if available) the user's basic GitHub stats.
+        #
+        # Note that we append to ostr.
+        #
+        printf -v ostr '%s\n'\
+'      mfa enabled: %s\n'\
+'%s\n'\
+'     public repos: %*s\n'\
+'    private repos: %*s  (owned: %s)\n'\
+'     public gists: %*s\n'\
+'    private gists: %*s\n'\
+\
+'        followers: %*s\n'\
+'        following: %*s\n'\
+'    collaborators: %*s\n'\
+\
+'       plan space: %*s\n'\
+'       disk usage: %*s'\
+           "${ostr}" \
+           \
+           "${ghu_two_factor_authentication_disp}"   \
+           \
+           "${sepval}" \
+           \
+           "${t_max_numeric}" "${ghu_public_repos}"  \
+           "${t_max_numeric}" "${ghu_total_private_repos}" "${ghu_owned_private_repos}" \
+           "${t_max_numeric}" "${ghu_public_gists}"  \
+           "${t_max_numeric}" "${ghu_private_gists}" \
+           \
+           "${t_max_numeric}" "${ghu_followers}"     \
+           "${t_max_numeric}" "${ghu_following}"     \
+           "${t_max_numeric}" "${ghu_collaborators}" \
+           \
+           "${t_max_numeric}" "${ghu_plan_space}"    \
+           "${t_max_numeric}" "${ghu_disk_usage}"
+
+        : $PROG \(trace: $LINENO\): 2x long, ostr is: @@@[[[___"${ostr}"___]]]@@@
+
+        if $DO_LOONG; then :; else
+            # Build upon our 1x and 2x output chunks already constructed.
+
+            # 3x long output: In addition to the user's basic contact
+            # information and basic GitHub stats, also show (if available)
+            # location, website, organization affiliation, and bio.
+
+            printf -v ostr '%s\n'\
+'%s\n'\
+'          company: %s\n'\
+'         hireable: %s\n'\
+'         location: %s\n'\
+'           github: %s\n'\
+'          website: %s\n'\
+'              bio: %s'\
+                "${ostr}"   \
+                "${sepval}" \
+                \
+                "${ghu_company}"  \
+                "${ghu_hireable}" \
+                "${ghu_location}" \
+                "${ghu_html_url}" \
+                "${ghu_blog}"     \
+                "${ghu_bio}"
+
+            : $PROG \(trace: $LINENO\): 3x long, ostr is: @@@[[[___"${ostr}"___]]]@@@
+
+            if $DO_LOOONG; then :; else
+                # Build upon our 1x, 2x, and 3x output chunks already constructed.
+
+                # 4x long output: In addition to the user's basic contact
+                # information, basic GitHub stats, and bio info, also show (if
+                # available) GitHub account metadata that is less frequently
+                # interesting.
+
+                if test '-' = "${ghu_created_at}"; then
+                    ghu_created_at_disp=${ghu_created_at}
+                else
+                    ghu_created_at_disp=$("${DATE_PROG}" --utc --date="${ghu_created_at}" '+%F %T%z')
+                    if test $? -ne 0; then
+                        printf "${PROG} (warning): was unable to format raw \"created at\" date; will show raw value\n" 1>&2
+                        ghu_created_at_disp=${ghu_created_at}
+                        # keep going
+                    fi
+                fi
+                declare -r ghu_created_at_disp
+
+                if test '-' = "${ghu_updated_at}"; then
+                    ghu_updated_at_disp=${ghu_updated_at}
+                else
+                    ghu_updated_at_disp=$("${DATE_PROG}" --utc --date="${ghu_updated_at}" '+%F %T%z')
+                    if test $? -ne 0; then
+                        printf "${PROG} (warning): was unable to format raw \"updated at\" date; will show raw value\n" 1>&2
+                        ghu_updated_at_disp=${ghu_updated_at}
+                        # keep going
+                    fi
+                fi
+                declare -r ghu_updated_at_disp
+
+                if test '-' = "${ghu_site_admin}"; then
+                    ghu_site_admin_disp=${ghu_site_admin}
+                else
+                    if test 'true' = "${ghu_site_admin}"; then
+                        ghu_site_admin_disp='yes'
+                    elif test 'false' = "${ghu_site_admin}"; then
+                        ghu_site_admin_disp='no'
+                    else
+                        printf "${PROG} (warning): unrecognized value for site admin flag: \"%s\"; ignoring\n" "${ghu_site_admin}" 1>&2
+                        ghu_site_admin_disp='-'
+                        # keep going...
+                    fi
+                fi
+                declare -r ghu_site_admin_disp
+
+                printf -v ostr '%s\n'\
+'%s\n'\
+'       created at: %s\n'\
+'       updated at: %s\n'\
+'        plan name: %s\n'\
+'          node id: %s\n'\
+'       site admin: %s'\
+                "${ostr}"   \
+                "${sepval}" \
+                \
+                "${ghu_created_at_disp}" \
+                "${ghu_created_at_disp}" \
+                \
+                "${ghu_plan_name}" \
+                "${ghu_node_id}"   \
+                "${ghu_site_admin_disp}"
+
+                : $PROG \(trace: $LINENO\): 4x long, ostr is: @@@[[[___"${ostr}"___]]]@@@
+            fi
+        fi
+    fi
+    printf "%s\n" "${ostr}"
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): completed successfully\n" 1>&2
+fi
+
+exit 0
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.3.1' \
+#               --section='1' \
+#               > /outputdir/ads-github-whoami.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+  ads-github-whoami - Show the currently authenticated GitHub user
+
+
+=head1 SYNOPSIS
+
+  ads-github-whoami { -h | --help }
+  ads-github-whoami { -V | --version }
+
+  ads-github-whoami [-l | --long...] [-O | --output-format=WORD] [-v | --verbose...] [--]
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-whoami> program is part of the C<ads-github-tools> project.
+
+The C<ads-github-whoami> program is similar in spirit to the Unix L<whoami(1)>
+and L<id(1)> commands, but shows information about the authenticated GitHub
+user (as understood by the GitHub API).
+
+The program obtains its direct information via the GitHub v3 API call:
+
+    GET /user
+
+Default output is plain text for interactive command line use, but we also
+provide a knob to have the raw JSON response emitted, as instead (similar to
+how L<ads-github-show-rate-limits(1)> works).
+
+
+=head1 IMPLEMENTATION NOTES
+
+=head2 How it works
+
+The program makes an authenticated HTTPS C<GET> request to the GitHub API
+(using L<curl(1)>) to obtain the response body that contains a JSON
+representation of the authenticated GitHub user.  The GitHub user information
+is parsed out of the JSON structure and presented to the user.
+
+The default output (whitespace delimited columns of plain text) is suitable
+for a user working interactively in a shell and for use in a Unix shell
+pipeline.
+
+The C<--output-format=WORD> option can be used to request output in different
+formats. At the time of writing (2020-10-07), two formats are supported:
+C<text> and C<json>.
+
+All requests are made over HTTPS.
+
+
+=head2 Authentication
+
+No authentication data is used directly; the L<curl(1)> C<-n> (C<--netrc>)
+option is used, so the user is expected to store the necessary GitHub
+credentials in a C<~/.netrc> file. For details on setting that up, see
+L<curl(1)> and L<netrc(5)>. Note that curl will not use the C<~/.netrc> file
+if the permissions allow reading by group or other.
+
+HINT: The relevant line C<~/.netrc> file content should have the form:
+
+    machine api.github.com login YOUR_USER_NAME password YOUR_GITHUB_PERSONAL_ACCESS_TOKEN
+
+
+=head2 Motivation
+
+When working with the programs provided by the C<ads-github-tools> project (or
+really any tool that makes calls to the GitHub API) you will want to be able
+to confirm that the GitHub API recognizes your user credentials in the way
+that you expect. The C<ads-github-whoami> tool provides a window into that
+information.
+
+Separately, some tools (both those within the C<ads-github-tools> project, and
+those you might write yourself) need a reliable way to obtain the username of
+the authenticated user (a.k.a. "owner") because it must be specified in some
+contexts; for example:
+
+    GET /repos/{owner}/{repo}
+
+B<Q:> Couldn't the username simply be inferred by context, or explicitly configured?
+
+B<A:> In some contexts, it might be possible to infer the username. For
+example, when in a git working directory, there may be a git "remote" that
+could be used (by convention) from which the username could be parsed. Or
+direct git configuration could be leveraged to store the username explicitly
+(that is the approach used by git-hub(1)).
+
+For programs that rely on curl(1) and its use of the ~/.netrc file (such
+as the 'ads-github-tools'), neither of those approaches is foolproof:
+
+=over 4
+
+=item
+
+Inferring based on data from the git working directory is only
+possible if there is already a git working directory, which is not
+always the case for operations performed by the 'ads-github-tools'.
+
+=item
+
+The name configured in the git configuration might not match 'login' field as
+it appears in the relevant entry of the C<~/.netrc> file.
+
+=back
+
+
+=head1 OPTIONS
+
+Below are the command line options accepted by C<ads-github-whoami>.
+
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -l, --long
+
+Request longer output, in one of several flavors as described below.
+
+Increasingly-long output can be requested by by specifying additional C<-l>
+(C<--long>) options on the command line. Currently five levels
+are supported: none, "1x", "2x", and "3x", and "4x". Additional C<-l>
+opts are accepted, but (currently) anything more than four
+will not affect the output produced.
+
+The behavior of this option allows us to optimize for the common case, yet
+still keep noisy-looking, less-often-valuable information within easy reach.
+
+A discription of each of the long output "flavors" follows. See the
+L<EXAMPLES> section below to see sample output of all styles.
+
+=over 4
+
+=item * one C<-l> opt: "1x" long output
+
+In addition to the GitHub username (a.k.a. "owner"), also show basic contact
+information for user, if available.
+
+
+=item * two C<-l> opts: "2x" long output
+
+In addition to basic contact information for the user, also show (if
+available) the user's basic GitHub stats.
+
+
+=item * three C<-l> opts: "3x" long output
+
+In addition to the user's basic contact information and basic GitHub stats,
+also show (if available) location, website, organization affiliation, and bio.
+
+
+=item * four C<-l> opts: "4x" long output
+
+In addition to the user's basic contact information, basic GitHub stats, and
+bio info, also show (if available) GitHub account metadata that is less
+frequently interesting.
+
+=back
+
+
+=item -O, --output-format=WORD
+
+Allows the user to request output in a format other than the default
+whitespace-separated text columns, according to WORD.
+
+Valid values for WORD include:
+
+=over 4
+
+=item * text  (this is the default)
+
+=item * json
+
+=back
+
+Note that the JSON output is the raw JSON output emitted by the GitHub API's
+C<GET /user> endpoint:
+
+    $ ads-github-whoami --output-format=json | jq '.'
+
+When JSON output is requested, the various C<-l> (C<--long>) options are
+ignored.
+
+The JSON output is simply the raw response from the GitHub API written to
+C<stdout>. The rationale is that somebody requesting the JSON output is likely
+familiar with the GitHub API, and there is little point in creating a
+close-but-different variation of it in this program. Unless a good reason is
+found to depart from it, any other tree-like output formats introduced in the
+future will follow this same principle.
+
+If more than one C<-O> (C<--output-format=WORD>) option is specified on the
+command line, the one specified last wins.
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+fruther the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing.
+
+=back
+
+
+=head1 FILES
+
+=over 4
+
+=item * C<~/.netrc>
+
+The C<~/.netrc> file is not used directly by C<ads-github-whoami>, it I<is>
+used by L<curl(1)> (which C<ads-github-whoami> uses internally) to obtain the
+credentials that are used to authenticate to the GitHub API.
+
+See L<Authentication> above.
+
+=back
+
+
+=head1 EXIT STATUS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 EXAMPLES
+
+=over 4
+
+=item * No C<-l> opts (default output)
+
+Emits just the GitHub username (a.k.a. "owner" or "login").
+
+    $ ads-github-whoami
+    salewski
+
+
+=item * One C<-l> opt: "1x" long output
+
+In addition to the GitHub username, also show basic contact information for
+user, if available.
+
+    $ ads-github-whoami -l
+    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+
+
+=item * Two C<-l> opts: "2x" long output
+
+In addition to basic contact information for the user, also show (if
+available) the user's basic GitHub stats.
+
+    $ ads-github-whoami -ll
+    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+          mfa enabled: [DATA NOT AVAILABLE]
+        ─────────────────────────────────────────────────────
+         public repos: 1234
+        private repos:    -  (owned: -)
+         public gists:   20
+        private gists:    -
+            followers:   23
+            following:  239
+        collaborators:    -
+           plan space:    -
+           disk usage:    -
+
+
+=item * Three C<-l> opts: "3x" long output
+
+In addition to the user's basic contact information and basic GitHub stats,
+also show (if available) location, website, organization affiliation, and bio.
+
+    $ ads-github-whoami -lll
+    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+          mfa enabled: [DATA NOT AVAILABLE]
+        ─────────────────────────────────────────────────────
+         public repos: 1234
+        private repos:    -  (owned: -)
+         public gists:   20
+        private gists:    -
+            followers:   23
+            following:  239
+        collaborators:    -
+           plan space:    -
+           disk usage:    -
+        ─────────────────────────────────────────────────────
+              company: -
+             hireable: -
+             location: -
+               github: https://github.com/salewski
+              website: https://salewski.github.io/
+                  bio: -
+
+
+=item * Four C<-l> opts: "4x" long output
+
+In addition to the user's basic contact information, basic GitHub stats, and
+bio info, also show (if available) GitHub account metadata that is less
+frequently interesting.
+
+    $ ads-github-whoami -llll
+    salewski  997214  "Alan D. Salewski" <ads@salewski.email>
+          mfa enabled: [DATA NOT AVAILABLE]
+        ─────────────────────────────────────────────────────
+         public repos: 1234
+        private repos:    -  (owned: -)
+         public gists:   20
+        private gists:    -
+            followers:   23
+            following:  239
+        collaborators:    -
+           plan space:    -
+           disk usage:    -
+        ─────────────────────────────────────────────────────
+              company: -
+             hireable: -
+             location: -
+               github: https://github.com/salewski
+              website: https://salewski.github.io/
+                  bio: -
+        ─────────────────────────────────────────────────────
+           created at: 2011-08-22 20:17:54+0000
+           updated at: 2011-08-22 20:17:54+0000
+            plan name: -
+              node id: MBCDabcdWXYZwxyz==
+           site admin: no
+
+
+=item * Request JSON output
+
+The C<-O> (C<--output-format=WORD>) can be used to request that JSON output be
+emitted. As noted aboe, the structure of the JSON output is simply the raw
+response from the GitHub API's C<GET /user> endpoint written to C<stdout>.
+
+    $ ads-github-whoami -O json | jq --indent 4 '.'
+    {
+        "login": "octocat",
+        "id": 1,
+        "node_id": "MDQ6VXNlcjE=",
+        "avatar_url": "https://github.com/images/error/octocat_happy.gif",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/octocat",
+        "html_url": "https://github.com/octocat",
+        "followers_url": "https://api.github.com/users/octocat/followers",
+        "following_url": "https://api.github.com/users/octocat/following{/other_user}",
+        "gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
+        "organizations_url": "https://api.github.com/users/octocat/orgs",
+        "repos_url": "https://api.github.com/users/octocat/repos",
+        "events_url": "https://api.github.com/users/octocat/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/octocat/received_events",
+        "type": "User",
+        "site_admin": false,
+        "name": "monalisa octocat",
+        "company": "GitHub",
+        "blog": "https://github.com/blog",
+        "location": "San Francisco",
+        "email": "octocat@github.com",
+        "hireable": false,
+        "bio": "There once was...",
+        "twitter_username": "monatheoctocat",
+        "public_repos": 2,
+        "public_gists": 1,
+        "followers": 20,
+        "following": 0,
+        "created_at": "2008-01-14T04:33:35Z",
+        "updated_at": "2008-01-14T04:33:35Z"
+    }
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<ads-github-tools(7)>
+
+=item * L<jq(1)>
+
+The C<jq> program is referenced in examples above. It is a command line tool
+for transforming JSON in various ways. On Debian (and Debian-derived) systems,
+it is available in the C<jq> package. The upstream website for the tool is here:
+
+=over 4
+
+=item *
+
+L<https://stedolan.github.io/jq/>
+
+=back
+
+and the source of the tool is available on GitHub here:
+
+=over 4
+
+=item *
+
+L<https://github.com/stedolan/jq>
+
+=back
+
+
+=back
+
+
+=head1 HISTORY
+
+The C<ads-github-whoami> program first appeared in C<ads-github-tools-0.3.1>,
+which was released in October 2020.
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <ads@salewski.email>
+
+=back
+
+
+=head1 BUGS
+
+Probably tons.
+
+If you find any, please report them as described in the C<BUGS> file.
+
+
+=head1 COPYRIGHT
+
+Copyright 2020 Alan D. Salewski
+
+=cut
+

@@ -10,7 +10,8 @@ INPUT_TEMPLATES = \
     ads-github-fetch-all-upstreams.in \
     ads-github-hash-url.in            \
     ads-github-merge-all-upstreams.in \
-    ads-github-show-rate-limits.in
+    ads-github-show-rate-limits.in    \
+    ads-github-whoami.in
 
 
 # "static" scripts
@@ -172,6 +173,7 @@ $(G1MANPAGES): %.1: %
 	fi ;\
 	\
 	"$(POD2MAN)" $< \
+	    --utf8      \
 	    --center='$(PACKAGE_TARNAME)' \
 	    --name="$${topic_name}" \
 	    --release=$(PACKAGE_TARNAME)-$(VERSION) \

@@ -87,6 +87,11 @@ if test -z "$CURL_PROG"; then
     AC_MSG_ERROR([curl not found])
 fi
 
+AC_PATH_PROG([DATE_PROG], [date])
+if test -z "$DATE_PROG"; then
+    AC_MSG_ERROR([date not found])
+fi
+
 AC_PATH_PROG([ECHO_PROG], [echo])
 if test -z "$ECHO_PROG"; then
     AC_MSG_ERROR([echo not found])
@@ -326,6 +331,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
   -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
+  -e '"'"'s,[@]DATE_PROG[@],$(DATE_PROG),g'"'"' \
   -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
   -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \

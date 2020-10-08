@@ -130,6 +130,140 @@ which they were fixed will be noted here, as well.
     https://github.com/salewski/ads-github-tools/issues/50
 
 
+*** issue 52: new tool: ads-github-whoami(1)
+
+    https://github.com/salewski/ads-github-tools/issues/52
+
+    The new 'ads-github-whoami' tool shows information about the authenticated
+    GitHub user.
+
+    By default, it simply emits the username (a.k.a. "owner" or "login"):
+
+    :    $ ads-github-whoami
+    :    salewski
+
+    The tool has a '-l' (--long) option that can be specified more than once
+    to request increasingly verbose amounts of information. An option is also
+    provided to request that the raw JSON output be emitted.
+
+    Currently five "long" levels are supported: none, "1x", "2x", and "3x",
+    and "4x". Additional '-l' opts are accepted, but (currently) anything more
+    than four will not affect the output produced.
+
+    The behavior of this option allows us to optimize for the common case, yet
+    still keep noisy-looking, less-often-valuable information within easy
+    reach.
+
+    Note that the availability of the data displayed depends on the "scopes"
+    of access associated with the GitHub "personal access token" used to
+    authenticate. There are publicly visible fields (the type of thing you see
+    on a given user's GitHub page), and fields that are private. Reading the
+    data values for the private fields requires the 'user:read' access
+    scope. In the examples that follow, that access has NOT been
+    provided. Users need to decide for themselves which access are appropriate
+    for their individual use cases. As you can see in the examples that
+    follow, the 'ads-github-whoami' tool will simply display placeholder
+    values for those fields that are not accessible.
+
+**** no '-l' opts (default output)
+
+     Emits just the GitHub username (a.k.a. "owner" or "login").
+
+     :    $ ads-github-whoami
+     :    salewski
+
+
+**** one '-l' opt: "1x" long output
+
+     In addition to the GitHub username, also show basic contact information
+     for user, if available.
+
+     :    $ ads-github-whoami -l
+     :    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+
+
+**** two '-l' opts: "2x" long output
+
+     In addition to basic contact information for the user, also show (if
+     available) the user's basic GitHub stats.
+
+     :    $ ads-github-whoami -ll
+     :    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+     :          mfa enabled: [DATA NOT AVAILABLE]
+     :        ─────────────────────────────────────────────────────
+     :         public repos: 1234
+     :        private repos:    -  (owned: -)
+     :         public gists:   20
+     :        private gists:    -
+     :            followers:   23
+     :            following:  239
+     :        collaborators:    -
+     :           plan space:    -
+     :           disk usage:    -
+
+
+**** three '-l' opts: "3x" long output
+
+     In addition to the user's basic contact information and basic GitHub
+     stats, also show (if available) location, website, organization
+     affiliation, and bio.
+
+     :    $ ads-github-whoami -lll
+     :    salewski  999999  "Alan D. Salewski" <ads@salewski.email>
+     :          mfa enabled: [DATA NOT AVAILABLE]
+     :        ─────────────────────────────────────────────────────
+     :         public repos: 1234
+     :        private repos:    -  (owned: -)
+     :         public gists:   20
+     :        private gists:    -
+     :            followers:   23
+     :            following:  239
+     :        collaborators:    -
+     :           plan space:    -
+     :           disk usage:    -
+     :        ─────────────────────────────────────────────────────
+     :              company: -
+     :             hireable: -
+     :             location: -
+     :               github: https://github.com/salewski
+     :              website: https://salewski.github.io/
+     :                  bio: -
+
+
+**** four '-l' opts: "4x" long output
+
+     In addition to the user's basic contact information, basic GitHub stats,
+     and bio info, also show (if available) GitHub account metadata that is
+     less frequently interesting.
+
+     :    $ ads-github-whoami -llll
+     :    salewski  997214  "Alan D. Salewski" <ads@salewski.email>
+     :          mfa enabled: [DATA NOT AVAILABLE]
+     :        ─────────────────────────────────────────────────────
+     :         public repos: 1234
+     :        private repos:    -  (owned: -)
+     :         public gists:   20
+     :        private gists:    -
+     :            followers:   23
+     :            following:  239
+     :        collaborators:    -
+     :           plan space:    -
+     :           disk usage:    -
+     :        ─────────────────────────────────────────────────────
+     :              company: -
+     :             hireable: -
+     :             location: -
+     :               github: https://github.com/salewski
+     :              website: https://salewski.github.io/
+     :                  bio: -
+     :        ─────────────────────────────────────────────────────
+     :           created at: 2011-08-22 20:17:54+0000
+     :           updated at: 2011-08-22 20:17:54+0000
+     :            plan name: -
+     :              node id: MBCDabcdWXYZwxyz==
+     :           site admin: no
+
+
 * ads-github-tools 0.3.0 (2020-04-09)
 
 ** fixes
