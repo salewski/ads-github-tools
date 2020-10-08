@@ -113,6 +113,90 @@ which they were fixed will be noted here, as well.
     perform some action.
 
 
+*** issue 48: new tool: ads-github-repo-create(1)
+
+    https://github.com/salewski/ads-github-tools/issues/48
+
+    This new tool allows the user to create new GitHub repositories while
+    working at the command line. The tool's '--help' output and sample usage
+    below give a feel for what it can do:
+
+**** ads-github-repo-create --help
+
+     :    $ ./src/main/bash/bin/ads-github-repo-create --help
+     :    usage: ads-github-repo-create { -h | --help }
+     :      or:  ads-github-repo-create { -V | --version }
+     :      or:  ads-github-repo-create [OPTION...] [--] REPO_NAME
+     :
+     :    Create a new GitHub repository.
+     :
+     :    Mandatory arguments to long options are mandatory for short options too.
+     :
+     :      -h, --help                 Print this help message on stdout
+     :
+     :      -V, --version              Print the version of the program on stdout
+     :
+     :      -b, --default-branch=NAME  Specify the name to use for the default branch
+     :
+     :      -d, --description=BLURB    Specify a short description blurb for the repo
+     :
+     :          --force-replace        If repo already exists, attempt to replace it
+     :                                   (delete, then re-create)
+     :
+     :          --homepage=URL         Specify a URL with more information about the repo
+     :
+     :      -I, --disable-issues       Disable GitHub issues for the new repo
+     :
+     :      -P, --disable-projects     Disable GitHub projects for the new repo
+     :
+     :      -O, --output-format=WORD   Emit output in the format specified by WORD [default: text]
+     :                                   Valid values for WORD include: 'text' and 'json'
+     :
+     :      -p, --private              Make the repository a GitHub private repo (default is public)
+     :
+     :      -v, --verbose              Print program progress messages on stderr. Specify multiple
+     :                                   times to increase verbosity: info, debug, and tracing (set -x)
+     :
+     :      -W, --disable-wiki         Disable GitHub wiki feature for the new repo
+     :
+     :          --                     Signals the end of options and disables further options processing.
+     :                                   Any remaining argument(s) will be interpretted as a repo name
+     :
+     :    Report bugs to Alan D. Salewski <ads@salewski.email>.
+
+
+**** sample usage: ads-github-repo-create
+
+     :    $ ads-github-repo-create 'aljunk-testing-repo-006'
+     :    Summary of newly created repository:
+     :
+     :                Name: aljunk-testing-repo-006
+     :            Is fork?: no
+     :               Owner: salewski
+     :
+     :        Is archived?: no
+     :        Is disabled?: no
+     :
+     :          Created at: 2020-10-09 07:09:52+0000
+     :          Updated at: 2020-10-09 07:09:56+0000
+     :
+     :         Is private?: no
+     :          Visibility: -
+     :
+     :      Default branch: main
+     :
+     :         Has issues?: yes
+     :       Has projects?: yes
+     :           Has wiki?: yes
+     :
+     :              GitHub: https://github.com/salewski/aljunk-testing-repo-006
+     :            Homepage: -
+     :         Description: -
+     :
+     :       Clone via ssh: git@github.com:salewski/aljunk-testing-repo-006.git
+     :     Clone via https: https://github.com/salewski/aljunk-testing-repo-006.git
+
+
 *** issue 49: update contact email
 
     https://github.com/salewski/ads-github-tools/issues/49

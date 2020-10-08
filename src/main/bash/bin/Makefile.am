@@ -10,6 +10,7 @@ INPUT_TEMPLATES = \
     ads-github-fetch-all-upstreams.in \
     ads-github-hash-url.in            \
     ads-github-merge-all-upstreams.in \
+    ads-github-repo-create.in         \
     ads-github-show-rate-limits.in    \
     ads-github-whoami.in
 
