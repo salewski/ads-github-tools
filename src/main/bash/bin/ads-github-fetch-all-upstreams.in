@@ -848,6 +848,12 @@ f_get_gh_user_repos_pagination_count_or_die () {
         exit 1
     fi
 
+    if test [[ "${t_last_page_number}" =~ $RE_ALL_DIGITS ]]; then :; else
+        printf "${PROG} (error): obtained page counter that contains non-digits (\"%s\"); bailing out\n" \
+               "${t_last_page_number}" 1>&2
+        exit 1
+    fi
+
     printf -v "${__t_out_var_name}" '%s' "${t_last_page_number}"
     return 0  # success
 }

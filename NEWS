@@ -47,6 +47,16 @@ which they were fixed will be noted here, as well.
     jq(1) process that should have been handled upstream of it.
 
 
+*** issue 34: 'ads-github-fetch-all-upstreams -vcu foo results in "line 1067: test: 7: unary operator expected" when github host is inaccessible'
+
+    https://github.com/salewski/ads-github-tools/issues/34
+
+    This issue was partially fixed by the above changes for issue #33, but a
+    check specific to this issue has been added to verify that the obtained
+    page count value contains all digits. This keeps any emitted error
+    messages as close as possible to the source of the problem.
+
+
 *** issue 44: ads-github-show-rate-limits: http response code not checked
 
     https://github.com/salewski/ads-github-tools/issues/44
