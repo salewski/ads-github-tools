@@ -1,4 +1,6 @@
 #!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
 #
 # gh-remote-fixname-fork-to-origin: Rename the 'fork' remote to 'origin', etc.
 #
@@ -12,7 +14,10 @@
 # local .git/config file.
 #
 # This is a prototype script for behavior that I'd like to get into the
-# 'ads-github-tools' project.
+# 'ads-github-tools' project. For the moment, it helps work around the "fork"
+# vs. "origin" remote naming problem described in issue #46:
+#
+#     https://github.com/salewski/ads-github-tools/issues/46
 #
 # This script is idempotent; it is safe to run it repeatedly in a working
 # directory even if earlier invocations had partial failures. The program
@@ -51,6 +56,12 @@
 #     gh-remote-fixname-fork-to-origin (info): renaming remote 'fork' => 'origin'
 #     gh-remote-fixname-fork-to-origin (info): changing git-config key 'hub.forkremote' value from 'fork' to 'origin'
 #
+#
+# See also:
+# =========
+#
+#     * "git config: honor 'hub.upstreamremote' and 'hub.forkremote', if set"
+#       https://github.com/salewski/ads-github-tools/issues/46
 
 set -o pipefail
 
