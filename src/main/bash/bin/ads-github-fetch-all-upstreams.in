@@ -98,6 +98,8 @@ declare -r PROG='ads-github-fetch-all-upstreams'
 
 set -o pipefail
 
+declare -r COPYRIGHT_DATES='2016, 2017, 2019, 2020'
+
 # declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
 declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
 
@@ -107,10 +109,19 @@ declare -r gl_const_build_date='@BUILD_DATE@'  # value filtered-in at build time
 declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 # declare -r gl_const_release="${VERSION}"
 
-BE_VERBOSE=false # info-level output; override with one '-v' opt
 
-# This one implies BE_VERBOSE, too
-DEBUGGING=false  # debug-level output; override with two '-v' opts
+# Note that we use an "application" $TRACING flag separate from bash's
+# built-in 'xtrace' (set -x) shell option. This allows us to have a general
+# notion of user-requested verbosity separate from any selectively placed
+# 'set -x/set +x' sections we may plug into the code while working on the
+# program itself; similarly for places where we might want to avoid trace
+# output while debugging by selectively placing 'set +x/set -x' sections; both
+# of those behaviors would be much more cumbersome to achieve if we just
+# checked for 'x' in $- at runtime.
+#
+BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
+DEBUGGING=false    # enable with two '-v' (--verbose) opts
+TRACING=false      # enable with three or more '-v' (--verbose) opts
 
 
 # GitHub issue #28: Unset GREP_OPTIONS to make grep(1) behavior predictable.
@@ -326,7 +337,7 @@ EOF
 f_print_version () {
     "${CAT_PROG}" <<EOF
 ${PROG} ${gl_const_release}
-Copyright (C) 2016, 2017, 2019, 2020 Alan D. Salewski
+Copyright (C) ${COPYRIGHT_DATES} Alan D. Salewski
 License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
@@ -345,7 +356,7 @@ EOF
 # ($DEBUGGING).
 #
 # If we are currently at debug-level verbosity, then enables trace-level
-# output (set -x).
+# output ($TRACING, set -x).
 #
 # If we are already at trace-level verbosity, then this function has no effect
 # (is effectively a NOOP).
@@ -354,27 +365,36 @@ f_maybe_increase_verbosity () {
 
     if $BE_VERBOSE; then
 
-        # We are (at least) at info-level verbosity currently.
         if $DEBUGGING; then
-            # We are (at least) at debug-level verbosity currently.
 
-            case $- in
-                *x* )
-                    : $PROG \(trace: $LINENO\): tracing already enabled
-                    ;;
-                * )
-                    printf "${PROG} (debug): additional verbosity requested; enabling trace-level output\n" 1>&2
-                    set -x
-                    ;;
-            esac
+            # We've seen at least two -v opt before, so now we're turning
+            # tracing on.
+
+            if $TRACING; then
+                : $PROG \(trace: $LINENO\): tracing already enabled
+            else
+                # See comments at the decl spot for $TRACING pertaining to why
+                # we maintain an "application" $TRACING flag separate from
+                # bash's built-in 'xtrace' (set -x) shell option.
+
+                # Enable tracking before setting our app-level $TRACING flag
+                # so that setting it is the first thing that appears in the
+                # trace.
+                set -x
+                TRACING=true
+            fi
         else
-            printf "${PROG} (info): additional verbosity requested; enabling debug-level output\n" 1>&2
+            # Second -v opt we're seeing
             DEBUGGING=true
+            # Just to give a warm and fuzzy...
+            printf "${PROG} (debug): debug-level output enabled\n" 1>&2
         fi
     else
-        printf "${PROG} (info): verbose output requested; enabling info-level output\n" 1>&2
+        # First -v opt we're seeing
         BE_VERBOSE=true
     fi
+
+    return 0  # success
 }
 
 # Makes a HTTP HEAD request to the GitHub service to obtain pagination

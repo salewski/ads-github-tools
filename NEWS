@@ -348,6 +348,14 @@ which they were fixed will be noted here, as well.
      :           site admin: no
 
 
+
+*** issue 54: fluff-up: ads-github-fetch-all-upstreams '-v' handling (support $TRACING)
+
+    https://github.com/salewski/ads-github-tools/issues/54
+
+    This change only impacts developers working on the 'ads-github-tools'.
+
+
 * ads-github-tools 0.3.0 (2020-04-09)
 
 ** fixes
