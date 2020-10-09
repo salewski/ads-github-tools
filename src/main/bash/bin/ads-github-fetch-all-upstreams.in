@@ -123,6 +123,8 @@ BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
 DEBUGGING=false    # enable with two '-v' (--verbose) opts
 TRACING=false      # enable with three or more '-v' (--verbose) opts
 
+RE_ALL_DIGITS='^[[:digit:]]+$'
+
 
 # GitHub issue #28: Unset GREP_OPTIONS to make grep(1) behavior predictable.
 #
@@ -209,15 +211,26 @@ declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v
 # particular tool by setting an environment variable named after the tool
 # (with hyphen chars changed to underscores).
 
+# jq - command line JSON parser and manipulation language
+#      see: https://github.com/stedolan/jq
+#
+JQ_PROG="${JQ:-@JQ_PROG@}"
+RM_PROG="${RM:-@RM@}"
+TR_PROG="${TR:-@TR_PROG@}"
+WC_PROG="${WC:-@WC_PROG@}"
+
 CAT_PROG="${CAT:-@CAT@}"
+GIT_PROG="${GIT:-@GIT_PROG@}"
+SED_PROG="${SED:-@SED@}"
 
 CURL_PROG="${CURL:-@CURL_PROG@}"
-
 ECHO_PROG="${ECHO:-@ECHO_PROG@}"
+HEAD_PROG="${HEAD:-@HEAD_PROG@}"
+TAIL_PROG="${TAIL:-@TAIL_PROG@}"
 
-EXPR_PROG="${EXPR:-@EXPR_PROG@}"
+XARGS_PROG="${XARGS:-@XARGS_PROG@}"
 
-GIT_PROG="${GIT:-@GIT_PROG@}"
+MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 
 # FIXME: How to make this selectable? Would need to influence git's search
 #        path to find the specified version of the tool, but how to do that
@@ -231,32 +244,40 @@ GIT_PROG="${GIT:-@GIT_PROG@}"
 # GIT_HUB_PROG="${GIT_HUB:-@GIT_HUB_PROG@}"
 GIT_HUB_PROG='git-hub'
 
-HEAD_PROG="${HEAD:-@HEAD_PROG@}"
-
-# jq - command line JSON parser and manipulation language
-#      see: https://github.com/stedolan/jq
-#
-JQ_PROG="${JQ:-@JQ_PROG@}"
-
-SED_PROG="${SED:-@SED@}"
-
-TR_PROG="${TR:-@TR_PROG@}"
-
-XARGS_PROG="${XARGS:-@XARGS_PROG@}"
-
 declare -a NEEDED_EXTERNAL_PROGS=(
+    "${RM_PROG}"
+    "${JQ_PROG}"
+    "${TR_PROG}"
+    "${WC_PROG}"
+
     "${CAT_PROG}"
+    "${GIT_PROG}"
+    "${SED_PROG}"
+
     "${CURL_PROG}"
     "${ECHO_PROG}"
-    "${EXPR_PROG}"
     "${HEAD_PROG}"
-    "${JQ_PROG}"
-    "${GIT_PROG}"
-    "${GIT_HUB_PROG}"
-    "${SED_PROG}"
-    "${TR_PROG}"
+    "${TAIL_PROG}"
+
     "${XARGS_PROG}"
+
+    "${MKTEMP_PROG}"
+
+    "${GIT_HUB_PROG}"
 )
+
+for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
+
+    t_path=$(builtin type -p "${ext_tool}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
 
 
 declare -a F_CLEANUP_HOOK_NAMES=()
@@ -346,6 +367,55 @@ Written by Alan D. Salewski.
 EOF
 }
 
+
+# @param FPATH -- (required) The path to a file to examine.
+#
+function f_file_ends_with_newline() {
+
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_fpath=$1
+
+    local __t_line_cnt
+
+    # Feed last character of the file (if any) to wc(1) and see if it counts
+    # it as a line. If so, then the file ends with a newline; otherwise it
+    # does not.
+    #
+    # This technique from:
+    #     https://stackoverflow.com/a/25749716
+    #
+    __t_line_cnt=$("${TAIL_PROG}" -c1 "${__t_fpath}" | "${WC_PROG}" -l)
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to obtain line count from file (%s); bailing out\n" \
+               "${__t_fpath}" 1>&2
+        exit 1
+    fi
+    if test -z "${__t_line_cnt}"; then
+        printf "${PROG} (error): tail/wc succeeded, but line count for file (%s) is empty?; bailing out\n" \
+               "${__t_fpath}" 1>&2
+        exit 1
+    fi
+    if [[ "${__t_line_cnt}" =~ $RE_ALL_DIGITS ]]; then :; else
+        printf "${PROG} (error): got non-numeric line count (%s) for file (%s); bailing out\n" \
+               "${__t_line_cnt}" \
+               "${__t_fpath}" 1>&2
+        exit 1
+
+    fi
+
+    if test ${__t_line_cnt} -gt 0; then
+        return 0  # true
+    fi
+    return 1  # false
+}
+
+
 # Invoked by our accumulating '-v' (--verbose) option. Increases the program
 # output verbosity level by "one stage".
 #
@@ -397,6 +467,109 @@ f_maybe_increase_verbosity () {
     return 0  # success
 }
 
+
+# Common global options for use in (nearly) every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify the MY_CURL_DEFAULT_OPTS array.
+#
+# The MY_CURL_OPTS array is provided to be reused per invocation:
+#
+#     MY_CURL_OPTS=()  # (re)set
+#     MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+#     MY_CURL_OPTS+=( YOUR_STUFF )
+#
+# HTTP response status code gets written to stderr.
+#
+# The HTTP response payload (if any) is written to the file path named in
+# $MY_TMP_CURL_OUT_FPATH.
+#
+# CAREFUL: This assumes localized, sequential usage patterns of curl(1) and
+#          handling of the response body contents. If you need long-term
+#          access to the HTTP response body contents, copy it from
+#          $MY_TMP_CURL_OUT_FPATH to a different file location so you want
+#          have to worry about the data you need getting overwritten by other
+#          sections of the code making API requests with curl(1) as configured
+#          here.
+#
+declare -a MY_CURL_DEFAULT_OPTS=()
+declare -a MY_CURL_OPTS=()
+
+f_initialize_curl_default_opts () {
+
+    # sanity check
+    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # This disables output of curl's progress meter /and/ output of error messages...
+    MY_CURL_DEFAULT_OPTS+=( '--silent' )
+    # ...but this re-enables output of the error messages.
+    MY_CURL_DEFAULT_OPTS+=( '--show-error' )
+
+
+    # Force use of TLS 1.2 (or later). Writing in 2020, all previous versions
+    # are known to be broken and susceptible to known attacks. Note that the
+    # '--tlsv1.2' option was added in curl 7.34.0
+    #
+    # This is absolutely essential since we're using HTTP Basic Auth (see below).
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--tlsv1.2' )
+
+    # Allow ONLY https, for both the initial request and for redirects
+    MY_CURL_DEFAULT_OPTS+=( '--proto')
+    MY_CURL_DEFAULT_OPTS+=( 'https')
+    MY_CURL_DEFAULT_OPTS+=( '--proto-redir')
+    MY_CURL_DEFAULT_OPTS+=( 'https')
+
+
+    # Tell curl to use HTTP Basic Authentication. This is the curl default, but
+    # we're explicit about what we expect (and want to avoid any surprises from
+    # weirdo ~/.curlrc files).
+    #
+    # See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--basic' )
+
+
+    # User's authentication credentials will be obtained from the user's ~/.netrc
+    # file. See curl(1) and netrc(5)
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--netrc'  )
+
+    MY_CURL_DEFAULT_OPTS+=( '--user-agent' )
+    MY_CURL_DEFAULT_OPTS+=( "$PROG"        )
+
+
+    # Even when we're just making HEAD requests, have curl fail
+    # MY_CURL_DEFAULT_OPTS+=( '--fail' )
+
+
+    # Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+    # 2020, v3 is the default, but there is also a 'GraphQL API v4' version which
+    # we do not use here. Some newer version may become the default in the future,
+    # so we are explicit about which version we are using.
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--header' )
+    MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+    # We always write the (JSON) output to a file in our temporary directory...
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--output' )
+    MY_CURL_DEFAULT_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
+
+    # ...and write the HTTP response status to stdout. This allows for robust
+    # error handling. Also, we cannot really know how to interpret the output
+    # returned from the remote server until we have examined (at least) the HTTP
+    # response code.
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--write-out'  )
+    MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
+
+    return 0
+}
+
+
 # Makes a HTTP HEAD request to the GitHub service to obtain pagination
 # information for pulling all /user/repos data in the minimal number of
 # service calls (that is, within the service restriction of 100 repos per
@@ -407,7 +580,31 @@ f_maybe_increase_verbosity () {
 #
 # Recall that the first page is one, not zero.
 #
+# @param OUT_VAR_NAME -- (required) the name of the global variable to which
+#                        the total repos count value should be written.
+#
+# @return 0 always, if it returns at all. All internal errors are fatal.
+#
 f_get_gh_user_repos_pagination_count_or_die () {
+
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_out_var_name=$1
+
+    local __t_http_code
+    local __t_estat
+
+    local t_head_response
+    local t_http_head_stat_and_label
+    local t_http_head_stat
+    local t_http_head_label
+    local t_http_head_link
+    local t_last_page_number
 
     # Pagination: 
     #
@@ -415,14 +612,48 @@ f_get_gh_user_repos_pagination_count_or_die () {
     # ...
     # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
 
-    t_head_response=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
-                            --head               \
-                            "${MY_GITHUB_REPOS_URL}" \
-                       | "${TR_PROG}" -d '\r' )
+    MY_CURL_OPTS=()  # (re)set
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
 
+    MY_CURL_OPTS+=( '--head' )
+
+    __t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}"     \
+                                    "${MY_GITHUB_REPOS_URL}" )
+    __t_estat=$?
+
+    if test ${__t_estat} -ne 0; then
+        printf "${PROG} (error): was error while invoking curl(1) to retrieve repos pagination; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${__t_http_code}"; then
+        printf "${PROG} (error): ${FUNCNAME}(): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    case ${__t_http_code} in
+
+        '200')
+            if $DEBUGGING; then
+                printf "${PROG} (debug): HEAD request for repos pagination data succeeded\n" 1>&2
+            fi
+            ;;
+
+        *)
+            printf "${PROG} (error): HEAD request for repos pagination data failed; HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                   "${__t_http_code}" 1>&2
+            exit 1
+            ;;
+    esac
+
+    if test -s "${MY_TMP_CURL_OUT_FPATH}"; then :; else
+        printf "${PROG} (error): HEAD request for repos pagination data succeeded, by response body is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    t_head_response=$("${TR_PROG}" -d '\r' < "${MY_TMP_CURL_OUT_FPATH}")
     if test $? -ne 0; then
-        # Hopefully curl printed something meaningful to stderr here...
-        printf "${PROG} (error): was unable to obtain pagination info for repos; bailing out\n" 1>&2
+        printf "${PROG} (error): was unable to read HEAD response body for repos pagination data from temporary file (%s); bailing out\n" \
+               "${MY_TMP_CURL_OUT_FPATH}" 1>&2
         exit 1
     fi
 
@@ -573,8 +804,8 @@ f_get_gh_user_repos_pagination_count_or_die () {
         if test "${PIPESTATUS[0]}" -eq 0 \
         && test "${PIPESTATUS[1]}" -eq 1; then
             # We'll emit 1 as the count of pages needed
-            printf "1\n"
-            return  # success
+            printf -v "${__t_out_var_name}" '1'
+            return 0  # success
         fi
 
         # Hopefully grep emitted something helpful on stderr already if we're
@@ -617,8 +848,248 @@ f_get_gh_user_repos_pagination_count_or_die () {
         exit 1
     fi
 
-    printf "%s\n" "${t_last_page_number}"
-    return  # success
+    printf -v "${__t_out_var_name}" '%s' "${t_last_page_number}"
+    return 0  # success
+}
+
+
+# @param REPO_PAGES_COUNT -- (required) The number of "repo data" pages
+#                            (starting from page 1) to be consume.
+#
+# @param OUT_VAR_NAME -- (required) the name of the pre-existing global
+#                        variable to which the repo data lines should be
+#                        appended.
+#
+# @return 0 always, if it returns at all. All internal errors are fatal.
+#
+#
+# @see f_get_gh_user_repos_pagination_count_or_die()
+#
+f_build_repo_data_lines_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_repo_pages_cnt=$1
+    local __t_out_var_name=$2
+
+    # sanity check
+    if test -z "$MY_TMP_DIR"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_DIR is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    local __t_cur_page=0
+    local __t_keep_going=true
+
+    local __t_gh_url_for_page
+
+    # We will gather each "page" of data from the GitHub API and use it to
+    # produce a partial data structure. Each page's worth of data is stored in
+    # a separate temporary file.
+    #
+    # Once we have the individual partial data structures (one for each of the
+    # pages), we will catenate them together to produce the value we write to
+    # the output variable.
+    local -a __t_repo_data_page_fpaths=()
+
+    local __t_one_tmpfile_fpath
+    local __t_tmpfile_catenated_repo_data_fpath
+
+    local __t_http_code
+    local __t_estat
+
+    local __t_rsp_body
+
+    while ${__t_keep_going}; do
+
+        let __t_cur_page=${__t_cur_page}+1
+
+        # Our curl(1) command will save the HTTP response to a temporary file
+        # that gets reused with each of our curl invocations. So after each
+        # successful call, we extract the data we need from that temporary
+        # file and write the results to a different temporary file whose file
+        # path we generate here.
+        #
+        __t_one_tmpfile_fpath=$("${MKTEMP_PROG}" --tmpdir="${MY_TMP_DIR}" 'repo-data-pg-'"${__t_cur_page}"'.XXXXXXXXXXXX')
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to generate temporary file name for repo data page %s; bailing out\n" \
+                   "${__t_cur_page}" 1>&2
+            exit 1
+        fi
+
+        __t_gh_url_for_page=${MY_GITHUB_REPOS_URL}'&page='${__t_cur_page}
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): requesting /user/repos page %s of %s\n" "${__t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
+        fi
+
+        MY_CURL_OPTS=()  # (re)set
+        MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+        MY_CURL_OPTS+=( '--get' )
+
+        __t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+                                        "${__t_gh_url_for_page}" )
+        __t_estat=$?
+        if test ${__t_estat} -ne 0; then
+            printf "${PROG} (error): was error while invoking curl(1) to retrieve repo data page %s; bailing out\n" \
+                   "${__t_cur_page}" 1>&2
+            exit 1
+        fi
+        if test -z "${__t_http_code}"; then
+            printf "${PROG} (error): ${FUNCNAME}(): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+            exit 1
+        fi
+
+        case ${__t_http_code} in
+            '200')
+                if $DEBUGGING; then
+                    printf "${PROG} (debug): GET request for repo page %s data succeeded\n" "${__t_cur_page}" 1>&2
+                fi
+                ;;
+
+            *)
+                printf "${PROG} (error): GET request for repo page %s data failed; HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                       "${__t_cur_page}" \
+                       "${__t_http_code}" 1>&2
+                exit 1
+                ;;
+        esac
+
+        if test -s "${MY_TMP_CURL_OUT_FPATH}"; then :; else
+            printf "${PROG} (error): GET request for repo page %s data succeeded, by response body is empty; bailing out\n" \
+                   "${__t_cur_page}" 1>&2
+            exit 1
+        fi
+
+        # Add the file to our list before we try to put anything into it
+        # because with the following command the shell will create it as an
+        # empty file even if the jq(1) command fails.
+        #
+        __t_repo_data_page_fpaths+=( "${__t_one_tmpfile_fpath}" )
+
+        "${JQ_PROG}" --raw-output '.[] '\
+'| select( .owner.type == "User" ) '\
+'| .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' \
+                     < "${MY_TMP_CURL_OUT_FPATH}" \
+                     > "${__t_one_tmpfile_fpath}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): Was unable to extract data for repo page %s; bailing out\n" \
+                   "${__t_cur_page}" 1>&2
+            exit 1
+        fi
+        if test -s "${__t_one_tmpfile_fpath}"; then :; else
+            printf "${PROG} (error): Extracted data file for repo page %s is empty; bailing out\n" \
+                   "${__t_cur_page}" 1>&2
+            exit 1
+        fi
+
+        f_file_ends_with_newline "${__t_one_tmpfile_fpath}"
+        if test $? -eq 0; then :; else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): Adding missing newline to temporary file: %s\n" \
+                       "${__t_one_tmpfile_fpath}" 1>&2
+            fi
+            printf '\n' >> "${__t_one_tmpfile_fpath}"
+        fi
+
+        # internal sanity check
+        f_file_ends_with_newline "${__t_one_tmpfile_fpath}"
+        if test $? -eq 0; then :; else
+            printf "${PROG} (error): Newline is /still/ missing at end of temporary file: %s; bug?; bailing out\n" \
+                   "${__t_one_tmpfile_fpath}" 1>&2
+            exit 1
+        fi
+
+        if test ${__t_cur_page} -ge ${__t_repo_pages_cnt}; then
+            __t_keep_going=false
+        fi
+    done
+
+    # Catenate the individual repo data files into a single file.
+    #
+    # We remove each file as we go so we do not end up consuming nearly 200%
+    # of the disk space we actually need. Here we care about space over time.
+    #
+    # XXX: Yes, this is a slow way to do it, but it is far from the slowest
+    #      part of this program.
+    #
+    __t_tmpfile_catenated_repo_data_fpath=$("${MKTEMP_PROG}" --tmpdir="${MY_TMP_DIR}" 'repo-data-cat.XXXXXXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to generate temporary file name for catenated repo data pages; bailing out\n" 1>&2
+        exit 1
+    fi
+    > "${__t_tmpfile_catenated_repo_data_fpath}"  # touch
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create temporary file for catenated repo data pages; bailing out\n" 1>&2
+        exit 1
+    fi
+    for ff in "${__t_repo_data_page_fpaths[@]}"; do
+        "${CAT_PROG}" "${ff}" >> "${__t_tmpfile_catenated_repo_data_fpath}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to append temporary file (%s) to catenated tmp file (%s); bailing out\n" \
+                   "${ff}" \
+                   "${__t_tmpfile_catenated_repo_data_fpath}" 1>&2
+            exit 1
+        fi
+        "${RM_PROG}" "${ff}"
+        if test $? -ne 0; then
+            printf "${PROG} (warning): was unable to delete temporary file: %s; continuing anyway\n" \
+                   "${ff}" 1>&2
+            # keep going...
+        fi
+    done
+
+
+    # For now we'll just slurp up all of the repo info into memory; we'll
+    # revisit this if needed, but <famous-last-words>we're not expecting to
+    # have enough repos that it will be a problem</famous-last-words>.
+    #
+    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' < all-repos-per_page-105-001.js | head -n 5
+    #     aas:salewski/aas:master:true
+    #     abcl:salewski/abcl:master:true
+    #     abstract-tables:salewski/abstract-tables:master:true
+    #     ac-nrepl:salewski/ac-nrepl:master:true
+    #     ack2:salewski/ack2:dev:true
+    #
+    # UPDATE (2016-07-06): [issue #12] Note that we are working only with
+    # repos with owner type 'User' (we are ignoring those with owner type
+    # 'Organization'). This is to work around the previously unrealized issue
+    # that the /user/repos/ data can include repos that that user (as a member
+    # of a particular organization) merely has access to, regardless of
+    # whether he also has a personal fork of those repos. The authenticated
+    # user's personal fork of such a repo, if he has one, is presented
+    # separately.
+    #
+    # XXX: This has the undesirable effect of preventing this program from
+    #      working directly on organization-owned repos. The author needs to
+    #      further review how those are intended to work, but if this turns
+    #      out to be an artificial limitation is interested in having it
+    #      fixed. Patches/pull requests welcome!
+    #
+    # See also: https://github.com/salewski/ads-github-tools/issues/12
+    #
+    printf -v "${__t_out_var_name}" '%s' \
+           "$("${CAT_PROG}" "${__t_tmpfile_catenated_repo_data_fpath}")"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable slurp repo data file into output variable; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # cleanup
+    "${RM_PROG}" "${__t_tmpfile_catenated_repo_data_fpath}"
+    if test $? -ne 0; then
+        printf "${PROG} (warning): was unable to delete temporary file: %s; continuing anyway\n" \
+               "${__t_tmpfile_catenated_repo_data_fpath}" 1>&2
+        # keep going...
+    fi
+
+    return 0  # success
 }
 
 
@@ -895,18 +1366,34 @@ while test $# -gt 0 ; do
     EXPLICITLY_REQUESTED_REPOS+=( "${_one_repo_name}" )
 done
 
-for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
 
-    t_path=$(builtin type -p "${ext_tool}")
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
-        exit 1
+MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
+if test $? -ne 0; then
+    printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
+    exit 1
+fi
+#
+# This should be a "can't happen" scenario, but since we do a 'rm -fr ...' on
+# the value when we are done, we want to be belt-and-suspenders about it...
+#
+if test -z "${MY_TMP_DIR}"; then
+    printf "${PROG} (error) temporary directory path is empty; bailing out\n" 1>&2
+    exit 1
+fi
+function f_cleanup_rmfr_tmpdir () {
+    local -a t_rm_opts=()
+    t_rm_opts+=('-f')
+    t_rm_opts+=('-r')
+    if $TRACING; then
+        t_rm_opts+=('-v')  # verbose
     fi
+    "${RM_PROG}" "${t_rm_opts[@]}" "${MY_TMP_DIR}"
+    # Ignore exit status -- Is a cleanup hook, so do not exit the process if
+    # 'rm' failed; keep going...
+}
+F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
 
-    if $DEBUGGING; then
-        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
-    fi
-done
+declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
 
 
 # Refuse to run if we do not recognize the URL as something that will be
@@ -953,6 +1440,9 @@ if $BE_VERBOSE; then
 fi
 
 
+f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
+
+
 # Note that the gl_const_http_accept_github_version value is known to always
 # end with a slash character.
 #
@@ -964,63 +1454,6 @@ fi
 # of remote calls while paging through the results.
 #
 MY_GITHUB_REPOS_URL="${gl_const_github_api_base_url}user/repos?per_page=100"
-
-
-# Common global options for use in every 'curl' invocation. Specific
-# invocations will require additional options, but such usages should not
-# modify this array.
-#
-declare -a MY_CURL_OPTS=()
-
-# This disables output of curl's progress meter /and/ output of error messages...
-MY_CURL_OPTS+=( '--silent' )
-# ...but this re-enables output of the error messages.
-MY_CURL_OPTS+=( '--show-error' )
-
-
-# Force use of TLS 1.2. Writing in 2016, all previous versions are known to be
-# broken and susceptible to known attacks. Note that the '--tlsv1.2' option
-# was added in curl 7.34.0
-#
-# This is absolutely essential since we're using HTTP Basic Auth (see below).
-#
-MY_CURL_OPTS+=( '--tlsv1.2' )
-
-# Allow ONLY https, for both the initial request and for redirects
-MY_CURL_OPTS+=( '--proto')
-MY_CURL_OPTS+=( 'https')
-MY_CURL_OPTS+=( '--proto-redir')
-MY_CURL_OPTS+=( 'https')
-
-
-# Tell curl to use HTTP Basic Authentication. This is the curl default, but
-# we're explicit about what we expect (and want to avoid any surprises from
-# weirdo ~/.curlrc files).
-#
-# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
-#
-MY_CURL_OPTS+=( '--basic' )
-
-
-# User's authentication credentials will be obtained from the user's ~/.netrc
-# file. See curl(1) and netrc(5)
-#
-MY_CURL_OPTS+=( '--netrc'  )
-
-MY_CURL_OPTS+=( '--user-agent' )
-MY_CURL_OPTS+=( "$PROG"        )
-
-
-# Even when we're just making HEAD requests, have curl fail
-# MY_CURL_OPTS+=( '--fail' )
-
-
-# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
-# 2016, v3 is the default, but some newer version may become the default in
-# the future.
-#
-MY_CURL_OPTS+=( '--header' )
-MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
 
 
 # We'll build up this multi-line value in memory below. Each line will have
@@ -1063,74 +1496,22 @@ REPO_DATA_LINES=''
 # event, we do not know which page of the results a particular repo will be
 # on, so we need to pull full summary data anyway.
 #
-MY_TOTAL_REPO_PAGES=$(f_get_gh_user_repos_pagination_count_or_die)
-t_cur_page=0
-t_keep_going=true
-while $t_keep_going; do
+f_get_gh_user_repos_pagination_count_or_die 'MY_TOTAL_REPO_PAGES'
 
-    let t_cur_page=$t_cur_page+1
-
-    t_gh_url_for_page=${MY_GITHUB_REPOS_URL}'&page='${t_cur_page}
-
-    if $BE_VERBOSE; then
-        printf "${PROG} (info): requesting /user/repos page %s of %s\n" "${t_cur_page}" "${MY_TOTAL_REPO_PAGES}" 1>&2
-    fi
-
-    # For now we'll just slurp up all of the repo info into memory; we'll
-    # revisit this if needed, but <famous-last-words>we're not expecting to
-    # have enough repos that it will be a problem</famous-last-words.
-    #
-    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' < all-repos-per_page-105-001.js | head -n 5
-    #     aas:salewski/aas:master:true
-    #     abcl:salewski/abcl:master:true
-    #     abstract-tables:salewski/abstract-tables:master:true
-    #     ac-nrepl:salewski/ac-nrepl:master:true
-    #     ack2:salewski/ack2:dev:true
-    #
-    # UPDATE (2016-07-06): [issue #12] Note that we are working only with
-    # repos with owner type 'User' (we are ignoring those with owner type
-    # 'Organization'). This is to work around the previously unrealized issue
-    # that the /user/repos/ data can include repos that that user (as a member
-    # of a particular organization) merely has access to, regardless of
-    # whether he also has a personal fork of those repos. The authenticated
-    # user's personal fork of such a repo, if he has one, is presented
-    # separately.
-    #
-    # XXX: This has the undesirable effect of preventing this program from
-    #      working directly on organization-owned repos. The author needs to
-    #      further review how those are intended to work, but if this turns
-    #      out to be an artificial limitation is interested in having it
-    #      fixed. Patches/pull requests welcome!
-    #
-    # See also: https://github.com/salewski/ads-github-tools/issues/12
-    #
-    REPO_DATA_LINES=${REPO_DATA_LINES}\
-$'\n'\
-$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
-        --get                \
-        "${t_gh_url_for_page}" \
-        | "${JQ_PROG}" -r '.[] '\
-'| select( .owner.type == "User" ) '\
-'| .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' )
-
-    # The newline embedded between our existing and new REPO_DATA_LINES
-    # instances is intended to ensure that the concatenation of the two does
-    # not join the first line of the new to the last line of the old. It is
-    # possible, though, that we may have just introduced a spurious blank
-    # line; we'll strip it out if so.
-    #
-    REPO_DATA_LINES=$(echo "${REPO_DATA_LINES}" | "${SED_PROG}" -e '/^[[:space:]]*$/d' )
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to strip possible empty line out of REPO_DATA_LINES (working page: %s); bailing out\n" \
-               "${t_cur_page}" 1>&2
-        exit 1
-    fi
-
-    if test $t_cur_page -ge $MY_TOTAL_REPO_PAGES; then
-        t_keep_going=false
-    fi
-
-done
+# Build REPO_DATA_LINES. Each record (line) in the table data structure will
+# be in the form:
+#
+#     <REPO_NAME>:<REPO_FULL_NAME>:<DEFAULT_BRANCH>:<IS_FORK>
+#
+# Example:
+#
+#     aas:salewski/aas:master:true
+#     abcl:salewski/abcl:master:true
+#     abstract-tables:salewski/abstract-tables:master:true
+#     ac-nrepl:salewski/ac-nrepl:master:true
+#     ack2:salewski/ack2:dev:true
+#     ...
+f_build_repo_data_lines_or_die "${MY_TOTAL_REPO_PAGES}" 'REPO_DATA_LINES'
 
 
 while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
@@ -1432,12 +1813,47 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                     printf "${PROG} (info): querying GitHub service to obtain parent clone url for repo \"%s\"\n" "${repo_name}" 1>&2
                 fi
 
-                t_parent_clone_url=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
-                                      --get                \
-                                      "${t_gh_url_for_this_repo}" \
-                                      | "${JQ_PROG}" -r '.clone_url' )
+                MY_CURL_OPTS=()  # (re)set
+                MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+                MY_CURL_OPTS+=( '--get' )
+
+                t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
+                                              "${t_gh_url_for_this_repo}")
+                t_estat=$?
+                if test ${t_estat} -ne 0; then
+                    printf "${PROG} (error): was error while invoking curl(1) to retrieve repo \"%s\"; bailing out\n" \
+                           "${repo_full_name}" 1>&2
+                    exit 1
+                fi
+                if test -z "${t_http_code}"; then
+                    printf "${PROG} (error): ${FUNCNAME}(): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+                    exit 1
+                fi
+                case ${t_http_code} in
+                    '200')
+                        if $DEBUGGING; then
+                            printf "${PROG} (debug): GET request for repo \"%s\" succeeded\n" "${repo_full_name}" 1>&2
+                        fi
+                        ;;
+                    *)
+                        printf "${PROG} (error): GET request for repo \"%s\" failed; HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                               "${repo_full_name}" \
+                               "${t_http_code}" 1>&2
+                        exit 1
+                        ;;
+                esac
+
+                if test -s "${MY_TMP_CURL_OUT_FPATH}"; then :; else
+                    printf "${PROG} (error): GET request for repo \"%s\" succeeded, by response body is empty; bailing out\n" \
+                           "${repo_full_name}" 1>&2
+                    exit 1
+                fi
+
+                t_parent_clone_url=$("${JQ_PROG}" --raw-output '.clone_url'  \
+                                                  < "${MY_TMP_CURL_OUT_FPATH}")
                 if test $? -ne 0; then
-                    printf "${PROG} (error): was unable to query GitHub service to obtain clone url for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
+                    printf "${PROG} (error): was unable to extract clone url for repo \"%s\"; bailing out\n" "${repo_name}" 1>&2
                     exit 1  # from subshell
                 fi
                 if test -z "${t_parent_clone_url}"; then

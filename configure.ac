@@ -181,6 +181,11 @@ if test -z "$SHA3SUM_PROG"; then
     AC_MSG_ERROR([sha3sum not found])
 fi
 
+AC_PATH_PROG([TAIL_PROG], [tail])
+if test -z "$TAIL_PROG"; then
+    AC_MSG_ERROR([tail not found])
+fi
+
 AC_PATH_PROG([TR_PROG], [tr])
 if test -z "$TR_PROG"; then
     AC_MSG_ERROR([tr not found])
@@ -197,6 +202,11 @@ fi
 AC_PATH_PROG([USERMOD], [usermod])
 if test -z "$USERMOD"; then
     AC_MSG_ERROR([usermod program not found])
+fi
+
+AC_PATH_PROG([WC_PROG], [wc])
+if test -z "$WC_PROG"; then
+    AC_MSG_ERROR([wc not found])
 fi
 
 AC_PATH_PROG([XARGS_PROG], [xargs])
@@ -347,9 +357,11 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
+  -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
+  -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
   -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
 '
 ]

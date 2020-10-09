@@ -24,6 +24,29 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
+*** issue 33: 'ads-github-fetch-all-upstreams -vcu foo*' leads to 'jq: error (at <stdin>:3): Cannot index string with string "owner"'
+
+    https://github.com/salewski/ads-github-tools/issues/33
+
+    The ads-github-fetch-all-upstreams(1) tool was previously using the
+    default behavior of curl(1) to invoke GitHub v3 API endpoints and emit the
+    retrieved responses on stdout, feeding that output in Unix pipelines to
+    other programs (mostly to jq(1)).
+
+    While that approach was fast and convenient when originally implemented,
+    it also had the downside of preventing the program from properly detecting
+    all failures because it could not check the HTTP response codes.
+
+    The program now follows the pattern (used elsehwere in the
+    'ads-github-tools') of configuring 'curl' to write the response body to a
+    temporary file named by a well-known global variable, and emit the HTTP
+    response code on stdout. The calling code is thus able to check the 'curl'
+    exit status, the emitted HTTP response code, and the size and content of
+    the response body independently of one another. This makes the program
+    more robust in general, and avoids complaints emitting from the downstream
+    jq(1) process that should have been handled upstream of it.
+
+
 *** issue 44: ads-github-show-rate-limits: http response code not checked
 
     https://github.com/salewski/ads-github-tools/issues/44
