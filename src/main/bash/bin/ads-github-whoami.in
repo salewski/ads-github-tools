@@ -239,6 +239,19 @@ declare -a NEEDED_EXTERNAL_PROGS=(
     "${MKTEMP_PROG}"
 )
 
+for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
+
+    t_path=$(builtin type -p "${ext_tool}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
+
 
 declare -a F_CLEANUP_HOOK_NAMES=()
 
@@ -607,7 +620,7 @@ if test $# -gt 0; then
                     # require the values for those arguments to be non-empty
                     # strings.
                     if [[ "${OPTARG}" =~ $RE_BLANK ]]; then
-                        printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${OPTARG}" 1>&2
+                        printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${opt}" 1>&2
                         f_print_help 1>&2
                         exit 1
                     fi
