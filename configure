@@ -599,10 +599,12 @@ ads_perl5_extra_includes
 POD2MAN
 PERL
 XARGS_PROG
+WC_PROG
 USERMOD
 USERADD
 GROUPADD
 TR_PROG
+TAIL_PROG
 SHA3SUM_PROG
 RMDIR
 RM
@@ -3348,6 +3350,50 @@ if test -z "$SHA3SUM_PROG"; then
     as_fn_error $? "sha3sum not found" "$LINENO" 5
 fi
 
+# Extract the first word of "tail", so it can be a program name with args.
+set dummy tail; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_TAIL_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $TAIL_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_TAIL_PROG="$TAIL_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_TAIL_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+TAIL_PROG=$ac_cv_path_TAIL_PROG
+if test -n "$TAIL_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $TAIL_PROG" >&5
+$as_echo "$TAIL_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$TAIL_PROG"; then
+    as_fn_error $? "tail not found" "$LINENO" 5
+fi
+
 # Extract the first word of "tr", so it can be a program name with args.
 set dummy tr; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -3520,6 +3566,50 @@ fi
 
 if test -z "$USERMOD"; then
     as_fn_error $? "usermod program not found" "$LINENO" 5
+fi
+
+# Extract the first word of "wc", so it can be a program name with args.
+set dummy wc; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_WC_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $WC_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_WC_PROG="$WC_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_WC_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+WC_PROG=$ac_cv_path_WC_PROG
+if test -n "$WC_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $WC_PROG" >&5
+$as_echo "$WC_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$WC_PROG"; then
+    as_fn_error $? "wc not found" "$LINENO" 5
 fi
 
 # Extract the first word of "xargs", so it can be a program name with args.
@@ -4291,9 +4381,11 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
+  -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
+  -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
   -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
 '
 
