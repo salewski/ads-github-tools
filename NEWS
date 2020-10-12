@@ -166,32 +166,25 @@ which they were fixed will be noted here, as well.
      :    Mandatory arguments to long options are mandatory for short options too.
      :
      :      -h, --help                 Print this help message on stdout
-     :
      :      -V, --version              Print the version of the program on stdout
-     :
-     :      -b, --default-branch=NAME  Specify the name to use for the default branch
-     :
+     :      -a, --auto-init            Auto-initialize the repo with a minimal README.md file
+     :          --prop-secs=NUMBER     Seconds to wait for GitHub data propagation before verifying
+     :                                   Default is 4 seconds.
+     :                                   Only relevant when -a (--auto-init) is in-effect.
+     :      -b, --default-branch=NAME  Specify the name to use for the default branch.
+     :                                   Implies -a (--auto-init).
      :      -d, --description=BLURB    Specify a short description blurb for the repo
-     :
      :          --force-replace        If repo already exists, attempt to replace it
-     :                                   (delete, then re-create)
-     :
+     :                                   (delete, then re-create; requires 'delete_repo' scope)
      :          --homepage=URL         Specify a URL with more information about the repo
-     :
      :      -I, --disable-issues       Disable GitHub issues for the new repo
-     :
      :      -P, --disable-projects     Disable GitHub projects for the new repo
-     :
      :      -O, --output-format=WORD   Emit output in the format specified by WORD [default: text]
      :                                   Valid values for WORD include: 'text' and 'json'
-     :
      :      -p, --private              Make the repository a GitHub private repo (default is public)
-     :
      :      -v, --verbose              Print program progress messages on stderr. Specify multiple
      :                                   times to increase verbosity: info, debug, and tracing (set -x)
-     :
      :      -W, --disable-wiki         Disable GitHub wiki feature for the new repo
-     :
      :          --                     Signals the end of options and disables further options processing.
      :                                   Any remaining argument(s) will be interpretted as a repo name
      :
@@ -202,32 +195,46 @@ which they were fixed will be noted here, as well.
 
      :    $ ads-github-repo-create 'aljunk-testing-repo-006'
      :    Summary of newly created repository:
+     :                   Name: aljunk-testing-repo-006
+     :               Is fork?: no
+     :                  Owner: salewski
+     :           Is archived?: no
+     :           Is disabled?: no
      :
-     :                Name: aljunk-testing-repo-006
-     :            Is fork?: no
-     :               Owner: salewski
+     :             Created at: 2020-10-09 07:09:52+0000
+     :             Updated at: 2020-10-09 07:09:56+0000
      :
-     :        Is archived?: no
-     :        Is disabled?: no
+     :            Is private?: no
+     :             Visibility: -
      :
-     :          Created at: 2020-10-09 07:09:52+0000
-     :          Updated at: 2020-10-09 07:09:56+0000
+     :      Auto-initialized?: no
+     :         Default branch: main
      :
-     :         Is private?: no
-     :          Visibility: -
+     :            Has issues?: yes
+     :          Has projects?: yes
+     :              Has wiki?: yes
      :
-     :      Default branch: main
+     :                 GitHub: https://github.com/salewski/aljunk-testing-repo-006
+     :               Homepage: -
+     :            Description: -
      :
-     :         Has issues?: yes
-     :       Has projects?: yes
-     :           Has wiki?: yes
-     :
-     :              GitHub: https://github.com/salewski/aljunk-testing-repo-006
-     :            Homepage: -
-     :         Description: -
-     :
-     :       Clone via ssh: git@github.com:salewski/aljunk-testing-repo-006.git
-     :     Clone via https: https://github.com/salewski/aljunk-testing-repo-006.git
+     :          Clone via ssh: git@github.com:salewski/aljunk-testing-repo-006.git
+     :        Clone via https: https://github.com/salewski/aljunk-testing-repo-006.git
+
+
+**** issue 55: repo-create: make repo auto-initialization optional
+
+     https://github.com/salewski/ads-github-tools/issues/55
+
+     This issue documents a change in direction we took while designing the
+     'ads-github-repo-create' tool. Originally the tool always
+     auto-initialized the new repo, but that behavior interfered with use
+     cases in which the GitHub repo was being created as the target for some
+     existing Git repository (e.g., when mirroring a Git repo from elsewhere
+     into GitHub). Consequently, the auto-initialize behavior was made
+     optional, with the tradeoff being that the user needs to be cognizant of
+     whether auto-initialization will be helpful to or an annoyance for the
+     task at hand.
 
 
 *** issue 49: update contact email

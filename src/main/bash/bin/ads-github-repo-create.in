@@ -36,9 +36,6 @@
 #       small amount of the functionality currently implemented in this
 #       program (such a handling the global options).
 #
-# TODO:
-#     * honor the user's 'init.defaultBranch' setting (git >= 2.28 only)
-#
 declare -r PROG='ads-github-repo-create'
 
 set -o pipefail
@@ -71,8 +68,37 @@ TRACING=false      # enable with three or more '-v' (--verbose) opts
 RE_BLANK='^[[:space:]]*$'
 RE_EMPTY='^$'
 
+RE_ALL_DIGITS='^[[:digit:]]+$'
+
+RE_DECIMAL_NUMBER1='^[[:digit:]]+[.][[:digit:]]*$'
+RE_DECIMAL_NUMBER2='^[[:digit:]]*[.][[:digit:]]+$'
+
 RE_JSON_BOOLEAN='^(true|false)$'
 
+
+# In those instances in which we need to auto-initialize the new repo, there
+# is a noticeable delay between when we push to the repo and when an API query
+# for that repo will reflect the data just pushed. It seems that the GitHub
+# side is engineered to be "eventually consistent", and since we are working
+# through two different interfaces (the API and git-push(1)) there is no hope
+# for "read our own writes".
+#
+# The result of this situation, of course, is that querying the API for our
+# repo too soon after doing a 'git push' can result in a bogus reponse. To
+# work around the issue we simply sleep(1) $DATA_PROP_SECS to wait for the
+# data to propagate after a 'git push' before attempting to query it via the
+# API. (Patches welcome for better approaches, if there are any...)
+#
+# Empirical testing has shown that the magic number 4 is long enough to be
+# effective, but short enough to be bearable. The default value for
+# DATA_PROP_SECS is subject to change without warning, in response to
+# additional real-world experience. In a lot of cases, the difference between
+# .5 seconds and 1 second seems to be where the difference lies, but there are
+# enough failures with that value that we have determined that using one
+# second would leave us too close to the border line. In any event, adjust to
+# suit; that's what the '--prop-secs=NUMBER' knob is there for.
+#
+DATA_PROP_SECS=4  # override with --prop-secs=NUMBER
 
 # Keys are internal values used by the program; values are allowed names for
 # user-specified formats.
@@ -84,8 +110,8 @@ DFLT_OUTPUT_FORMAT=${LEGIT_OUTPUT_FORMAT_SYM_TO_NAME['TEXT']}
 
 OUTPUT_FORMAT=    # set with '-O' (--output-format=WORD)
 
-
-DO_FORCE_REPLACE=false  # override with '--force-replace'
+DO_AUTO_INIT_REPO=false  # override with '-a' (--auto-init)
+DO_FORCE_REPLACE=false   # override with '--force-replace'
 
 NEW_REPO_DESC=
 HAVE_NEW_REPO_DESC=false
@@ -95,6 +121,9 @@ HAVE_NEW_REPO_NAME=false
 
 NEW_REPO_URL_HOMEPAGE=
 HAVE_NEW_REPO_URL_HOMEPAGE=false
+
+declare -r GIT_CFG_KEY_INIT_DFLT_BRANCH='init.defaultBranch'  # see git-config(1), git >= 2.28
+declare -r GITHUB_DFLT_BRANCH_NAME='main'  # GitHub policy, since 2020-10-01
 
 NEW_REPO_DFLT_BRANCH_NAME=
 HAVE_NEW_REPO_DFLT_BRANCH_NAME=false
@@ -128,6 +157,7 @@ declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v
 # particular tool by setting an environment variable named after the tool
 # (with hyphen chars changed to underscores).
 
+BC_PROG="${BC:-@BC_PROG@}"
 # jq - command line JSON parser and manipulation language
 #      see: https://github.com/stedolan/jq
 #
@@ -263,32 +293,25 @@ Create a new GitHub repository.
 Mandatory arguments to long options are mandatory for short options too.
 
   -h, --help                 Print this help message on stdout
-
   -V, --version              Print the version of the program on stdout
-
-  -b, --default-branch=NAME  Specify the name to use for the default branch
-
+  -a, --auto-init            Auto-initialize the repo with a minimal README.md file
+      --prop-secs=NUMBER     Seconds to wait for GitHub data propagation before verifying
+                               Default is 4 seconds.
+                               Only relevant when -a (--auto-init) is in-effect.      
+  -b, --default-branch=NAME  Specify the name to use for the default branch.
+                               Implies -a (--auto-init).
   -d, --description=BLURB    Specify a short description blurb for the repo
-
       --force-replace        If repo already exists, attempt to replace it
-                               (delete, then re-create)
-
+                               (delete, then re-create; requires 'delete_repo' scope)
       --homepage=URL         Specify a URL with more information about the repo
-
   -I, --disable-issues       Disable GitHub issues for the new repo
-
   -P, --disable-projects     Disable GitHub projects for the new repo
-
   -O, --output-format=WORD   Emit output in the format specified by WORD [default: text]
                                Valid values for WORD include: 'text' and 'json'
-
   -p, --private              Make the repository a GitHub private repo (default is public)
-
   -v, --verbose              Print program progress messages on stderr. Specify multiple
                                times to increase verbosity: info, debug, and tracing (set -x)
-
   -W, --disable-wiki         Disable GitHub wiki feature for the new repo
-
       --                     Signals the end of options and disables further options processing.
                                Any remaining argument(s) will be interpretted as a repo name
 
@@ -395,6 +418,11 @@ function f_set_opt_default_branch_name_or_die () {
 
     declare -r NEW_REPO_DFLT_BRANCH_NAME
     declare -r HAVE_NEW_REPO_DFLT_BRANCH_NAME
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): specifying a default branch name implies -a (--auto-init)\n" 1>&2
+        $DO_AUTO_INIT_REPO || DO_AUTO_INIT_REPO=true
+    fi
 
     return 0  # success
 }
@@ -688,6 +716,7 @@ declare -A longopt_spec=(
     ['help']=0      # -h
     ['version']=0   # -V
 
+    ['auto-init']=0         # -a (--auto-init)
     ['default-branch']=1    # -b (--default-branch=NAME)
     ['description']=1       # -d (--description=BLURB)
     ['force-replace']=0     #    (--force-replace)
@@ -699,7 +728,9 @@ declare -A longopt_spec=(
 
     ['output-format']=1     # -O (--output-format)
 
-    ['private']=0   # -p (--private)
+    ['private']=0           # -p (--private)
+    ['prop-secs']=1         #    (--prop-secs=NUMBER)
+
     ['verbose']=0   # -v
 )
 
@@ -723,7 +754,7 @@ if test $# -gt 0; then
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
-    while getopts ':-:hVb:d:IO:PpvW' opt
+    while getopts ':-:hVab:d:IO:PpvW' opt
     do
         : $PROG \(trace: $LINENO\): opt is: $opt
 
@@ -888,6 +919,10 @@ if test $# -gt 0; then
                 exit 0
                 ;;
 
+            'auto-init' | 'a')
+                DO_AUTO_INIT_REPO=true
+                ;;
+
             'default-branch' | 'b')
                 f_set_opt_default_branch_name_or_die "${OPTARG}"
                 ;;
@@ -940,6 +975,21 @@ if test $# -gt 0; then
 
             'private' | 'p')
                 FLG_NEW_REPO_IS_PUBLIC=false
+                ;;
+
+            'prop-secs' )
+                if [[ "${OPTARG}" =~ $RE_ALL_DIGITS ]]; then
+                    DATA_PROP_SECS=${OPTARG}
+                elif [[ "${OPTARG}" =~ $RE_DECIMAL_NUMBER1 ]]; then
+                    DATA_PROP_SECS=${OPTARG}
+                elif [[ "${OPTARG}" =~ $RE_DECIMAL_NUMBER2 ]]; then
+                    DATA_PROP_SECS=${OPTARG}
+                else
+                    printf "${PROG} (error): propagation seconds must be an integer or decimal number; got \"%s\"; bailing out\n" \
+                           "${OPTARG}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
                 ;;
 
             'verbose' | 'v' )
@@ -1043,58 +1093,87 @@ if test -z "${OUTPUT_FORMAT}"; then
 fi
 
 
-if $HAVE_NEW_REPO_DFLT_BRANCH_NAME; then :; else
-    # The user did not specify on the command line a default branch name to
-    # use, but (since git 2.28 (tagged as such on 2020-07-26)) a preference
-    # may be available in the user's ~/.gitconfig file under the key:
-    #
-    #     init.defaultBranch
-    #
-    # We will honor that setting, if it exists. If the setting does not exist,
-    # then the default branch name will be whatever the GitHub API uses by
-    # default. Prior to 2020-10-01, that value was 'master'. After 2020-10-01,
-    # the value is 'main'.
-    #
-    # See also:
-    #     * git-config(1) -- the entry for 'init.defaultBranch' (git >= 2.28)
-    #
-    #     * https://github.blog/2020-07-27-highlights-from-git-2-28/#introducing-init-defaultbranch
-    #
-    #     * https://github.blog/changelog/2020-08-26-set-the-default-branch-for-newly-created-repositories/
-    #     * https://github.com/github/renaming
-    #
-    if $DEBUGGING; then
-        printf "${PROG} (debug): no default branch specified on command line; will check git config for 'init.defaultBranch'\n" 1>&2
-    fi
+if $DO_AUTO_INIT_REPO; then
 
-    declare t_key_name='init.defaultBranch'
-    declare t_global_out_val
-    f_get_git_config_opt_ignoring_local_repo "${t_key_name}" 't_global_out_val'
+    # We will be auto-initializing the repository, either because the user
+    # explicitly asked us to ('-a', '--auto-init'), or implicitly asked us to
+    # ('-b', '--default-branch=NAME').
 
-    if test $? -eq 1; then
+    if $HAVE_NEW_REPO_DFLT_BRANCH_NAME; then :; else
+        # The user did not specify on the command line a default branch name
+        # to use, but (since git 2.28 (tagged as such on 2020-07-26)) a
+        # preference may be available in the user's ~/.gitconfig file under
+        # the key:
+        #
+        #     init.defaultBranch
+        #
+        # We will honor that setting, if it exists. If the setting does not
+        # exist, then the default branch name will be whatever the GitHub API
+        # uses by default. Prior to 2020-10-01, that value was 'master'. After
+        # 2020-10-01, the value is 'main'.
+        #
+        # See also:
+        #     * git-config(1) -- the entry for 'init.defaultBranch' (git >= 2.28)
+        #
+        #     * https://github.blog/2020-07-27-highlights-from-git-2-28/#introducing-init-defaultbranch
+        #
+        #     * https://github.blog/changelog/2020-08-26-set-the-default-branch-for-newly-created-repositories/
+        #     * https://github.com/github/renaming
+        #
         if $DEBUGGING; then
-            printf "${PROG} (debug): did not find a git config value for key '%s' (okay)\n" "${t_key_name}" 1>&2
+            printf "${PROG} (debug): no default branch specified on command line; will check git config for 'init.defaultBranch'\n" 1>&2
         fi
-    else
-        if test -z "${t_global_out_val}"; then
-            printf "${PROG} (warning): found empty value for git config key '%s'; ignoring\n" "${t_key_name}" 1>&2
-        elif [[ "${t_global_out_val}" =~ $RE_BLANK ]]; then
-            printf "${PROG} (warning): found blank value for git config key '%s'; ignoring\n" "${t_key_name}" 1>&2
-        else
+
+        declare t_key_name=$GIT_CFG_KEY_INIT_DFLT_BRANCH
+        declare t_global_out_val
+        f_get_git_config_opt_ignoring_local_repo "${t_key_name}" 't_global_out_val'
+
+        if test $? -eq 1; then
             if $DEBUGGING; then
-                printf "${PROG} (debug): found a git config value for key '%s': \"%s\"\n" "${t_key_name}" "${t_global_out_val}" 1>&2
+                printf "${PROG} (debug): did not find a git config value for key '%s' (okay; will use GitHub default: \"%s\")\n" \
+                       "${t_key_name}"              \
+                       "${GITHUB_DFLT_BRANCH_NAME}" \
+                       1>&2
             fi
-            NEW_REPO_DFLT_BRANCH_NAME=${t_global_out_val}
+            NEW_REPO_DFLT_BRANCH_NAME=${GITHUB_DFLT_BRANCH_NAME}
             HAVE_NEW_REPO_DFLT_BRANCH_NAME=true
+        else
+            if test -z "${t_global_out_val}"; then
+                printf "${PROG} (warning): found empty value for git config key '%s'; ignoring (will use GitHub default: \"%s\")\n" \
+                       "${t_key_name}" \
+                       "${GITHUB_DFLT_BRANCH_NAME}" 1>&2
+                NEW_REPO_DFLT_BRANCH_NAME=${GITHUB_DFLT_BRANCH_NAME}
+                HAVE_NEW_REPO_DFLT_BRANCH_NAME=true
+
+            elif [[ "${t_global_out_val}" =~ $RE_BLANK ]]; then
+                printf "${PROG} (warning): found blank value for git config key '%s'; ignoring (will use GitHub default: \"%s\")\n" \
+                       "${t_key_name}" \
+                       "${GITHUB_DFLT_BRANCH_NAME}" 1>&2
+                NEW_REPO_DFLT_BRANCH_NAME=${GITHUB_DFLT_BRANCH_NAME}
+                HAVE_NEW_REPO_DFLT_BRANCH_NAME=true
+
+            else
+                if $DEBUGGING; then
+                    printf "${PROG} (debug): found a git config value for key '%s': \"%s\"\n" "${t_key_name}" "${t_global_out_val}" 1>&2
+                fi
+                NEW_REPO_DFLT_BRANCH_NAME=${t_global_out_val}
+                HAVE_NEW_REPO_DFLT_BRANCH_NAME=true
+            fi
         fi
+        unset t_global_out_val
     fi
-    unset t_global_out_val
+
+    # Internal sanity check
+    if ${HAVE_NEW_REPO_DFLT_BRANCH_NAME}; then :; else
+        printf "${PROG} (BUG) [line: $LINENO]: HAVE_NEW_REPO_DFLT_BRANCH_NAME should be true here; bailing out\n"
+    fi
 fi
 
 :
 : Key flags and options summary:
 : ------------------------------
 : "$PROG (trace: $LINENO): force-replace enabled?: ${DO_FORCE_REPLACE}"
+: "$PROG (trace: $LINENO):        auto-init repo?: ${DO_AUTO_INIT_REPO}"
 :
 : "$PROG (trace: $LINENO):          output format: ${OUTPUT_FORMAT}"
 :
@@ -1182,18 +1261,28 @@ declare -r NEW_REPO_NAME_URLENC
 # For non-boolean fields, we only specify a key/value pair if we have have
 # gathered a value.
 #
-# Note that we have 'auto_init' set to true to cause an initial commit to be
-# made with an empty README.md file. We need to have at least one commit to
-# reify the default branch; otherwise we will not be able to rename it below
-# (git only makes the branch real upon the first commit).
+# Note that '-b' (--default-branch=NAME) implies '-a' (--auto-init). The
+# reason for that is that we need to create a commit to reify the branch; a
+# branch does not exist until a commit has been made to it.
 #
-# XXX: Note that we /always/ have the 'auto_init' flag set to true. Strictly
-#      speaking it is only needed when the user has specified a default branch
-#      name that is different from that used by the GitHub API (since
-#      2020-10-01, that value is "main"). It is not yet clear whether this
-#      will prove to be an annoyance. For the time being, we are opting for
-#      consistency of behavior; users should not have to keep fidly little
-#      details like this in mind to use the tool.
+# Note, too, that our '-a' (--auto-init) option is conceptually similar (read
+# as: "nearly identical") to the GitHub v3 API's "auto_init" parameter for the
+# repo creation endpoint, but ads-github-repo-create DOES NOT use the
+# "auto_init" parameter (it /did/ use that parameter through commit
+# acf77414be14598c0418a13e607a5718d65c34a5 (2020-10-07), but it was later
+# found that the benefit of that attribute was not sufficient to merit its use
+# over just performing the work (primarily) locally, which we can do both more
+# efficiently and more robustly).
+#
+# For additional background on this choice, see the subsection named:
+#
+#     "Option '-a' (--auto-init) does not necessarily mean the "auto_init" parameter"
+#
+# in the write-up of issue #55:
+#
+#   * "repo-create: make repo auto-initialization optional"
+#     https://github.com/salewski/ads-github-tools/issues/55
+#
 #
 # FIXME: Consider supporting 'visibility' (public|private|internal).
 #
@@ -1205,7 +1294,7 @@ declare -r NEW_REPO_NAME_URLENC
 #
 json_create=$("${CAT_PROG}" - <<EOF
 {
-    "auto_init": "true",
+    "auto_init": "false",
     "name":      "${NEW_REPO_NAME}"
 EOF
 )
@@ -1614,291 +1703,364 @@ else
 fi
 
 
-# Writing in 2020-10, we expect that our request for any particular default
-# branch name was ignored by the GitHub v3 API. We only verify it, though, if:
+# Policy: The name of the default branch created by this tool will follow the
+#         default GitHub policy, unless overridden by the command line
+#         invocation or the local Git configuration.
 #
-#     a) a specific value was requested; and
-#     b) that specific value is something different from the GitHub default ("main")
+# WANTED_BRANCH_NAME: Is the name the user wants to use as the default branch
+#     name for the newly created repo, as expressed either explicitly on the
+#     command line via the '-b' (--default-branch=NAME) option, or via
+#     git-config(1) with the 'init.defaultBranch' setting. When the user has
+#     not expressed such a preference by either of those means, then the value
+#     of WANTED_BRANCH_NAME will be set to $GITHUB_DFLT_BRANCH_NAME (which is
+#     always 'main'). WANTED_BRANCH_NAME expresses the name that should be
+#     used for the default branch of the newly created repo when this program
+#     is in control of setting it, which is only done when explicitly
+#     requested with '-a' (--auto-init) or (implicitly) with '-b'
+#     (--default-branch=NAME).
 #
-if $HAVE_NEW_REPO_DFLT_BRANCH_NAME; then
+# EXPECTED_BRANCH_NAME is the name we expect the GitHub API to report as the
+#     name of the newly created repo during our end-state verification step.
+#
+#     * When the user has specified '-a' (--auto-init) (either explicitly, or
+#       implicitly by specifying '-b' (--default-branch=NAME)), then this
+#       value will always be the same as $WANTED_BRANCH_NAME.
+#
+#     * When no auto-initialization was done for the repo, then the newly
+#       created repo will be "empty", and will not actually have a default
+#       branch (it will not have any branches). In this case, the GitHub API
+#       indicates (in the 'default_branch' property) that the default branch
+#       name is 'main'; that is because that is the name GitHub would have
+#       used by default if we were to have allowed it to initialize the
+#       repo. It is also the name a user would end up with if the GitHub repo
+#       setup instructions are followed blindly (since those instructions were
+#       updated on 2020-10-01).
+#
+WANTED_BRANCH_NAME=${GITHUB_DFLT_BRANCH_NAME}
+EXPECTED_BRANCH_NAME=${GITHUB_DFLT_BRANCH_NAME}
+if ${HAVE_NEW_REPO_DFLT_BRANCH_NAME}; then
+    WANTED_BRANCH_NAME=${NEW_REPO_DFLT_BRANCH_NAME}
+fi
+if ${DO_AUTO_INIT_REPO} \
+&& ${HAVE_NEW_REPO_DFLT_BRANCH_NAME}; then
+    WANTED_BRANCH_NAME=${NEW_REPO_DFLT_BRANCH_NAME}
+    EXPECTED_BRANCH_NAME=${NEW_REPO_DFLT_BRANCH_NAME}
+fi
+declare -r WANTED_BRANCH_NAME
+declare -r EXPECTED_BRANCH_NAME
 
-    if test 'main' = "${NEW_REPO_DFLT_BRANCH_NAME}"; then :; else
 
-        if test "${dflt_branch_name}" = "${NEW_REPO_DFLT_BRANCH_NAME}"; then
+if $DO_AUTO_INIT_REPO; then
 
-            # AUTHOR NOTE (2020-10-04): If somebody encounters this scenario in the
-            # wild before the author does, please open an issue on GitHub to let him
-            # know about it. It would indicate a (probably good) change in the
-            # behavior of the GitHub API that this program should be adapted to
-            # interpret more accurately.
-            #
-            #     https://github.com/salewski/ads-github-tools/issues
-            #
-            printf "${PROG} (warning): unexpected success: GitHub API honored our initial 'default_branch' request\n" 1>&2
-            # Keep going...
-        else
-            if $BE_VERBOSE; then
-                printf "${PROG} (info): specific default branch name specified; doing clone/rename dance\n" 1>&2
-            fi
+    # For repo auto-initialization and/or changing the default branch name of
+    # the repo, we need a default branch to actually exist (a Git branch does
+    # not exist until a commit to the branch is actually made).
+    #
+    # We will need to clone the empty repository and make an initial commit to
+    # it in order to force the default branch into existence. The single
+    # commit we make to the branch counts as our "repo auto-initialization".
+    #
+    # Beyond auto-initialization, if the user has requested that a default
+    # branch name other than the GitHub default be used, then we rename the
+    # branch locally, delete the 'origin' ref for HEAD, push the newly named
+    # branch to GitHub (where it will be the only branch, so becomes the
+    # default branch automatically), and then add the 'origin' ref for HEAD
+    # pointing to the new branch.
 
-            # Since our requested default branch name was ignored, we'll check out the
-            # repo, rename it locally, and then sync that state to the remote repo.
 
-            if $BE_VERBOSE; then
-                printf "${PROG} (info): [local repo] clone newly created repo..." 1>&2
-            fi
-            "${GIT_PROG}" clone --quiet 'git@github.com:'"${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}.git" "${MY_TMP_GIT_REPO_FPATH}"
+    # Note that 'git clone --quiet ...' (as of git 2.28.0) always emits the
+    # following warning on stderr:
+    #
+    #     warning: You appear to have cloned an empty repository.
+    #
+    # That's entirely expected and Officially Okay for our use case (and
+    # others), so we will suppress that particular message to avoid suggesting
+    # to the user that something may be amiss.
+    #
+    # XXX: This tweak does not account for any localization of the git warning
+    #      that may produce a variant other than the US English that is
+    #      currently accounted for.
+    #
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): [local repo] clone newly created (empty) repo..." 1>&2
+    fi
+    "${GIT_PROG}" clone --quiet 'git@github.com:'"${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}.git" "${MY_TMP_GIT_REPO_FPATH}" \
+        2> >( re_rmt='^warning:[[:space:]]+You appear to have cloned an empty repository[.]';
+              while read -r line; do
+                  if [[ "${line}" =~ $re_rmt ]]; then :; else
+                      printf '%s\n' "${line}" 1>&2
+                  fi
+              done )
+    if test $? -ne 0; then
+        $BE_VERBOSE && printf '\n' 1>&2
+        printf "${PROG} (error): was unable while trying to clone newly created repo; bailing out\n" 1>&2
+        exit 1
+    fi
+    if $BE_VERBOSE; then
+        printf '.done\n' 1>&2
+    fi
+
+    (
+        cd "${MY_TMP_GIT_REPO_FPATH}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to cd to directory of newly created repo; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): [local repo] repo auto-initialization..." 1>&2
+        fi
+        printf '# %s\n' "${NEW_REPO_NAME}" > 'README.md'
+        if test $? -ne 0; then
+            $BE_VERBOSE && printf '\n' 1>&2
+            printf "${PROG} (error): repo auto-initalization: was unable to create to 'README.md' file; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+
+        if $HAVE_NEW_REPO_DESC; then
+            printf '%s\n' "${NEW_REPO_DESC}" >> 'README.md'
             if test $? -ne 0; then
                 $BE_VERBOSE && printf '\n' 1>&2
-                printf "${PROG} (error): was unable while trying to clone newly created repo; bailing out\n" 1>&2
-                exit 1
-            fi
-            if $BE_VERBOSE; then
-                printf '.done.\n' 1>&2
-            fi
-
-            (
-              cd "${MY_TMP_GIT_REPO_FPATH}"
-              if test $? -ne 0; then
-                  printf "${PROG} (error): was unable to cd to directory of newly created repo; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-
-              # We are currently on the default branch. Let's rename it it.
-              #
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): [local repo] on default branch; renaming it..." 1>&2
-              fi
-              "${GIT_PROG}" branch --move "${dflt_branch_name}" "${NEW_REPO_DFLT_BRANCH_NAME}"
-              if test $? -ne 0; then
-                  $BE_VERBOSE && printf '\n' 1>&2
-                  printf "${PROG} (error): was unable to rename branch locally; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if $BE_VERBOSE; then
-                  printf '.done.\n' 1>&2
-              fi
-
-
-              # Let the repo represented by our 'origin' remote know that there's a new branch
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): [local repo] pushing renamed branch to origin..." 1>&2
-              fi
-              # We jump through hoops to suppress 'remote:' messages without
-              # suppresssing legit stderr messages.
-#              "${GIT_PROG}" push --quiet --set-upstream origin "${NEW_REPO_DFLT_BRANCH_NAME}"
-              "${GIT_PROG}" push --quiet origin "${NEW_REPO_DFLT_BRANCH_NAME}" \
-                  2> >( re_rmt='^remote:';
-                        while read -r line; do
-                            if [[ "${line}" =~ $re_rmt ]]; then :; else
-                                printf '%s\n' "${line}" 1>&2
-                            fi
-                        done ) \
-                  1> /dev/null
-              if test $? -ne 0; then
-                  $BE_VERBOSE && printf '\n' 1>&2
-                  printf "${PROG} (error): was unable to push new branch to origin; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if $BE_VERBOSE; then
-                  printf '.done.\n' 1>&2
-              fi
-
-
-              # Now that the remote side knows about our new branch, our
-              # 'origin' remote should have a reference for the branch. Let's
-              # make that one the branch being tracked from our current local
-              # branch.
-              #
-              # Yes, we could have done this above with a '--set-upstream'
-              # option in our git-push(1) call, but then we could not control
-              # the program output as well (the '--quiet' would not be enough
-              # to silence some of the unwanted output).
-              #
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): [local repo] track new branch from upstream..." 1>&2
-              fi
-              "${GIT_PROG}" branch --quiet --set-upstream-to "origin/${NEW_REPO_DFLT_BRANCH_NAME}"
-              if test $? -ne 0; then
-                  $BE_VERBOSE && printf '\n' 1>&2
-                  printf "${PROG} (error): was unable to set upstream to new branch in origin remote; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if $BE_VERBOSE; then
-                  printf '.done.\n' 1>&2
-              fi
-
-
-              # locally: Switch our default branch
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): [local repo] pointing HEAD to %s..." "${NEW_REPO_DFLT_BRANCH_NAME}" 1>&2
-              fi
-              "${GIT_PROG}" remote set-head origin "${NEW_REPO_DFLT_BRANCH_NAME}"
-              if test $? -ne 0; then
-                  $BE_VERBOSE && printf '\n' 1>&2
-                  printf "${PROG} (error): was unable to switch default branch locally; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if $BE_VERBOSE; then
-                  printf '.done.\n' 1>&2
-              fi
-
-
-              # Note that our local repo will still have a remote ref for the original
-              # repo branch until we tell the remote to delete it below.
-
-              # remotely: Change the default branch for the repo
-              json_patch_dflt_name=$("${CAT_PROG}" - <<EOF
-{
-    "default_branch": "${NEW_REPO_DFLT_BRANCH_NAME}"
-}
-EOF
-                                    )
-
-              MY_CURL_OPTS=()  # (re)set
-              MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
-
-              MY_CURL_OPTS+=( '--data' )  # implies POST (overridden below)
-              MY_CURL_OPTS+=( "${json_patch_dflt_name}" )
-
-              MY_CURL_OPTS+=( '--request' )  # -X
-              MY_CURL_OPTS+=( 'PATCH'     )  # override POST; use PATCH instead
-
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): remotely: attempting to PATCH dflt branch name for GitHup repo: %s/%s\n" \
-                         "${GITHUB_REPO_OWNER}" \
-                         "${NEW_REPO_NAME}" 1>&2
-              fi
-
-              # "Update a repository"
-              #     https://developer.github.com/v3/repos/#update-a-repository
-              #     https://docs.github.com/en/free-pro-team@latest/rest/reference/repos#update-a-repository
-              #
-              # Known possible responses:
-              #     200 OK
-              #     403 Forbidden
-              #     404 Not Found
-              #     422 Unprocessable Entity
-              #
-              # On success, the returned JSON response should reflect the changes we
-              # attempted to "PATCH in".
-              #
-              t_http_code=$("${CURL_PROG}" "${MY_CURL_OPTS[@]}" \
-                                           "${gl_const_github_api_base_url}repos/${GITHUB_REPO_OWNER}/${NEW_REPO_NAME}")
-              t_estat=$?
-              if test $t_estat -ne 0; then
-                  printf "${PROG} (error): was error while invoking curl(1) to PATCH existing repo; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if test -z "${t_http_code}"; then
-                  printf "${PROG} (error): curl(1) command succeeded, but no HTTP response code emitted for PATCH; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-
-              case ${t_http_code} in
-                '200')  # "OK"
-                    if $BE_VERBOSE; then
-                        # CAREFUL: We'll note that the PATCH operation succeeded, but
-                        #          don't want to suggest that the actual default
-                        #          branch change succeeded until we confirm below by
-                        #          reading the expected values back in the JSON
-                        #          response we received.
-                        printf "${PROG} (info): successfully PATCHed existing GitHup repo: %s/%s\n" \
-                               "${GITHUB_REPO_OWNER}" \
-                               "${NEW_REPO_NAME}" 1>&2
-                    fi
-                    ;;
-
-                '403')
-                    printf "${PROG} (error): curl(1) PATCH resulted in a 403 (\"Forbidden\"); was unable to patch repo: %s/%s; bailing out\n" \
-                           "${GITHUB_REPO_OWNER}" \
-                           "${NEW_REPO_NAME}" 1>&2
-                    exit 1  # from subshell
-                    ;;
-
-                '404')
-                    # This should only happen if some other process is attempting to
-                    # modify the repo at the same time we are.
-                    #
-                    printf "${PROG} (error): curl(1) PATCH resulted in a 404 (\"Not Found\"); existing GitHup repo deleted by some other means (not us): %s/%s; bailing out\n" \
-                           "${GITHUB_REPO_OWNER}" \
-                           "${NEW_REPO_NAME}" 1>&2
-                    exit 1  # from subshell
-                    ;;
-
-                '422')  # "Unprocessable Entity"
-                    # This one is probably a bug in the current program related to not
-                    # structuring our PATCH request correctly (including problems
-                    # related to encoding the data correctly).
-                    #
-                    printf "${PROG} (error): curl(1) PATCH resulted in a 422 (\"Unprocessable Entity\"); was unable to patch repo: %s/%s; bailing out\n" \
-                           "${GITHUB_REPO_OWNER}" \
-                           "${NEW_REPO_NAME}" 1>&2
-                    exit 1  # from subshell
-                    ;;
-
-                *)
-                  printf "${PROG} (error): HTTP response code for PATCH command was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
-                         "${t_http_code}" 1>&2
-                  exit 1  # from subshell
-                  ;;
-              esac
-
-              # Ensure the default_branch name in-use (as reflected in the JSON
-              # response to our PATCH operation) actually reflects the name we
-              # requested.
-              read -r rsp_dflt_branch_name \
-                   < <("${JQ_PROG}" -r '"\(.default_branch)"' < "${MY_TMP_CURL_OUT_FPATH}")
-              if test $? -ne 0; then
-                  # Hopefully some other (more useful) error message was also emitted
-                  # by jq(1) or bash(1)...
-                  printf "${PROG} (error): was unable to extract data from PATCH JSON response; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-
-              if test "${rsp_dflt_branch_name}" = "${NEW_REPO_DFLT_BRANCH_NAME}"; then
-                  if $BE_VERBOSE; then
-                      printf "${PROG} (info): successfully changed default branch for existing GitHup repo: %s/%s\n" \
-                             "${GITHUB_REPO_OWNER}" \
-                             "${NEW_REPO_NAME}" 1>&2
-                  fi
-              else
-                  if test "${rsp_dflt_branch_name}" = "${dflt_branch_name}"; then
-                      printf "${PROG} (error): PATCH op to change default branch name succeeded, but request was ignored by the GitHub API; bailing out\n" 1>&2
-                      exit 1  # from subshell
-                  fi
-
-                  printf "${PROG} (error): PATCH op to change default branch name succeeded, but new default branch name is unexpected value (\"%s\"); bailing out\n" \
-                         "${rsp_dflt_branch_name}" 1>&2
-                  exit 1  # from subshell
-              fi
-
-              # remotely: Delete old default branch from GitHub repo
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): [remote repo] delete old default branch from GitHub repo..." 1>&2
-              fi
-              "${GIT_PROG}" push --quiet origin --delete "${dflt_branch_name}"
-              if test $? -ne 0; then
-                  $BE_VERBOSE && printf '\n' 1>&2
-                  printf "${PROG} (error): was unable to delete old default branch remotely; bailing out\n" 1>&2
-                  exit 1  # from subshell
-              fi
-              if $BE_VERBOSE; then
-                  printf '.done.\n' 1>&2
-              fi
-
-              if $BE_VERBOSE; then
-                  printf "${PROG} (info): successfully changed default branch for GitHup repo: %s/%s\n" \
-                         "${GITHUB_REPO_OWNER}" \
-                         "${NEW_REPO_NAME}" 1>&2
-              fi
-              exit 0  # from subshell
-            )
-            if test $? -ne 0; then
-                # Error message already printed in subshell
-                exit 1
+                printf "${PROG} (error): repo auto-initalization: was unable to append repo desc to 'README.md' file; bailing out\n" 1>&2
+                exit 1  # from subshell
             fi
         fi
+
+        "${GIT_PROG}" add 'README.md'
+        if test $? -ne 0; then
+            $BE_VERBOSE && printf '\n' 1>&2
+            printf "${PROG} (error): auto-initialization: was unable to add 'README.md' to git index; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+
+        "${GIT_PROG}" commit --quiet --message='add file: README.md'
+        if test $? -ne 0; then
+            $BE_VERBOSE && printf '\n' 1>&2
+            printf "${PROG} (error): auto-initialization: was unable to commit changes; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+        if $BE_VERBOSE; then
+            printf '.done\n' 1>&2
+        fi
+
+        # So we have our new repo checked-out and the content has been
+        # auto-initialized locally. Before we push it up to GitHub, though, we
+        # need to ensure the branch name is sane (for some definition of "sane"...)
+
+        t_branch_name_as_created=$("${GIT_PROG}" symbolic-ref --quiet --short 'HEAD')
+        if test $? -ne 0; then
+            printf "${PROG} (error): auto-initialization: was unable to obtain name of branch as created; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+        if test -z "${t_branch_name_as_created}"; then
+            # Should be a "can't happen" scenario....
+            printf "${PROG} (error): auto-initialization: obtained \"as created\" branch name is empty; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+
+        # The user's local git version and configuration influence the name of
+        # the "as created" branch. We will need to rename the "as created"
+        # branch name under the following circumstances:
+        #
+        #     1. If the user explicitly requested a specific default branch
+        #        name, and the "as created" branch name is different from that
+        #        value, then we will rename the branch.
+        #
+        #     2. If the user did not explicitly request a specific default
+        #        branch name but does have 'init.defaultBranch' configured,
+        #        AND the "as created" branch name is different from the value
+        #        specified by 'init.defaultBranch', then we will rename the
+        #        branch.
+        #
+        #     3. If the user did not explicitly request a specific default
+        #        branch name and DOES NOT have 'init.defaultBranch' set, then
+        #        we will use 'main', which is the default branch name used by
+        #        GitHub since 2020-10-01.
+
+        # If we end up renaming the local branch, then there will be a little
+        # extra housekeeping to do later on.
+        RENAMED_THE_LOCAL_BRANCH=false
+        if test "${t_branch_name_as_created}" = "${WANTED_BRANCH_NAME}"; then
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [local repo] auto-initialization: \"as created\" branch name (\"%s\") matches wanted name; no need to rename the branch\n" \
+                       "${t_branch_name_as_created}" 1>&2
+            fi
+        else
+            # Rename the branch
+            #
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [local repo] auto-initialization: renaming \"as created\" branch \"%s\" to \"%s\"..." \
+                       "${t_branch_name_as_created}" \
+                       "${WANTED_BRANCH_NAME}" 1>&2
+            fi
+            "${GIT_PROG}" branch --move "${t_branch_name_as_created}" "${WANTED_BRANCH_NAME}"
+            if test $? -ne 0; then
+                $BE_VERBOSE && printf '\n' 1>&2
+                printf "${PROG} (error): was unable to rename branch locally; bailing out\n" 1>&2
+                exit 1  # from subshell
+            fi
+            if $BE_VERBOSE; then
+                printf '.done\n' 1>&2
+            fi
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [local repo] auto-initialization: deleting obsolete HEAD ref..." 1>&2
+            fi
+            "${GIT_PROG}" remote set-head origin --delete
+            if test $? -ne 0; then
+                $BE_VERBOSE && printf '\n' 1>&2
+                printf "${PROG} (error): was unable to delete obsolete HEAD ref; bailing out\n" 1>&2
+                exit 1  # from subshell
+            fi
+            if $BE_VERBOSE; then
+                printf '.done\n' 1>&2
+            fi
+
+            RENAMED_THE_LOCAL_BRANCH=true
+        fi
+
+        # Whether or not we renamed the branch locally, the remote GitHub repo
+        # does not yet have any branches in it. When we push our single branch
+        # to GitHub, it will become the default branch by virtue of being the
+        # first branch to exist in the repo.
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): [local repo] auto-initialization: pushing branch to origin..." 1>&2
+        fi
+        # We jump through hoops to suppress 'remote:' messages without
+        # suppresssing legit stderr messages.
+        "${GIT_PROG}" push --quiet --set-upstream origin "${WANTED_BRANCH_NAME}" \
+            2> >( re_rmt='^remote:';
+                  while read -r line; do
+                      if [[ "${line}" =~ $re_rmt ]]; then :; else
+                          printf '%s\n' "${line}" 1>&2
+                      fi
+                  done ) \
+            1> /dev/null
+        if test $? -ne 0; then
+            $BE_VERBOSE && printf '\n' 1>&2
+            printf "${PROG} (error): auto-initialization: was unable to push new branch to origin; bailing out\n" 1>&2
+            exit 1  # from subshell
+        fi
+        if $BE_VERBOSE; then
+            printf '.done\n' 1>&2
+        fi
+
+        # If we renamed the branch above, then we will re-establish a HEAD ref
+        # locally pointing at the new remote branch.
+        #
+        # Strictly speaking, this step is optional in this particular Git repo
+        # clone because we will be delete it momentarily. Any new clones
+        # created for the repo from GitHub would already have this ref set up
+        # automatically (because at this point they would not be cloning an
+        # empty repo). Nevertheless, we want our local repo to be in a sane
+        # configuration for debugging purposes (while hacking on the code we
+        # might disable the automatic repo deletion).
+        #
+        # Note that this will only succeed if the branch already exists for
+        # our 'origin' remote, so we needed to push our branch to (and
+        # implicitly sync with) our 'origin' remote before this command could
+        # succeed:
+        #
+        if $RENAMED_THE_LOCAL_BRANCH; then
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): [local repo] auto-initialization: establishing updated HEAD ref..." 1>&2
+            fi
+            "${GIT_PROG}" remote set-head origin "${WANTED_BRANCH_NAME}"
+            if test $? -ne 0; then
+                $BE_VERBOSE && printf '\n' 1>&2
+                printf "${PROG} (error): was unable to establish updated HEAD ref; bailing out\n" 1>&2
+                exit 1  # from subshell
+            fi
+            if $BE_VERBOSE; then
+                printf '.done\n' 1>&2
+            fi
+        fi
+
+        # XXX: So dumb....
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): stalling %s seconds for \"eventually consistent\" data propagation..." \
+                   "${DATA_PROP_SECS}" 1>&2
+            # The shell wants to do integer math, so we'll just caveman it
+            t_full_secs_left=${DATA_PROP_SECS%.*}
+            t_frac_secs_left=${DATA_PROP_SECS#*.}
+            if test -z "${t_full_secs_left}"; then
+                t_full_secs_left=0
+            fi
+            if test -z "${t_frac_secs_left}"; then
+                t_frac_secs_left=0
+            fi
+            # We will prefer the dot indicators, but that type of display does
+            # not scale well so we will switch to using a spinner if we would
+            # otherwise emit more than N dots.
+            t_use_spinner=false
+            if test ${t_full_secs_left} -gt 10; then
+                t_use_spinner=true
+            fi
+            if $t_use_spinner; then
+                t_spin='-\|/'
+                t_modulus=${#t_spin}
+
+                # We'll spin-tick three times each second to provide a more
+                # visually pleasing animation than would be the case if we
+                # only updated the spinner once each second.
+                t_ticks_per_sec=3
+                t_sleep_dur=$(printf '%s\n' 'scale=2' "1 / ${t_ticks_per_sec}" | "${BC_PROG}")
+                if test $? -ne 0; then
+                    printf "\n${PROG} (warning): was unable to calculate sleep duration; using .5\n" 1>&2
+                    t_ticks_per_sec=2
+                    t_sleep_dur='.5'
+                    # keep going ...
+                fi
+
+                t_ii=0
+                printf ' '  # advance into our own overwritable cell
+                while test ${t_full_secs_left} -gt 0; do
+                    t_idx=$(( (t_ii++) % t_modulus ))
+                    printf '\b%s' "${t_spin:${t_idx}:1}"
+                    sleep "${t_sleep_dur}"
+                    if test $? -ne 0; then
+                        printf "\n${PROG} (error): spinner sleep failed; bailing out\n" 1>&2
+                        exit 1  # from subshell
+                    fi
+                    (( --t_full_secs_left ))
+                done
+            else
+                # Use dot indicators
+                while test ${t_full_secs_left} -gt 0; do
+                    printf '.'
+                    sleep 1
+                    if test $? -ne 0; then
+                        # Yes, this actually got triggered during development
+                        printf "\n${PROG} (error): full-second sleep failed; bailing out\n" 1>&2
+                        exit 1  # from subshell
+                    fi
+                    (( --t_full_secs_left ))
+                done
+            fi
+            if test ${t_frac_secs_left} -gt 0; then
+                if $t_use_spinner; then
+                    printf '\b '  # backspace and space
+                else
+                    printf '.'
+                fi
+                sleep ".${t_frac_secs_left}"  # sleep for fraction of a second
+                if test $? -ne 0; then
+                    printf "\n${PROG} (error): sub-second sleep failed; bailing out\n" 1>&2
+                    exit 1  # from subshell
+                fi
+            fi
+            if $t_use_spinner; then
+                printf '\b'
+            fi
+            printf '.done\n'
+        fi
+
+        exit 0  # from subshell
+    )
+    if test $? -ne 0; then
+        # Error message already printed in subshell
+        exit 1
     fi
 fi
 
@@ -2066,7 +2228,293 @@ fi
 : "$PROG (trace: $LINENO): ghr_description: ${ghr_description}"
 
 if $DEBUGGING; then
-    printf "${PROG} (debug): successfully extracted fields from JSON response; emitting summary\n" 1>&2
+    printf "${PROG} (debug): successfully extracted fields from JSON response\n" 1>&2
+fi
+
+
+if $DEBUGGING; then
+    printf "${PROG} (debug): verifying attributes of newly created GitHub repo\n" 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: repo name..." 1>&2
+fi
+if test "${ghr_name}" = "${NEW_REPO_NAME}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected repo name to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${NEW_REPO_NAME}" \
+           "${ghr_name}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'fork' flag..." 1>&2
+fi
+if test "${ghr_fork}" = 'false'; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'fork' flag to be \"false\", but have \"%s\"; bailing out\n" \
+           "${ghr_fork}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'archived' flag..." 1>&2
+fi
+if test "${ghr_archived}" = 'false'; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'archived' flag to be \"false\", but have \"%s\"; bailing out\n" \
+           "${ghr_archived}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'disabled' flag..." 1>&2
+fi
+if test "${ghr_disabled}" = 'false'; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'disabled' flag to be \"false\", but have \"%s\"; bailing out\n" \
+           "${ghr_disabled}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+# XXX: Just testing that created_at and updated_at are non-zero in
+#      length. Beef this up if real-world practice suggests that this is not
+#      enough.
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'created_at' field..." 1>&2
+fi
+if test -z "${ghr_created_at}"; then
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: the 'created_at' date/time field is empty; bailing out\n" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'updated_at' field..." 1>&2
+fi
+if test -z "${ghr_updated_at}"; then
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: the 'updated_at' field date/time is empty; bailing out\n" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'private' flag..." 1>&2
+fi
+# Note: comparing JSON boolean to 'true'/'false' command names
+t_expected='false'  # GitHub repos are public by default
+if ${FLG_NEW_REPO_IS_PUBLIC}; then :; else
+    t_expected='true'
+fi
+if test "${ghr_private}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'private' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_private}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'visibility' field..." 1>&2
+fi
+# t_expected='public'
+# if ${FLG_NEW_REPO_IS_PUBLIC}; then :; else
+#     # FIXME: There is also an experimental 'internal' value that we do not yet
+#     #        support, so should not see here for a repo that we just created.
+#     t_expected='private'
+# fi
+t_expected='-'  # When not opting-in to the experimental feature, the field is omitted or null in the repsonse
+if test "${ghr_visibility}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'visibility' field to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_visibility}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'default_branch' field..." 1>&2
+fi
+t_expected=${EXPECTED_BRANCH_NAME}
+if test "${ghr_default_branch}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'default_branch' field to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_default_branch}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'has_issues' flag..." 1>&2
+fi
+# Note: comparing JSON boolean to 'true'/'false' command names
+t_expected=${FLG_NEW_REPO_ISSUES_ENABLED}
+if test "${ghr_has_issues}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'has_issues' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_has_issues}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'has_projects' flag..." 1>&2
+fi
+# Note: comparing JSON boolean to 'true'/'false' command names
+t_expected=${FLG_NEW_REPO_PROJECTS_ENABLED}
+if test "${ghr_has_projects}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    # FIXME: This setting is known to "not take"; may try harder via a follow-up PATCH operation?
+    printf "${PROG} (warning): newly repo verification: expected 'has_projects' flag to be \"%s\", but have \"%s\" (known GitHub v3 API bug; ignoring)..." \
+           "${t_expected}" \
+           "${ghr_has_projects}" 1>&2
+#    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'has_wiki' flag..." 1>&2
+fi
+# Note: comparing JSON boolean to 'true'/'false' command names
+t_expected=${FLG_NEW_REPO_WIKI_ENABLED}
+if test "${ghr_has_wiki}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'has_wiki' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_has_wiki}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'html_url' field..." 1>&2
+fi
+# The GitHub API produces this value, but it should always be present and non-empty
+if test -z "${ghr_html_url}"; then
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: the 'html_url' field is empty; bailing out\n" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'homepage' field..." 1>&2
+fi
+t_expected='-'  # our hard-coded transformation meaning "not present, or empty"
+if ${HAVE_NEW_REPO_URL_HOMEPAGE}; then
+    t_expected=${NEW_REPO_URL_HOMEPAGE}
+fi
+if test "${ghr_homepage}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'homepage' field to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_homepage}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'clone_url' field..." 1>&2
+fi
+# The GitHub API produces this value, but it should always be present and non-empty
+if test -z "${ghr_clone_url}"; then
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: the 'clone_url' field is empty; bailing out\n" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'ssh_url' field..." 1>&2
+fi
+# The GitHub API produces this value, but it should always be present and non-empty
+if test -z "${ghr_ssh_url}"; then
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: the 'ssh_url' field is empty; bailing out\n" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'owner.login' field..." 1>&2
+fi
+t_expected=${GITHUB_REPO_OWNER}
+if test "${ghr_owner_login}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'owner.login' field to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_owner_login}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+if $BE_VERBOSE; then
+    printf "${PROG} (info): new repo verification: 'description' field..." 1>&2
+fi
+t_expected='-'  # our hard-coded transformation meaning "not present, or empty"
+if ${HAVE_NEW_REPO_DESC}; then
+    t_expected=${NEW_REPO_DESC}
+fi
+if test "${ghr_description}" = "${t_expected}"; then :; else
+    $BE_VERBOSE && printf '\n' 1>&2
+    printf "${PROG} (error): newly repo verification: expected 'description' field to be \"%s\", but have \"%s\"; bailing out\n" \
+           "${t_expected}" \
+           "${ghr_description}" 1>&2
+    exit 1
+fi
+if $BE_VERBOSE; then
+    printf '.ok\n' 1>&2
+fi
+
+
+if $DEBUGGING; then
+    printf "${PROG} (debug): Emitting summary\n" 1>&2
 fi
 
 if $ghr_fork; then
@@ -2135,34 +2583,39 @@ else
 fi
 
 
+t_was_auto_initialized_disp='no'
+if ${DO_AUTO_INIT_REPO}; then
+    t_was_auto_initialized_disp='yes'
+fi
+
+
 "${CAT_PROG}" - <<EOF
 Summary of newly created repository:
+                Name: ${ghr_name}
+            Is fork?: ${ghr_fork_disp}
+               Owner: ${ghr_owner_login}
+        Is archived?: ${ghr_archived_disp}
+        Is disabled?: ${ghr_disabled_disp}
 
-            Name: ${ghr_name}
-        Is fork?: ${ghr_fork_disp}
-           Owner: ${ghr_owner_login}
+          Created at: ${ghr_created_at_disp}
+          Updated at: ${ghr_updated_at_disp}
 
-    Is archived?: ${ghr_archived_disp}
-    Is disabled?: ${ghr_disabled_disp}
+         Is private?: ${ghr_private_disp}
+          Visibility: ${ghr_visibility}
 
-      Created at: ${ghr_created_at_disp}
-      Updated at: ${ghr_updated_at_disp}
+  Auto-initilalized?: ${t_was_auto_initialized_disp}
+      Default branch: ${ghr_default_branch}
 
-     Is private?: ${ghr_private_disp}
-      Visibility: ${ghr_visibility}
+         Has issues?: ${ghr_has_issues_disp}
+       Has projects?: ${ghr_has_projects_disp}
+           Has wiki?: ${ghr_has_wiki_disp}
 
-  Default branch: ${ghr_default_branch}
+              GitHub: ${ghr_html_url}
+            Homepage: ${ghr_homepage}
+         Description: ${ghr_description}
 
-     Has issues?: ${ghr_has_issues_disp}
-   Has projects?: ${ghr_has_projects_disp}
-       Has wiki?: ${ghr_has_wiki_disp}
-
-          GitHub: ${ghr_html_url}
-        Homepage: ${ghr_homepage}
-     Description: ${ghr_description}
-
-   Clone via ssh: ${ghr_ssh_url}
- Clone via https: ${ghr_clone_url}
+       Clone via ssh: ${ghr_ssh_url}
+     Clone via https: ${ghr_clone_url}
 EOF
 
 exit 0
@@ -2209,13 +2662,12 @@ exit 0
   ads-github-repo-create [(-v | --verbose)] [(-p | --private)] [--force-replace]
                          [(-O <word> | --output-format=<word>)]
                          [(-b <name> | --default-branch=<name>)]
-                         [(-I | --disable-issues)]
-                         [(-P | --disable-projects)]
-                         [(-W | --disable-wiki)]
+                         [(-a | --auto-init)] [(-I | --disable-issues)]
+                         [(-P | --disable-projects)] [(-W | --disable-wiki)]
                          [(-d <blurb> | --description=<blurb>)]
-                         [--homepage=<url>]
-                         [--]
-                         REPO_NAME
+                         [--homepage=<url>] [--prop-secs=<number>)]
+                         [--] REPO_NAME
+
 
 =head1 DESCRIPTION
 
@@ -2224,7 +2676,8 @@ project.
 
 The C<ads-github-repo-create> program allows one to create a new GitHub
 repository from the command line. Knobs are provided for configuring most of
-the attributes available for modification, as described below.
+the attributes that GitHub makes available for modification, as described
+below.
 
 
 =head1 OPTIONS
@@ -2240,6 +2693,31 @@ C<ads-github-repo-create>.
 Print help usage message
 
 
+=item -a, --auto-init
+
+Request that the repository be automatically initialized with a minimal
+'README.md' file.
+
+Note that our C<-a> (C<--auto-init>) option is conceptually similar (read as:
+"nearly identical") to the GitHub v3 API's C<"auto_init"> parameter for the
+repo creation endpoint, but C<ads-github-repo-create> I<does not> use the
+C<"auto_init"> API parameter.
+
+=over
+
+B<History:> The C<ads-github-repo-create> program I<did> use that parameter
+through commit C<acf77414be14598c0418a13e607a5718d65c34a5> (2020-10-07), but
+it was later found that the benefit of that attribute was not sufficient to
+merit its use over just performing the work (primarily) locally, which can be
+done more efficiently and more robustly.
+
+=back
+
+B<CAVEAT:> If you have an existing Git repository that you are trying to get
+into GitHub, then you will probably want to avoid the repo auto-initialization
+implied by this option. See the L</FAQ> section for more info.
+
+
 =item -b, --default-branch=NAME
 
 Specify the name to use for the default git branch.
@@ -2248,6 +2726,12 @@ If not specified, the value of the L<git-config(1)> C<init.defaultBranch> key
 will be used (from the "global" or "system" scopes only), if
 available. Otherwise the default used by GitHub will be applied; since
 2020-10-01, that default branch name is C<main>.
+
+This option implies the C<-a> (C<--auto-init>) option, as well.
+
+B<CAVEAT:> If you have an existing Git repository that you are trying to get
+into GitHub, then you will probably want to avoid the repo auto-initialization
+implied by this option. See the L</FAQ> section for more info.
 
 
 =item -d, --description=BLURB
@@ -2331,6 +2815,47 @@ you to request that the newly created repo have only private visibility,
 instead.
 
 
+=item --prop-secs=NUMBER
+
+Specify the the amount of time that the program should "stall" between
+performing a Git operation (such as C<git push ...>) and a GitHub API
+operation to allow for data propagation within GitHub.
+
+The default is four seconds, which was determined by empirical testing to be
+usually adequate.
+
+C<NUMBER> may be specified as a decimal to represent fractional seconds (e.g.,
+'.5' or '10.5'); this capability is mainly useful during development and
+testing of C<ads-github-repo-create> itself.
+
+This option in only used when auto-initialization (C<-a>, C<--auto-init>) is
+in-effect. Otherwise it has no effect.
+
+=over 4
+
+B<Background:> In those instances in which we need to auto-initialize the new
+repo, there is a noticeable delay between when we push to the repo and when an
+API query for that repo will reflect the data just pushed. Like many modern
+systems, it seems that the GitHub side is engineered to be "eventually
+consistent", and since we are working through two different interfaces (the
+API and L<git-push(1)>) we cannot expect to immediately "read our own writes".
+
+The result of this situation is that querying the API for our repo too soon
+after doing a C<git push> can result in a reponse that contains stale data. To
+work around the issue we simply L<sleep(1)> some number of seconds to allow
+some time for the data to propagate within GitHub after we do a C<git push>
+and before attempting to query it via the API. (Patches welcome for better
+approaches, if there are any...)
+
+Empirical testing has shown that the magic number four (seconds) is long
+enough to be effective, but short enough to be bearable. This default value
+for is subject to change without warning, in response to additional real-world
+experience. If you find that the default value is too short, please let us
+know (open a bug).
+
+=back
+
+
 =item -V, --version
 
 Print the version of the program to stdout and then exit.
@@ -2376,32 +2901,31 @@ name of the new GitHub repository that is to be created:
 
     $ ads-github-repo-create 'aljunk-testing-repo-006'
     Summary of newly created repository:
+                   Name: aljunk-testing-repo-006
+               Is fork?: no
+                  Owner: salewski
+           Is archived?: no
+           Is disabled?: no
 
-                Name: aljunk-testing-repo-006
-            Is fork?: no
-               Owner: salewski
+             Created at: 2020-10-09 07:09:52+0000
+             Updated at: 2020-10-09 07:09:56+0000
 
-        Is archived?: no
-        Is disabled?: no
+            Is private?: no
+             Visibility: -
 
-          Created at: 2020-10-09 07:09:52+0000
-          Updated at: 2020-10-09 07:09:56+0000
+      Auto-initialized?: no
+         Default branch: main
 
-         Is private?: no
-          Visibility: -
+            Has issues?: yes
+          Has projects?: yes
+              Has wiki?: yes
 
-      Default branch: main
+                 GitHub: https://github.com/salewski/aljunk-testing-repo-006
+               Homepage: -
+            Description: -
 
-         Has issues?: yes
-       Has projects?: yes
-           Has wiki?: yes
-
-              GitHub: https://github.com/salewski/aljunk-testing-repo-006
-            Homepage: -
-         Description: -
-
-       Clone via ssh: git@github.com:salewski/aljunk-testing-repo-006.git
-     Clone via https: https://github.com/salewski/aljunk-testing-repo-006.git
+          Clone via ssh: git@github.com:salewski/aljunk-testing-repo-006.git
+        Clone via https: https://github.com/salewski/aljunk-testing-repo-006.git
 
 
 =head2 Example 2: Default C<text> output with customized settings
@@ -2413,37 +2937,153 @@ respectively), and that the new repo have "la la la" as its description
 
     $ ads-github-repo-create -p -b 'whatev' -I -W -d 'la la la' -- 'aljunk-testing-repo-007'
     Summary of newly created repository:
+                   Name: aljunk-testing-repo-007
+               Is fork?: no
+                  Owner: salewski
+           Is archived?: no
+           Is disabled?: no
 
-                Name: aljunk-testing-repo-007
-            Is fork?: no
-               Owner: salewski
+             Created at: 2020-10-09 07:12:03+0000
+             Updated at: 2020-10-09 07:12:07+0000
 
-        Is archived?: no
-        Is disabled?: no
+            Is private?: yes
+             Visibility: -
 
-          Created at: 2020-10-09 07:12:03+0000
-          Updated at: 2020-10-09 07:12:07+0000
+      Auto-initialized?: yes
+         Default branch: whatev
 
-         Is private?: yes
-          Visibility: -
+            Has issues?: no
+          Has projects?: yes
+              Has wiki?: no
 
-      Default branch: whatev
+                 GitHub: https://github.com/salewski/aljunk-testing-repo-007
+               Homepage: -
+            Description: la la la
 
-         Has issues?: no
-       Has projects?: yes
-           Has wiki?: no
+          Clone via ssh: git@github.com:salewski/aljunk-testing-repo-007.git
+        Clone via https: https://github.com/salewski/aljunk-testing-repo-007.git
 
-              GitHub: https://github.com/salewski/aljunk-testing-repo-007
-            Homepage: -
-         Description: la la la
 
-       Clone via ssh: git@github.com:salewski/aljunk-testing-repo-007.git
-     Clone via https: https://github.com/salewski/aljunk-testing-repo-007.git
+=head2 Example 3: Obtain JSON output representation of the new repo
+
+This example shows how to request that the JSON representation of the newly
+created repo be emitted (instead of the default text summary output). In this
+example, we are piping the raw JSON into the L<jq(1)> tool for pretty printing
+on our pager (L<less(1)>).
+
+    $ ads-github-repo-create -O json -d 'la la la' -- 'aljunk-testing-repo-008' \
+    >   | jq --color-output --indent 4 '.' | less -R
+    {
+        "id": 123456789,
+        "node_id": "ABCdEFglcG9zaXLMnoPqRDM0Nj721Tc=",
+        "name": "aljunk-test-repo-008",
+        "full_name": "salewski/aljunk-test-repo-008",
+        "private": false,
+        "owner": {
+            "login": "salewski",
+    ...
+    }
+
+
+=head1 FAQ
+
+Frequently Asked Questions (with answers!)
+
+=over 4
+
+=item *
+
+B<Q:> I have an existing Git repo. Should I use C<-a> (C<--auto-init>) when
+creating the repo in GitHub?
+
+B<A:> No. If you have an existing Git repo, then you generally want to avoid
+the auto-initialization of the repo when using C<ads-github-repo-create> to
+create the repository on GitHub.
+
+Explanation: Auto-initializing the GitHub repo will produce a commit, which
+introduces a repo history that you will then need to work around with your
+existing repo (via forcing a L<git-push(1)>, and other means).
+
+In general, for a non-bare/non-mirror repo you would want to do something like
+this:
+
+    # cause an empty repo with the given name to exist in your GitHub account
+    $ ads-github-repo-create --verbose -- my-repo-name
+    ...
+
+    $ cd /path/to/your/existing/git/repo
+
+    $ git remote add gh-remote 'git@github.com:my-username/my-repo-name.git'
+
+    $ git push --set-upstream --follow-tags gh-remote branch-foo branch-bar branch-baz
+
+Or, to push all branches from the local repo, replace that the above
+C<git-push(1)> command with this:
+
+    $ git push --set-upstream --mirror gh-remote
+
+
+=item *
+
+B<Q:> I want to use a specific name for the default branch. Is
+C<ads-github-repo-create> the right tool for the job?
+
+B<A:> Yes, but whether or not you should use the C<-b>
+(C<--default-branch=NAME>) option depends on the task context and what you are
+trying to achieve.
+
+Explanation: The C<-b> (C<--default-branch=NAME>) option implies C<-a>
+(C<--auto-init>), and repo auto-initialization may or may not be appropriate
+for the task at hand.
+
+If you are starting a brand new project for which you do not yet have a Git
+repo, then using C<-b> (C<--default-branch=NAME>) will likely be convenient
+for you:
+
+    $ ads-github-repo-create --verbose --default-branch=my-branch-name -- my-repo-name
+    ...
+
+    $ git clone 'git@github.com:my-username/my-repo-name.git'
+    ...
+
+    $ cd my-repo-name
+
+    $ git symbolic-ref --quiet 'HEAD'
+    refs/heads/my-branch-name
+
+If you are starting a brand new project for which you do not yet have a Git
+repo, but (for whatever reason) you want to start with an empty repository,
+then avoid the C<-b> (C<--default-branch=NAME>) option. Instead, do something
+like this:
+
+    $ ads-github-repo-create --verbose -- my-repo-name
+    ...
+
+    $ git -c 'init.defaultBranch=my-branch-name' \
+    >     clone 'git@github.com:my-username/my-repo-name.git'
+    ...
+
+    $ cd my-repo-name
+
+    $ git symbolic-ref --quiet 'HEAD'
+    refs/heads/my-branch-name
+
+In the above set of commands, the name to be used for the default branch was
+specified on the L<git-clone(1)> command line, by providing a value for the
+C<init.defaultBranch> L<git-config(1)> key. Note that that key is only
+available in Git >= 2.28.0 (released in Spring 2020). If you always want to
+use a particular branch name as the default branch, then you would want to add
+the setting to your Git configuration; then you would be able to omit the
+C<-c KEY=VALUE> option in the above L<git-clone(1)> command.
+
+=back
 
 
 =head1 SEE ALSO
 
 =over 4
+
+=item * L<sleep(1)>, L<sleep(1posix)>
 
 =item * L<ads-github-tools(7)>
 
@@ -2452,6 +3092,38 @@ respectively), and that the new repo have "la la la" as its description
 Used to obtain the GitHub username of the authenticated user. The username
 value (a.k.a. "owner" or "login") is used as a parameter in some of the GitHub
 v3 API URLs that are invoked.
+
+
+=item * L<git-config(1)>
+
+=item * L<git-push(1)>
+
+=item * L<jq(1)>
+
+The C<jq> program is referenced in the L</EXAMPLES> section above. It is a
+command line tool for transforming JSON in various ways. On Debian (and
+Debian-derived) systems, it is available in the C<jq> package. The upstream
+website for the tool is here:
+
+=over 4
+
+=item *
+
+L<https://stedolan.github.io/jq/>
+
+=back
+
+and the source of the tool is available on GitHub here:
+
+=over 4
+
+=item *
+
+L<https://github.com/stedolan/jq>
+
+=back
+
+=item * L<less(1)>
 
 =back
 
@@ -2475,7 +3147,7 @@ C<ads-github-tools-0.3.1>, which was released in October 2020.
 
 =over 4
 
-=item * C<-P> (C<--dislable-projects>) does not work
+=item * C<-P> (C<--disable-projects>) does not work
 
 This is actually a bug in the GitHub v3 API. See caveat documented above for
 the C<-P> (C<--disable-projects>) option.

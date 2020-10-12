@@ -63,6 +63,15 @@ AS_IF([test -z "$BASH_SH"], [AC_MSG_ERROR([bash not found])],
       [AC_MSG_ERROR([found version of bash is not new enough; bash 4.0 or newer is required])
 ])
 
+# Arbitrary-precision arithmetic language
+# See:
+#     bc(1)
+#     bc(1posix)
+AC_PATH_PROG(BC_PROG, bc)
+if test -z "$BC_PROG"; then
+    AC_MSG_ERROR([bc not found])
+fi
+
 AC_PATH_PROG([CAT], [cat])
 if test -z "$CAT"; then
     AC_MSG_ERROR([cat not found])
@@ -337,6 +346,7 @@ do_subst_command='do_subst = sed \
   \
   -e '"'"'s,[@]AWK_PROG[@],$(AWK_PROG),g'"'"' \
   -e '"'"'s,[@]BASH_SH[@],$(BASH_SH),g'"'"' \
+  -e '"'"'s,[@]BC_PROG[@],$(BC_PROG),g'"'"' \
   -e '"'"'s,[@]CAT[@],$(CAT),g'"'"' \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
