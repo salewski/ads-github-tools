@@ -93,6 +93,45 @@ which they were fixed will be noted here, as well.
     :        (HTTP response payload was empty)
 
 
+*** issue 46: "fork" vs. "origin", etc.
+
+    "git config: honor 'hub.upstreamremote' and 'hub.forkremote', if set"
+    https://github.com/salewski/ads-github-tools/issues/46
+
+    When clone a repo initially the default behavior at some point seemed to
+    change from creating a Git remote named "origin" for the user's GitHub
+    repo to creating a Git remote named "fork". This was due to a behavior
+    change in the underlying git-hub(1) tool, which switched its behavior when
+    the tool went verion 1.0 some time ago. Users of 'ads-github-tools' could
+    influence the behavior of that tool by setting the 'hub.forkremote' and
+    'hub.upstreamremote' git-config(1) values, but in the absence of such a
+    config the user still got default behavior that was different from what it
+    had been.
+
+    The 'ads-github-fetch-all-upstreams' program has been modified to look for
+    and honor the config mentioned above, but when not present it now asserts
+    a preference for the name "origin" rather than "fork" when cloning a
+    repo. It also asserts a preference for the name "upstream", but that name
+    is in alignment with the git-hub(1) default already.
+
+    Note that the changes introduced here cure the immediate problem of having
+    Git remotes with the name "fork", but the solution as implemented is not
+    entirely general. In particular, the name "upstream" for the other Git
+    remote is baked-in at a fairly deep level, and will need additional
+    surgery to use an arbitrary name. Thus, if the 'hub.upstreamremote'
+    setting is present and contains a value other than "upstream", then when
+    you run:
+
+    :    $ ads-github-fetch-all-upstreams -vcu
+
+    you will actually end up with three remotes rather than two for newly
+    cloned repos. The program will create a remote named "upstream" in
+    addition to whatever other name is specified. While this is clearly
+    suboptimal, there have not been any problems with using the hard-coded
+    name "upstream"; as a practical matter, it is not an emergency to address
+    that. For best results, stick with the name "upstream" for now.
+
+
 *** issue 53: fix perms on *.in template files in src/main/bash/bin/
 
     https://github.com/salewski/ads-github-tools/issues/53

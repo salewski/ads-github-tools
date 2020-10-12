@@ -123,6 +123,9 @@ BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
 DEBUGGING=false    # enable with two '-v' (--verbose) opts
 TRACING=false      # enable with three or more '-v' (--verbose) opts
 
+RE_BLANK='^[[:space:]]*$'
+RE_EMPTY='^$'
+
 RE_ALL_DIGITS='^[[:digit:]]+$'
 
 
@@ -147,6 +150,16 @@ RE_ALL_DIGITS='^[[:digit:]]+$'
 # See: https://github.com/salewski/ads-github-tools/issues/28
 #
 unset GREP_OPTIONS
+
+
+# The git-hub(1) tool stores its settings via the git-config(1) command, so
+# our variables are named 'GIT_CFG_KEY_*', even though these particular
+# settings are for git-hub(1). The documentation for these keys lives in
+# git-hub(1).
+#
+#declare -r GIT_CFG_KEY_HUB_TRIANGULAR='hub.triangular'
+declare -r GIT_CFG_KEY_HUB_FORKREMOTE='hub.forkremote'
+declare -r GIT_CFG_KEY_HUB_UPSTREAMREMOTE='hub.upstreamremote'
 
 
 # If specified, the '--clone-if-missing' command line option directs this
@@ -333,7 +346,10 @@ trap 'f_cleanup' EXIT
 f_print_help () {
 
     "${CAT_PROG}" <<EOF
-usage: $PROG [OPTION...] [REPO...]
+usage: $PROG { -h | --help }
+  or:  $PROG { -V | --version }
+  or:  $PROG [OPTION...] [--] [REPO...]
+
 Invokes 'git fetch upstream' for all of the user's GitHub repos that are
 present. With appropriate options, will clone some or all missing repos and
 set up the 'upstream' remote.
@@ -567,6 +583,145 @@ f_initialize_curl_default_opts () {
     MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
 
     return 0
+}
+
+
+# We will check for GIT_CFG_KEY in the user's personal configuration
+# ("global"), and failing that will check at the ststem level ("system").
+#
+# If found, the value for the key will be written to the global variable named
+# by OUT_VAR_NAME.
+#
+# We deliberately DO NOT check for the option in git-config(1) scopes
+# "local" or "worktree". Those are specific to the exsiting repo in the
+# current working directory (should the user happen to be invoking the
+# command from an existing git working directory).
+#
+# This function is intended to obtain git config values, while ignoring the
+# configuration (if any) that should not have any bearing on the attributes of
+# the newly cloned GitHub repos that the current command might obtain.
+#
+# @param GIT_CFG_KEY -- (required) the git-config(1) key to lookup
+#
+# @param OUT_VAR_NAME -- (required) the name of the global variable to which
+#                        the output value should be written.
+#
+# @param DEFAULT_VALUE -- (required) the value to use if the git-config lookup
+#                         does not yeild a value (or yeilds a blank value).
+#
+# @return 0 if value for key was wrtten to OUT_VAR_NAME; otherwise returns 1.
+#
+function f_get_git_config_opt_ignoring_local_repo () {
+    local __required_count=3
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_key=$1
+    local __t_var=$2   # output variable
+    local __t_dflt=$3  # default value
+
+    local __t_have_good_value=false
+
+    local __t_tmp
+    local __t_estat
+    if $DEBUGGING; then
+        printf "${PROG} (debug): checking git config (scope: \"global\") for key: \"%s\"\n" "${__t_key}" 1>&2
+    fi
+    # Recall that the exit status of git-config(1) will be 0 (zero) if the key
+    # was found, and 1 (one) if the key is not found ("section or key is invalid").
+    #
+    __t_tmp=$("${GIT_PROG}" config --global --get "${__t_key}")
+    __t_estat=$?
+    if test ${__t_estat} -ne 0 \
+    && test ${__t_estat} -ne 1; then
+        printf "${PROG} (error): was unable to query git config (scope: \"global\") for key: \"%s\"; bailing out\n" "${__t_key}" 1>&2
+        exit 1
+    fi
+
+    if test ${__t_estat} -eq 0; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): found git config key \"%s\" in scope \"global\"\n" "${__t_key}" 1>&2
+        fi
+
+        if test -z "${__t_tmp}"; then
+            printf "${PROG} (warning): found empty value for git config key '%s'; ignoring\n" "${__t_key}" 1>&2
+        elif [[ "${__t_tmp}" =~ $RE_BLANK ]]; then
+            printf "${PROG} (warning): found blank value for git config key '%s'; ignoring\n" "${__t_key}" 1>&2
+        else
+            __t_have_good_value=true
+            if $DEBUGGING; then
+                printf "${PROG} (debug): have good value (\"%s\") for git config key \"%s\" from scope \"global\"\n" \
+                       "${__t_tmp}" \
+                       "${__t_key}" 1>&2
+            fi
+        fi
+    fi
+
+    if ${__t_have_good_value}; then :; else
+        if $DEBUGGING; then
+            printf "${PROG} (debug): checking git config (scope: \"system\") for key: \"%s\"\n" "${__t_key}" 1>&2
+        fi
+        __t_tmp=$("${GIT_PROG}" config --system --get "${__t_key}")
+        __t_estat=$?
+        if test ${__t_estat} -ne 0 \
+        && test ${__t_estat} -ne 1; then
+            printf "${PROG} (error): was unable to query git config (scope: \"system\") for key: \"%s\"; bailing out\n" "${__t_key}" 1>&2
+            exit 1
+        fi
+        if test ${__t_estat} -eq 0; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): found git config key \"%s\" in scope \"system\"\n" "${__t_key}" 1>&2
+            fi
+
+            if test -z "${__t_tmp}"; then
+                printf "${PROG} (warning): found empty value for git config key '%s' in scope \"system\"; ignoring (will use built-in default: \"%s\")\n" \
+                       "${__t_key}" \
+                       "${__t_dflt}" 1>&2
+                __t_tmp=${__t_dflt}
+                __t_have_good_value=true
+
+            elif [[ "${__t_tmp}" =~ $RE_BLANK ]]; then
+                printf "${PROG} (warning): found blank value for git config key '%s' in scope \"system\"; ignoring (will use built-in default: \"%s\")\n" \
+                       "${__t_key}" \
+                       "${__t_dflt}" 1>&2
+                __t_tmp=${__t_dflt}
+                __t_have_good_value=true
+
+            else
+                if $DEBUGGING; then
+                    printf "${PROG} (debug): have good value (\"%s\") for git config key '%s' from scope \"system\"\n" \
+                           "${__t_tmp}" \
+                           "${__t_key}" 1>&2
+                fi
+                __t_have_good_value=true
+            fi
+        else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): git config key \"%s\" not found in either \"global\" or \"system\" scope (okay; will use built-in default: \"%s\")\n" \
+                       "${__t_key}" \
+                       "${__t_dflt}" 1>&2
+            fi
+            __t_tmp=${__t_dflt}
+            __t_have_good_value=true
+        fi
+    fi
+
+    # Internal sanity check
+    if ${__t_have_good_value}; then :; else
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: __t_have_good_value should be true here; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    printf -v "${__t_var}" '%s' "${__t_tmp}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): ${FUNCNAME}(): was unable to write value to global var \"%s\"; bailing out\n" "${__t_var}" 1>&2
+        exit 1
+    fi
+
+    return 0  # success
 }
 
 
@@ -848,7 +1003,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
         exit 1
     fi
 
-    if test [[ "${t_last_page_number}" =~ $RE_ALL_DIGITS ]]; then :; else
+    if [[ "${t_last_page_number}" =~ $RE_ALL_DIGITS ]]; then :; else
         printf "${PROG} (error): obtained page counter that contains non-digits (\"%s\"); bailing out\n" \
                "${t_last_page_number}" 1>&2
         exit 1
@@ -1446,6 +1601,65 @@ if $BE_VERBOSE; then
 fi
 
 
+# Because we use git-hub(1) to perform the actual cloning of a given GitHub
+# repo, it's policies and behaviors affect the perceived actions of the
+# current tool.
+#
+# The preferences of the git-hub(1) tool (reflected in its defaults) are:
+#
+#     1. Use a triangular workflow
+#
+#     2. Use "fork" as the name of the git remote from which the GitHub repo
+#        is cloned.
+#
+#     3. For GitHub repos that are forks of other repos, use "upstream" for
+#        the name of the remote that represents the repo from which the fork
+#        was originally created.
+#
+# The preferences of the current tool (which reflect those of its author) are:
+#
+#     1. Use a non-triangular workflow
+#
+#     2. Use "origin" as the name of the git remote from which the GitHub repo
+#        is cloned.
+#
+#     3. For GitHub repos that are forks of other repos, use "upstream" for
+#        the name of the remote that represents the repo from which the fork
+#        was originally created.
+#
+# As you can see, the two tool agree only on their (3)s.
+#
+# If the user has git-hub(1) configuration that reflects the above, then we
+# will honor those explicit settings.
+#
+# If the user does not have git-hub(1) configuration for the above, then we
+# will apply our own defaults.
+#
+# See also:
+#
+#     * "git config: honor 'hub.upstreamremote' and 'hub.forkremote', if set"
+#       https://github.com/salewski/ads-github-tools/issues/46
+#
+declare -r DFLT_NAME_FOR_GIT_REMOTE_FORK='origin'
+declare -r DFLT_NAME_FOR_GIT_REMOTE_UPSTREAM='upstream'
+#
+declare NAME_FOR_GIT_REMOTE_FORK=${DFLT_NAME_FOR_GIT_REMOTE_FORK}
+declare NAME_FOR_GIT_REMOTE_UPSTREAM=${DFLT_NAME_FOR_GIT_REMOTE_UPSTREAM}
+#
+f_get_git_config_opt_ignoring_local_repo \
+    "${GIT_CFG_KEY_HUB_FORKREMOTE}"      \
+    'NAME_FOR_GIT_REMOTE_FORK'           \
+    "${DFLT_NAME_FOR_GIT_REMOTE_FORK}"
+#
+f_get_git_config_opt_ignoring_local_repo   \
+    "${GIT_CFG_KEY_HUB_UPSTREAMREMOTE}"    \
+    'NAME_FOR_GIT_REMOTE_UPSTREAM'         \
+    "${DFLT_NAME_FOR_GIT_REMOTE_UPSTREAM}"
+#
+declare -r NAME_FOR_GIT_REMOTE_FORK
+declare -r NAME_FOR_GIT_REMOTE_UPSTREAM
+
+
 f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
 
 
@@ -1575,7 +1789,6 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
     fi
 
     if $FETCH_ONLY_MISSING; then
-
         if test -d "${repo_name}"; then
             # We'll treat the presence of a subdirectory with the repo name as "not missing"
 
@@ -1631,6 +1844,15 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             if $DEBUGGING;  then t_v_opts+=( '--verbose' ); fi
 
             declare t_v_clone_opts=()
+
+            # GitHub issue #46: The variables we use here are set up to honor
+            # the user's 'hub.upstreamremote' and 'hub.forkremote' settings
+            # from git-config(1), if present. Otherwise they are set to the
+            # defaults preferred by the current tool. See comments above for
+            # details.
+            #
+            t_v_clone_opts+=( "--forkremote=${NAME_FOR_GIT_REMOTE_FORK}" )
+            t_v_clone_opts+=( "--upstreamremote=${NAME_FOR_GIT_REMOTE_UPSTREAM}" )
 
             # GitHub issue #38: ads-github-fetch-all-upstreams: chokes attempting to clone non-fork repos
             #
@@ -2030,10 +2252,13 @@ exit 0;
 
 =head1 SYNOPSIS
 
-  ads-github-fetch-all-upstreams --help
-  ads-github-fetch-all-upstreams --version
-
-  ads-github-fetch-all-upstreams [OPTION...] [REPO...]
+  ads-github-fetch-all-upstreams (-h | --help)
+  ads-github-fetch-all-upstreams (-V | --version)
+  ads-github-fetch-all-upstreams [(-v | --verbose)]
+                                 [(-c | --clone-if-missing)]
+                                 [(-m | --missing-only)]
+                                 [(-u | --upstream-remote-if-missing)]
+                                 [--] [REPO...]
 
 
 =head1 DESCRIPTION
