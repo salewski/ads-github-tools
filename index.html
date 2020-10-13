@@ -21,7 +21,7 @@
         <p class="view"><a href="https://github.com/salewski/ads-github-tools">View the Project on GitHub <small>salewski/ads-github-tools</small></a></p>
 
         <ul>
-          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2020-04-09</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.0.tar.gz"><code>ads-github-tools-0.3.0.tar.gz</code></a></li>
+          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2020-10-12</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.1.tar.gz"><code>ads-github-tools-0.3.1.tar.gz</code></a></li>
         </ul>
 
         <ul>
@@ -110,8 +110,21 @@ Installation should be as simple as:
 
 <h2>Progams provided by <tt>ads-github-tools</tt></h2>
 <p>
-At the time of writing (<tt>2020-04-09</tt>) there are five tools:
+At the time of writing (<tt>2020-10-12</tt>) there are seven tools:
 <ul>
+
+  <li><p><strong><tt>ads-github-whoami</tt></strong> - Show the currently authenticated GitHub user. This
+      program similar in spirit to the Unix <strong><tt>whoami(1)</tt></strong> and <strong><tt>id(1)</tt></strong> commands, but
+      shows information about the authenticated GitHub user (as understood by the
+      GitHub API). Obtains its direct information via the GitHub v3 API call:</p>
+      <pre>
+    GET /user
+</pre><p>
+      Default output is plain text for interactive command line use, but we
+      provide a knob to have the raw JSON response emitted, as well. The
+      <strong><tt>ads-github-whoami</tt></strong> command was added
+      in <strong><tt>ads-github-tools-0.3.1</tt></strong>.</p>
+  </li>
 
   <li><p><strong><tt>ads-github-normalize-url</tt></strong> - Produces a
       "normalized" view of a given URL, suitable for use in generating an
@@ -200,6 +213,15 @@ At the time of writing (<tt>2020-04-09</tt>) there are five tools:
                </p>
           </li>
       </ul>
+  </li>
+  <li><p><strong><tt>ads-github-repo-create</tt></strong> - Creates a new
+      GitHub repo with a given name and attributes (description, default
+      branch, etc.). Newly created repo is empty by default (suitable for
+      importing existing Git repos into GitHub), but can optionally be
+      auto-initialized (more suitable for projects being started from
+      scratch). The <strong><tt>ads-github-repo-create</tt></strong> command
+      was added in
+      <strong><tt>ads-github-tools-0.3.1</tt></strong>.</p>
   </li>
 </ul>
 
