@@ -57,6 +57,44 @@ which they were fixed will be noted here, as well.
     messages as close as possible to the source of the problem.
 
 
+*** issue 39: 'ads-github-fetch-all-upstreams: default to triangular workflow, but allow override'
+
+    https://github.com/salewski/ads-github-tools/issues/39
+
+    Consistent with the 'ads-github-tools-0.3.0' release, when initially
+    cloning a repo the 'ads-github-fetch-all-upstreams' program continues to
+    use a "triangular" workflow by default.
+
+    The manpage entry explains:
+    #+BEGIN_QUOTE
+       --triangular
+       --no-triangular
+           In newly cloned repos, use (or avoid using) a Git remote
+           configuration suitable for supporting a triangular workflow.
+
+           Among other things, a triangular config will cause the default
+           branch in the local working directory to be configured to track the
+           branch of the same name from the upstream remote.
+
+           For a non-triangular configuration, the default branch in the local
+           working directory will be configured to track the branch of the
+           same name from the origin remote.
+
+           See git-hub(1) for details.
+
+           If neither "--triangular" nor "--no-triangular" is specified, then
+           the "hub.triangular" setting from git-config(1) (scopes "global"
+           and "system" only) is consulted, and honored if present. Finally,
+           if neither command line options nor configuration specifies a
+           preference, then a triangular configuration is the default.
+
+           Note: Whether a triangular or non-triangular configuration is used
+           is purely a matter of preference for the user (if any) that will be
+           working with the newly cloned repo; it has no bearing on the
+           functionality of the "ads-github-fetch-all-upstreams" program.
+    #+END_QUOTE
+
+
 *** issue 44: ads-github-show-rate-limits: http response code not checked
 
     https://github.com/salewski/ads-github-tools/issues/44

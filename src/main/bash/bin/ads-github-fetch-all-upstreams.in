@@ -157,7 +157,7 @@ unset GREP_OPTIONS
 # settings are for git-hub(1). The documentation for these keys lives in
 # git-hub(1).
 #
-#declare -r GIT_CFG_KEY_HUB_TRIANGULAR='hub.triangular'
+declare -r GIT_CFG_KEY_HUB_TRIANGULAR='hub.triangular'
 declare -r GIT_CFG_KEY_HUB_FORKREMOTE='hub.forkremote'
 declare -r GIT_CFG_KEY_HUB_UPSTREAMREMOTE='hub.upstreamremote'
 
@@ -198,6 +198,52 @@ FETCH_ONLY_MISSING=false
 # the parent repo's clone url.
 #
 DO_CREATE_UPSTREAM_REMOTE_IF_NOT_PRESENT=false
+
+
+# When cloning a GitHub repo that is a fork, the git-hub(1) tool configures
+# the upstream and origin remotes to support a triangular workflow by
+# default. Implementation-wise, this means it actually clones the upstream
+# repo (so it is the default from which updates are pulled by 'git pull'), and
+# then configures the user's own origin (or "fork") remote as the push default
+# to which changes are pushed by 'git push'.
+#
+# Another consequence of the above is that the default branch (usually
+# "master") in the working directory of the new clone is configured to track
+# the upstream branch of the same name ("upstream/master").
+#
+# The author of the current program does not use default fetch (pull) or push
+# targets, but does appreciate the branch configuration described above. We
+# therefore align the behavior of this tool with that of git-hub in this
+# regard: by default, the newly clone repo (if it is a fork) will be
+# configured to support a triangular workflow.
+#
+# Since the behavior in this area has changed over time (internally, and due
+# to the changing behavior of the git-hub(1) tool), a '--triangular' option is
+# provided so the user can be explicit about the desired behavior without
+# necessarily being cognizant of the latest tweaks to the internal defaults.
+#
+# Similarly, a '--no-triangular' option is provided to allow the user to
+# request that newly cloned repos /not/ be configured for a triangular
+# workflow. For those, the default branch (usually "master") would be
+# configured to track the origin branch of the same name ("origin/master").
+#
+# Note that having the remote configured for a triangular workflow (or not)
+# does not impact the functionality of the 'ads-github-tools'. When fetching
+# or pushing, the desired remote names are always explicitly used, so the
+# implicit default actions for fetch (and pull) and push have no impact on our
+# functionality. The '--triangular' and '--no-triangular' options are provided
+# only to make the out-of-the-box configuration as useful as possible for the
+# user, based on the user's preferences.
+#
+# Finally, we will also honor the 'hub.triangular' git-config(1) option, if
+# set, which is "owned by" git-hub(1); we are only piggy-backing on its
+# purpose here to avoid introducing yet another form of configuration for the
+# same purpose.
+#
+DFLT_DO_CLONE_TRIANGULAR=true
+DO_CLONE_TRIANGULAR=${DFLT_DO_CLONE_TRIANGULAR}
+HAVE_TRIANGULAR_OPT=false
+HAVE_NOTRIANGULAR_OPT=false
 
 
 # Folks using GitHub Enterprise might access their API at a different
@@ -360,8 +406,9 @@ Mandatory arguments to long options are mandatory for short options too.
   -V, --version                     Print the version of the program on stdout
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
   -m, --missing-only                Operate on (clone) only repos that are missing locally (implies '-c')
+      --[no-]triangular             Whether or not newly cloned repos are configured to support a
+                                      triangular workflow. Triangular is the default.
   -u, --upstream-remote-if-missing  Setup 'upstream' remote in existing repo working dirs, if missing
-
   -v, --verbose                     Print program progress messages on stderr. Specify multiple
                                       times to increase verbosity: info, debug, and tracing (set -x)
 
@@ -1265,6 +1312,10 @@ declare -A longopt_spec=(
 
     ['clone-if-missing']=0            # -c
     ['missing-only']=0                # -m
+
+    ['no-triangular']=0
+    ['triangular']=0
+
     ['upstream-remote-if-missing']=0  # -u
     ['verbose']=0                     # -v
 )
@@ -1450,6 +1501,26 @@ if test $# -gt 0; then
                 DO_CLONE_IF_NOT_PRESENT=true
                 ;;
 
+            'no-triangular')
+                if ${HAVE_TRIANGULAR_OPT}; then
+                    printf "${PROG} (error): the '--no-triangular' and '--triangular' opts are mutually exclusive; bailing out\n" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+                HAVE_NOTRIANGULAR_OPT=true
+                DO_CLONE_TRIANGULAR=false
+                ;;
+
+            'triangular')
+                if ${HAVE_NOTRIANGULAR_OPT}; then
+                    printf "${PROG} (error): the '--triangular' and '--no-triangular' opts are mutually exclusive; bailing out\n" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+                HAVE_TRIANGULAR_OPT=true
+                DO_CLONE_TRIANGULAR=true
+                ;;
+
             'u' | 'upstream-remote-if-missing' )
                 DO_CREATE_UPSTREAM_REMOTE_IF_NOT_PRESENT=true
                 ;;
@@ -1618,7 +1689,7 @@ fi
 #
 # The preferences of the current tool (which reflect those of its author) are:
 #
-#     1. Use a non-triangular workflow
+#     1. Use a triangular workflow
 #
 #     2. Use "origin" as the name of the git remote from which the GitHub repo
 #        is cloned.
@@ -1627,7 +1698,7 @@ fi
 #        the name of the remote that represents the repo from which the fork
 #        was originally created.
 #
-# As you can see, the two tool agree only on their (3)s.
+# As you can see, the two tool agree on on their (1)s and (3)s, but not on (2).
 #
 # If the user has git-hub(1) configuration that reflects the above, then we
 # will honor those explicit settings.
@@ -1658,6 +1729,43 @@ f_get_git_config_opt_ignoring_local_repo   \
 #
 declare -r NAME_FOR_GIT_REMOTE_FORK
 declare -r NAME_FOR_GIT_REMOTE_UPSTREAM
+
+
+if $HAVE_TRIANGULAR_OPT; then
+    if $DEBUGGING; then
+        printf "${PROG} (debug): User specified '--triangular' opt; no need to examine the hub.triangular config ckey.\n" 1>&2
+    fi
+elif $HAVE_NOTRIANGULAR_OPT; then
+    if $DEBUGGING; then
+        printf "${PROG} (debug): User specified '--no-triangular' opt; no need to examine the hub.triangular config ckey.\n" 1>&2
+    fi
+else
+    declare t_global_output_var
+
+    f_get_git_config_opt_ignoring_local_repo \
+        "${GIT_CFG_KEY_HUB_TRIANGULAR}"      \
+        't_global_output_var'                \
+        'false'
+
+    if test -n "${t_global_output_var}"; then
+
+        # Honor user's hub.triangular config setting, if legit
+        if test 'true' = "${t_global_output_var}"; then
+            DO_CLONE_TRIANGULAR=true
+        elif test 'false' = "${t_global_output_var}"; then
+            DO_CLONE_TRIANGULAR=false
+        else
+            printf "${PROG} (warning): invalid value (\"%s\") obtained for 'hub.triangular' key from user config; ignoring (will use internal-default value: \"%s\")\n" \
+                   "${DFLT_DO_CLONE_TRIANGULAR}" 1>&2
+            # keep going...
+        fi
+    else
+        printf "${PROG} (warning): empty value (\"%s\") obtained for 'hub.triangular' key from user config; ignoring (will use internal-default value: \"%s\")\n" \
+               "${DFLT_DO_CLONE_TRIANGULAR}" 1>&2
+        # keep going...
+    fi
+    unset t_global_output_var
+fi
 
 
 f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
@@ -1871,7 +1979,13 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
             #
             # See: https://github.com/salewski/ads-github-tools/issues/38
             #
-            if $is_fork; then :; else
+            if $is_fork; then
+                if $DO_CLONE_TRIANGULAR; then
+                    t_v_clone_opts+=( '--triangular' );
+                else
+                    t_v_clone_opts+=( '--no-triangular' );
+                fi
+            else
                 t_v_clone_opts+=( '--no-triangular' );
             fi
 
@@ -2257,6 +2371,7 @@ exit 0;
   ads-github-fetch-all-upstreams [(-v | --verbose)]
                                  [(-c | --clone-if-missing)]
                                  [(-m | --missing-only)]
+                                 [--[no-]triangular]
                                  [(-u | --upstream-remote-if-missing)]
                                  [--] [REPO...]
 
@@ -2324,6 +2439,38 @@ time if you have a large number of GitHub repos), and without having to
 explicitly name the missing repos on the command line.
 
 
+=item --triangular
+
+=item --no-triangular
+
+In newly cloned repos, use (or I<avoid> using) a Git remote configuration
+suitable for supporting a triangular workflow.
+
+Among other things, a triangular config will cause the default branch in the
+local working directory to be configured to track the branch of the same name
+from the I<upstream> remote.
+
+For a non-triangular configuration, the default branch in the local working
+directory will be configured to track the branch of the same name from the
+I<origin> remote.
+
+See L<git-hub(1)> for details.
+
+If neither C<--triangular> nor C<--no-triangular> is specified, then the
+C<hub.triangular> setting from L<git-config(1)> (scopes C<global> and
+C<system> only) is consulted, and honored if present. Finally, if neither
+command line options nor configuration specifies a preference, then a
+triangular configuration is the default.
+
+The C<--triangular> and C<--no-triangular> options are named to match the
+options with the same general purpose of the L<git-hub(1)> tool.
+
+B<Note:> Whether a triangular or non-triangular configuration is used is
+purely a matter of preference for the user (if any) that will be working with
+the newly cloned repo; it has no bearing on the functionality of the
+C<ads-github-fetch-all-upstreams> program.
+
+
 =item -u, --upstream-remote-if-missing
 
 Setup 'upstream' remote in existing repo working dirs, if missing
@@ -2347,7 +2494,7 @@ be interpreted as a command line option.
 =back
 
 
-=head1 DIAGNOSTICS
+=head1 EXIT_STATUS
 
 Exits with zero on success, non-zero on error.
 
@@ -2376,9 +2523,13 @@ If you find any, please report them as described in the C<BUGS> file.
 
 =over 4
 
-=item ads-github-tools(7)
+=item * ads-github-tools(7)
 
-=item ads-github-merge-all-upstreams(1)
+=item * ads-github-merge-all-upstreams(1)
+
+=item * L<git-config(1)>, L<git-fetch(1)>, L<git-remote(1)>
+
+=item * L<git-hub(1)>
 
 =back
 
