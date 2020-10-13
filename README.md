@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.3.0` (released 2020-04-09), and can
+The latest version of the project is `0.3.1` (released 2020-10-12), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.0.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
@@ -67,7 +67,18 @@ repos (assuming only a minority of them are "missing", which is the common
 case). Note that the `'-m'` (`--missing-only`) option was introduced in the
 version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
 
-At the moment (2020-04-09) there are five tools:
+At the moment (2020-10-12) there are seven tools:
+
+* `ads-github-whoami` - Show the currently authenticated GitHub user. This
+  program similar in spirit to the Unix `whoami(1)` and `id(1)` commands, but
+  shows information about the authenticated GitHub user (as understood by the
+  GitHub API). Obtains its direct information via the GitHub v3 API call:
+  ```
+      GET /user
+  ```
+  Default output is plain text for interactive command line use, but we
+  provide a knob to have the raw JSON response emitted, as well. The
+  `ads-github-whoami` command was added in `ads-github-tools-0.3.1`.
 
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
@@ -128,6 +139,13 @@ At the moment (2020-04-09) there are five tools:
     pushed during earlier runs of the program invoked without the `--push`
     option.
 
+* `ads-github-repo-create` - Creates a new GitHub repo with a given name and
+  attributes (description, default branch, etc.). Newly created repo is empty
+  by default (suitable for importing existing Git repos into GitHub), but can
+  optionally be auto-initialized (more suitable for projects being started
+  from scratch). The `ads-github-repo-create` command was added in
+  `ads-github-tools-0.3.1`.
+
 
 See the "Prerequisites" section below for other programs that must be
 installed and configured on your system before you can install the
@@ -155,13 +173,13 @@ MS Windows).
 
 Many of the programs provided by `'ads-github-tools'` are implemented in Bash
 (a Bourne shell derivative). The 'ads-github-tools' project was developed and
-tested using Bash version 4.3.30. It uses associative arrays which were added
-in Bash 4.0, so you'll need a 4.x version or newer; the `'configure'` script
-will check for this and exit with an error message if a new enough version of
-Bash is not found. The author would appreciate hearing about any successes or
-failures with other versions of Bash. In the unlikely event that your system
-does not already have bash installed, it can be obtained from the project's
-site:
+tested using Bash version 5.0.3(1)-release, as shipped by Debian. It uses
+associative arrays which were added in Bash 4.0, so you'll need a 4.x version
+or newer; the `'configure'` script will check for this and exit with an error
+message if a new enough version of Bash is not found. The author would
+appreciate hearing about any successes or failures with other versions of
+Bash. In the unlikely event that your system does not already have bash
+installed, it can be obtained from the project's site:
 
    * http://www.gnu.org/software/bash/
 
@@ -200,6 +218,24 @@ or you can build from that project's latest sources from its GitHub project
 page:
 
    * https://github.com/sociomantic-tsunami/git-hub
+
+
+# Build instructions
+
+The `ads-github-tools` project is distributed as a standard GNU
+autotools-based package.
+
+Obtain the prerequisites as described above, and then you are ready to
+build. From an unpacked release tarball, run:
+```
+    $ ./configure
+    $ make
+    $ make check
+    $ make install
+```
+
+By default `make install` will install into subdirectories of `/usr/local`. To
+change where things will get installed, use `./configure --prefix=/some/path`.
 
 
 # Future directions
