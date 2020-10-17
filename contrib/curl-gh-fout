@@ -1,0 +1,159 @@
+#!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# curl-gh-fout: Wrapper around the 'curl-gh' program to cause the HTTP
+# response body to be written to the user-specified filepath.
+#
+# The curl progress meter, etc., will still be written to stdout. If you do
+# not wish to see that output, you may be interested in the 'curl-gh-fout-q'
+# script, instead (which wraps this one).
+#
+# Invokes curl(1) configured to talk to GitHub over TLS 1.2 (or
+# higher). Basically sets up command line options to curl(1) in a way similar
+# to how it is done by the 'ads-github-tools', for easy interactive use on the
+# command line.
+#
+# The user must provide two required (positional) params:
+#
+#     1. GitHub URL (or path; see below) to invoke
+#
+#     2. Output filepath for HTTP response body
+#
+# As a common-case optimization, if the value provided for the GitHub URL
+# starts with a '/' character, then it will be interpreted as the start of a
+# URL path that will be prepended to:
+#
+#     https://api.github.com
+#
+# This saves the user from having to remember and specify that unchanging URL
+# base, and can also save some typing. Thus, the following two invocations are
+# effectively identical:
+#
+#     $ curl-gh-fout 'https://api.github.com/user/repos' '/tmp/rsp.out'
+#
+#     $ curl-gh-fout '/user/repos' '/tmp/rsp.out'
+#
+#
+# As a special case, if the very first option on the command line is
+# '--no-act', then the curl command line that would otherwise be run is simply
+# printed to stdout. This is useful not only for understanding what the tool
+# is doing, but also for copying the command for use for manual editing on the
+# command line (sometimes you want /most/ of the behavior here, but not all of
+# it...)
+#
+# Any additional command line options will be passed through to curl(1). Some
+# curl options might interfere with the correct functioning of this program;
+# no attempt is made to detect such conflicts.
+#
+# Note that no particular request method (GET, POST, PUT, ...) is specified by
+# the default options (which means that the default curl behavior of
+# defaulting to GET will be used) unless a user-provided option causes some
+# other method to be used. This is just like when using curl directly.
+#
+#
+# Usage:
+#     curl-gh-fout [--no-act] GH_URL OUTPUT_FPATH [CURL_OPT...] 
+#
+#
+# HINT: The mnemonic for remembering the order of the params is that they
+#       resemble the order of 'cp(1)':
+#
+#           $ cp SOURCE DEST
+#
+#       Conceptually, you are taking the data from (emitted by) the URL, and
+#       storing it in OUTPUT_FPATH:
+#
+#           $ curl-gh-fout GH_URL OUTPUT_FPATH
+#
+#
+# See also:
+#
+#     * curl-gh
+#
+#     * curl-gh-fout-q (wraps the current program)
+#
+#     * GitHub v3 API:
+#         - https://developer.github.com/v3/
+#         - https://docs.github.com/v3/
+#
+declare -r PROG='curl-gh-fout'
+
+declare -r MAINTAINER='Alan D. Salewski <ads@salewski.email>'
+
+
+BE_VERBOSE=false
+# BE_VERBOSE=true
+
+DEBUGGING=false
+# DEBUGGING=true
+
+f_print_help () {
+
+    cat <<EOF
+usage: ${PROG} GITHUB_URL OUTPUT_FILE [CURL_OPT...]
+
+Invokes curl-gh, which itself wraps curl(1) configured to invoke the GitHub v3
+API. The HTTP response output is written to OUTPUT_FILE.
+
+Report bugs to ${MAINTAINER}.
+EOF
+}
+
+
+OPT_NOACT=
+if test $# -gt 0 && test "$1" = '--no-act'; then
+    OPT_NOACT='--no-act'
+    shift
+fi
+
+if test $# -lt 1; then
+    printf "${PROG} (error): required GITHUB_URL param missing; bailing out\n" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+GH_URL=$1
+shift
+
+if test $# -lt 1; then
+    printf "${PROG} (error): required OUTPUT_FILE param missing; bailing out\n" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+OUT_FPATH=$1
+shift
+
+
+# For needed internal progs, we will just expect them to be installed "next
+# to" the current program.
+#
+# Note that the mechanism used here needs to work both "in-tree" and when
+# installed. When working in-tree, the other in-tree versions of our internal
+# tools must be found first (even if the tools are installed on the system).
+#
+t_script_dir=${0%/*}
+AGH_CONTRIB_CURL_GH_PROG="${t_script_dir}/curl-gh"
+
+declare -a NEEDED_INTERNAL_PROGS=(
+    "${AGH_CONTRIB_CURL_GH_PROG}"
+)
+for t_int_tool in "${NEEDED_INTERNAL_PROGS[@]}"; do
+    if test -x "${t_int_tool}"; then :; else
+        printf "${PROG} (error): was unable to locate internal tool: \"%s\"; bailing out\n" "${t_int_tool}" 1>&2
+        exit 1
+    fi
+    if $DEBUGGING; then
+        printf "${PROG} (debug): found internal tool: %s\n" "${t_int_tool}" 1>&2
+    fi
+done
+
+# These options will (eventually) get passed-through to curl
+declare -a ADDL_CURL_OPTS=()
+
+# We always write the (JSON) output to the user-specified file.
+#
+ADDL_CURL_OPTS+=( '--output' )
+ADDL_CURL_OPTS+=( "${OUT_FPATH}" )
+
+exec "${AGH_CONTRIB_CURL_GH_PROG}" ${OPT_NOACT} "${GH_URL}" "$@" "${ADDL_CURL_OPTS[@]}"
