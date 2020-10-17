@@ -1,0 +1,214 @@
+#!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+# curl-gh: Invoke curl(1) configured to talk to GitHub over TLS 1.2 (or
+# higher). Basically sets up command line options to curl(1) in a way that is
+# similar to how it is done by the 'ads-github-tools', for easy interactive
+# use on the command line.
+#
+# Because interactive use involves more curl invocation scenario variations
+# than does a single program invocation, some curl configuration options that
+# are used by the 'ads-github-tools' programs are omitted here, but can be
+# "layered back in" by using one of our higher-layered wrapper scripts (q.v.):
+#
+#     * curl-gh-fout  (write the response body to a user-specified file)
+#
+#     * curl-gh-fout-q  (layers-in behavior to suppress the curl progress
+#                       status, and instead emit the HTTP response code on
+#                       stdout)
+#
+# Only one user-provided command line parameter is required: the GitHub URL
+# (or path; see below) to invoke.
+#
+# As a common-case optimization, if the value provided for the GitHub URL
+# starts with a '/' character, then it will be interpreted as the start of a
+# URL path that will be prepended to:
+#
+#     https://api.github.com
+#
+# This saves the user from having to remember and specify that unchanging URL
+# base, and can also save some typing. Thus, the following two invocations are
+# effectively identical:
+#
+#     $ curl-gh 'https://api.github.com/user/repos'
+#
+#     $ curl-gh '/user/repos'
+#
+# As a special case, if the very first option on the command line is
+# '--no-act', then the curl command line that would otherwise be run is simply
+# printed to stdout. This is useful not only for understanding what the tool
+# is doing, but also for copying the command for use for manual editing on the
+# command line (sometimes you want /most/ of the behavior here, but not all of
+# it...)
+#
+# Any additional command line options will be passed through to curl(1). Some
+# curl options might interfere with the correct functioning of this program;
+# no attempt is made to detect such conflicts.
+#
+# Note that no particular request method (GET, POST, PUT, ...) is specified by
+# the default options (which means that the default curl behavior of
+# defaulting to GET will be used) unless a user-provided option causes some
+# other method to be used. This is just like when using curl directly.
+#
+#
+# Usage:
+#     curl-gh [--no-act] GH_URL [CURL_OPT...] 
+#
+#
+# See also:
+#
+#     * curl-gh-fout   (explained above)
+#
+#     * curl-gh-fout-q (explained above)
+#
+#     * GitHub v3 API:
+#         - https://developer.github.com/v3/
+#         - https://docs.github.com/v3/
+#
+declare -r PROG='curl-gh'
+
+declare -r MAINTAINER='Alan D. Salewski <ads@salewski.email>'
+
+# Note that we deliberately DO NOT end the default base URL with a trailing
+# slash ('/') character. The reason is that we only use this value when
+# appending a user-provided URL path, which we detect by way of a leading '/'
+# char; then we just catentate the two values.
+
+# XXX: GitHub Enterprise custs would need to use a different URL base
+#
+declare -r gl_const_github_api_base_url='https://api.github.com'
+
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+
+BE_VERBOSE=false
+#BE_VERBOSE=true
+
+DEBUGGING=false
+#DEBUGGING=true
+
+DO_ACT=true  # disabled by '--no-act'
+
+f_print_help () {
+
+    cat <<EOF
+usage: ${PROG} GITHUB_URL [CURL_OPT...]
+
+Invokes curl(1) configured to invoke the GitHub v3 API.
+
+Report bugs to ${MAINTAINER}.
+EOF
+}
+
+if test $# -gt 0 \
+&& test "$1" = '--no-act'; then
+    DO_ACT=false
+    shift
+fi
+
+if test $# -lt 1; then
+    printf "${PROG} (error): required GITHUB_URL param missing; bailing out\n" 1>&2
+    f_print_help 1>&2
+    exit 1
+fi
+GH_URL=$1
+shift
+if [[ ${GH_URL} =~ ^[/] ]]; then
+    # User presumably provided URL using our common-case shortcut:
+    #
+    #     /somepath
+    #
+    # so we will prepend the GitHub base URL.
+    #
+    GH_URL=${gl_const_github_api_base_url}${GH_URL}
+fi
+# Refuse to run if we do not recognize the URL as something that will be
+# encrypted on the wire. This is intended to help prevent accidentally
+# transmitting HTTP Basic Auth credentials in cleartext.
+#
+re_starts_with_https='^https://'
+if test -z "${GH_URL}"; then
+    printf "${PROG} (error): GitHub API base URL is not defined; bailing out\n" 1>&2
+    exit 1
+fi
+if [[ "${GH_URL}" =~ $re_starts_with_https ]]; then :; else
+    printf "${PROG} (error): configured GitHub API base URL (\"%s\") does not start with 'https://'; bailing out\n" "${GH_URL}" 1>&2
+    exit 1
+fi
+
+
+# Anything left on the command line will just get passed-through "as is" to
+# curl.
+declare -a CALLER_OPTS_FOR_CURL=()
+while test $# -gt 0; do
+    CALLER_OPTS_FOR_CURL+=( "$1" )
+    shift
+done
+
+
+declare -a MY_CURL_OPTS=()
+
+# Force use of TLS 1.2 (or later). Writing in 2020, all previous versions are
+# known to be broken and susceptible to known attacks. Note that the
+# '--tlsv1.2' option was added in curl 7.34.0
+#
+# This is absolutely essential since we're using HTTP Basic Auth (see below).
+#
+MY_CURL_OPTS+=( '--tlsv1.2' )
+
+# Allow ONLY https, for both the initial request and for redirects
+MY_CURL_OPTS+=( '--proto')
+MY_CURL_OPTS+=( 'https')
+MY_CURL_OPTS+=( '--proto-redir')
+MY_CURL_OPTS+=( 'https')
+
+
+# Tell curl to use HTTP Basic Authentication. This is the curl default, but
+# we're explicit about what we expect (and want to avoid any surprises from
+# weirdo ~/.curlrc files).
+#
+# See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+#
+MY_CURL_OPTS+=( '--basic' )
+
+
+# User's authentication credentials will be obtained from the user's ~/.netrc
+# file. See curl(1) and netrc(5)
+#
+MY_CURL_OPTS+=( '--netrc'  )
+
+MY_CURL_OPTS+=( '--user-agent' )
+MY_CURL_OPTS+=( "${PROG}"      )
+
+
+# Even when we're just making HEAD requests, have curl fail
+# MY_CURL_OPTS+=( '--fail' )
+
+
+# Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+# 2020, v3 is (still) the default, but there is also a 'GraphQL API v4'
+# version which we do not use here. Some newer version may become the default
+# in the future, so we are explicit about which version we are using.
+#
+MY_CURL_OPTS+=( '--header' )
+MY_CURL_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+maybe_noact_cmd='echo'
+if $DO_ACT; then
+    maybe_noact_cmd=  # clear, but do not unset
+fi
+
+$maybe_noact_cmd \
+    curl "${MY_CURL_OPTS[@]}"         \
+         "${CALLER_OPTS_FOR_CURL[@]}" \
+         "${GH_URL}"
+t_estat=$?
+
+if test $t_estat -ne 0; then
+    printf "${PROG} (error): was error while invoking curl(1); bailing out\n" 1>&2
+    exit 1
+fi
+
+exit $t_estat
