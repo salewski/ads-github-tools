@@ -1,0 +1,43 @@
+# -*- conf-toml -*-
+## Process this file with automake to produce Cargo.toml
+
+## SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+## SPDX-License-Identifier: GPL-2.0-or-later
+
+# See: https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "parse-netrc"
+version = "0.1.0"
+authors = ["Alan D. Salewski <ads@salewski.email>"]
+
+# Rust "edition"
+# See:
+#     https://doc.rust-lang.org/edition-guide/index.html
+#     https://doc.rust-lang.org/edition-guide/rust-2018/index.html
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+
+# The std::env::home_dir function comes with a big ol' deprecation warning, so
+# we do not use it. Instead, we use the 'home::home_dir' function, which is
+# what Cargo uses, itself.
+#
+# https://docs.rs/home/0.5.3/home/index.html
+# https://docs.rs/home/0.5.3/home/fn.home_dir.html
+# https://github.com/brson/home
+# License: Either MIT or Apache 2
+#
+# See also the related discussion:
+#     https://github.com/rust-lang/rust/pull/51656
+#     https://github.com/rust-lang/rust/issues/71684
+#
+home = "^0.3.4"
+
+# https://docs.rs/netrc/0.4.1/netrc/index.html
+# https://github.com/Yuhta/netrc-rs
+# License: Either MIT or Apache 2
+netrc = "^0.4.1"

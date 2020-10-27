@@ -33,7 +33,15 @@ dnl proofing; as of may not be used yet...)
 AC_CONFIG_MACRO_DIR([autotools])
 
 dnl Turn on all Automake warnings and report them as errors
-AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+dnl
+dnl Enable subdir-objects. This is just future-proofing, as it will be the
+dnl default behavior in future versions of Automake.
+dnl
+dnl Use the ustar format defined by POSIX 1003.1-1988 to allow filepaths
+dnl longer than 99 chars (up to 256 chars). This is needed because of the deep
+dnl directories created by our vendored deps (under src/third-party/...)
+dnl
+AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects tar-ustar])
 
 
 dnl AC_SUBST([DFLT_MAINTAINER_NAME])
@@ -48,9 +56,17 @@ dnl +------------------------+
 dnl makes $(LN_S) available in our Makefile.am files
 AC_PROG_LN_S
 
+dnl modtern Autoconf-based $(MKDIR_P)
+AC_PROG_MKDIR_P
+
 AC_PATH_PROG(AWK_PROG, awk)
 if test -z "$AWK_PROG"; then
     AC_MSG_ERROR([awk not found])
+fi
+
+AC_PATH_PROG(BASENAME_PROG, basename)
+if test -z "$BASENAME_PROG"; then
+    AC_MSG_ERROR([basename not found])
 fi
 
 ## We need bash >= 4.x (associative arrays were added in bash-4.0)
@@ -72,6 +88,32 @@ if test -z "$BC_PROG"; then
     AC_MSG_ERROR([bc not found])
 fi
 
+
+# Cargo is the package management and build orchestration tool for the Rust
+# programming language. If you've got 'rustc', then you probably have this
+# already. On Debian systems (and its derivatives), it is provided by the
+# 'cargo' package.
+#
+#     https://github.com/rust-lang/cargo/
+#     https://doc.rust-lang.org/cargo/
+#
+# The minimum version required is 1.42.0 (released 2020-03-12); that version
+# introduced the '--versioned-dirs' option, which (combined with other project
+# configuration) causes the build to use our "vendored" sources under:
+#
+#     src/third-party/cargo-vendored/
+#
+# This macro provides these shell variables (along with their AC_SUBST'd
+# counterparts):
+#
+#     $CARGO_PROG
+#     $CARGO_PROG_VERSION
+#
+# Require cargo version 1.42.0 or newer.
+# 
+ads_PROG_CARGO([1.42.0])
+
+
 AC_PATH_PROG([CAT], [cat])
 if test -z "$CAT"; then
     AC_MSG_ERROR([cat not found])
@@ -82,9 +124,19 @@ if test -z "$CHGRP"; then
     AC_MSG_ERROR([chgrp not found])
 fi
 
+AC_PATH_PROG([CHMOD_PROG], [chmod])
+if test -z "$CHMOD_PROG"; then
+    AC_MSG_ERROR([chmod not found])
+fi
+
 AC_PATH_PROG([CHOWN], [chown])
 if test -z "$CHOWN"; then
     AC_MSG_ERROR([chown not found])
+fi
+
+AC_PATH_PROG(CP_PROG, cp)
+if test -z "$CP_PROG"; then
+    AC_MSG_ERROR([cp not found])
 fi
 
 # See: https://en.wikipedia.org/wiki/CURL
@@ -99,6 +151,11 @@ fi
 AC_PATH_PROG([DATE_PROG], [date])
 if test -z "$DATE_PROG"; then
     AC_MSG_ERROR([date not found])
+fi
+
+AC_PATH_PROG(DIRNAME_PROG, dirname)
+if test -z "$DIRNAME_PROG"; then
+    AC_MSG_ERROR([dirname not found])
 fi
 
 AC_PATH_PROG([ECHO_PROG], [echo])
@@ -160,14 +217,30 @@ if test -z "$JQ_PROG"; then
     AC_MSG_ERROR([jq program not found])
 fi
 
+AC_PATH_PROG([MKDIR_PROG], [mkdir])
+if test -z "$MKDIR_PROG"; then
+    AC_MSG_ERROR([mkdir program not found])
+fi
+
 AC_PATH_PROG([MKTEMP_PROG], [mktemp])
 if test -z "$MKTEMP_PROG"; then
     AC_MSG_ERROR([mktemp program not found])
 fi
 
+AC_PATH_PROG([MV_PROG], [mv])
+if test -z "$MV_PROG"; then
+    AC_MSG_ERROR([mv program not found])
+fi
+
 AC_PATH_PROG([SED], [sed])
 if test -z "$SED"; then
     AC_MSG_ERROR([sed not found])
+fi
+
+# readlink(1) from the GNU coreutils
+AC_PATH_PROG([READLINK_PROG], [readlink])
+if test -z "$READLINK_PROG"; then
+    AC_MSG_ERROR([readlink not found])
 fi
 
 AC_PATH_PROG([RM], [rm])
@@ -180,6 +253,19 @@ if test -z "$RMDIR"; then
     AC_MSG_ERROR([rmdir not found])
 fi
 
+# 'rustc' is the compiler for the Rust programming language. If you have
+# 'cargo' (checked-for above), then you probably have 'rustc', too. On Debian
+# systems (and its derivatives), it is provided by the 'rust' package.
+#
+#     https://www.rust-lang.org/
+#     https://www.rust-lang.org/tools/install
+#     https://doc.rust-lang.org/rustc/index.html
+#     https://github.com/rust-lang/rust
+#
+AC_PATH_PROG([RUSTC_PROG], [rustc])
+if test -z "$RUSTC_PROG"; then
+    AC_MSG_ERROR([rustc not found])
+fi
 
 # See: https://metacpan.org/release/Digest-SHA3
 #      https://packages.debian.org/jessie/libdigest-sha3-perl
@@ -281,6 +367,25 @@ dnl ads_PERL_LIBDIR
 AC_SUBST([perl5_pkgvdatadir], ["\${datadir}/${PACKAGE}-${VERSION}/perl5"])
 AC_SUBST([perl5_pkgvlibdir],  ["\${libdir}/${PACKAGE}-${VERSION}/perl5"])
 
+# The Cargo build orchestration tool for Rust can "vendor" our third-party
+# rust library dependencies ("crates") by obtaining them from crates.io (or
+# whever else we configure it to look) and storing local copies in an
+# arbitrary subdirectory within our build tree.
+#
+# We take advantage of that capability so that end-users will have within our
+# release tarballs everything they need to compile our Rust-based artifacts
+# (assuming they have the rustc compiler and cargo itself already
+# installed).
+#
+# This approach allows us to have reproducible builds and protects us against
+# artifacts disappearing from the Internet. It also allows us to provide users
+# with a build system that does not require access to network resources or
+# otherwise have familiarity and/or comfort with the tooling of the Rust
+# ecosystem.
+#
+cargo_vendored_root='$(top_srcdir)/src/third-party/cargo-vendored'
+AC_SUBST([cargo_vendored_root])
+
 
 ## The 'do_subst' Makefile var is the conventional name for manual
 ## filtering process that needs to be done at build time.
@@ -344,12 +449,20 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]ads_perl5_extra_includes[@],$(ads_perl5_extra_includes),g'"'"' \
   -e '"'"'s,[@]perl5_pkgvdatadir[@],$(perl5_pkgvdatadir),g'"'"' \
   \
+  -e '"'"'s,[@]cargo_vendored_root[@],$(cargo_vendored_root),g'"'"' \
+  \
   -e '"'"'s,[@]AWK_PROG[@],$(AWK_PROG),g'"'"' \
+  -e '"'"'s,[@]BASENAME_PROG[@],$(BASENAME_PROG),g'"'"' \
   -e '"'"'s,[@]BASH_SH[@],$(BASH_SH),g'"'"' \
   -e '"'"'s,[@]BC_PROG[@],$(BC_PROG),g'"'"' \
+  -e '"'"'s,[@]CARGO_PROG[@],$(CARGO_PROG),g'"'"' \
+  -e '"'"'s,[@]CARGO_PROG_VERSION[@],$(CARGO_PROG_VERSION),g'"'"' \
   -e '"'"'s,[@]CAT[@],$(CAT),g'"'"' \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
+  -e '"'"'s,[@]CHMOD_PROG[@],$(CHMOD_PROG),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
+  -e '"'"'s,[@]CP_PROG[@],$(CP_PROG),g'"'"' \
+  -e '"'"'s,[@]DIRNAME_PROG[@],$(DIRNAME_PROG),g'"'"' \
   -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
   -e '"'"'s,[@]DATE_PROG[@],$(DATE_PROG),g'"'"' \
   -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
@@ -362,10 +475,14 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
+  -e '"'"'s,[@]MKDIR_PROG[@],$(MKDIR_PROG),g'"'"' \
   -e '"'"'s,[@]MKTEMP_PROG[@],$(MKTEMP_PROG),g'"'"' \
+  -e '"'"'s,[@]MV_PROG[@],$(MV_PROG),g'"'"' \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
+  -e '"'"'s,[@]READLINK_PROG[@],$(READLINK_PROG),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
+  -e '"'"'s,[@]RUSTC_PROG[@],$(RUSTC_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
@@ -434,8 +551,25 @@ dnl
 dnl   5. Use `indent-region' (C-M-\) to indent the quoted
 dnl      strings. Region is already set up because we set the mark above.
 
-dnl Declare our output Makefiles
+# We generate some of our Rust (.rs) source code files, so they end up in the
+# build tree when doing a VPATH build. Because Cargo expects to find all of
+# the files involved with building a Rust "package" (source code files for the
+# crates, the Cargo.lock file, etc) together in the same directory tree, we
+# need to arrange for the files that aren't generated to appear to be local to
+# the build tree. Enter AC_CONFIG_LINKS.
+#
+# Note that we generate 'Cargo.toml' in the build tree, but link its
+# corresponding 'Cargo.lock' file from the source tree.
+#
+AC_CONFIG_LINKS(
+    [src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock]
+    [src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml]
+)
+
+dnl Declare our output Makefiles (and others)
 AC_CONFIG_FILES(
+    [.cargo/config.toml]
+    [src/main/rust/bin/parse-netrc/.cargo/config.toml]
     [Makefile]
     [bin/Makefile]
     [src/Makefile]
@@ -445,6 +579,9 @@ AC_CONFIG_FILES(
     [src/main/perl/Makefile]
     [src/main/perl/bin/Makefile]
     [src/main/resources/Makefile]
+    [src/main/rust/Makefile]
+    [src/main/rust/bin/Makefile]
+    [src/main/rust/bin/parse-netrc/Makefile]
 )
 
 dnl Actually output the declared files
@@ -504,6 +641,10 @@ printf "                  Manual pages: %s\n" "`__poor_mans_expand_file_name man
 printf "\n"
 printf "                          bash: %s\n" "`__poor_mans_expand_file_name BASH_SH`"
 printf "                          perl: %s\n" "`__poor_mans_expand_file_name PERL`"
+printf "                         rustc: %s\n" "`__poor_mans_expand_file_name RUSTC_PROG`"
+printf "                         cargo: %s (%s)\n" \
+  "`__poor_mans_expand_file_name CARGO_PROG`"      \
+  "`__poor_mans_expand_file_name CARGO_PROG_VERSION`"
 printf "\n"
 
 
