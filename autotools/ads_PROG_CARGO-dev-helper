@@ -1,0 +1,172 @@
+#!/bin/bash -
+#
+# semver checks: Good and bad testing data combined with a series of sed
+# expressions to check Semantic Versioning ("SemVer") version numbers.
+#
+# Many of the example data values are taken directly from the spec.
+#
+# This tool was used in the development of the 'ads_PROG_CARGO.m4' macro,
+# which is reflected in some of the variable names.
+#
+
+declare -r PROG='foo'
+
+declare -a good_values=()
+declare -a bad_values=()
+
+good_values+=( '1.0.0' )
+
+good_values+=( '21.0.0' )
+good_values+=( '1.10.0' )
+good_values+=( '1.0.10' )
+
+# If "pre-release" info is provided, it must follow immediately after the
+# patch value.
+good_values+=( '1.0.0-alpha' )
+good_values+=( '1.0.0-alpha.1' )
+good_values+=( '1.0.0-alpha.beta' )
+good_values+=( '1.0.0-alpha.beta.2' )
+good_values+=( '1.0.0-alpha.beta.11' )
+
+good_values+=( '3.2.4-alpha' )
+good_values+=( '3.2.4-alpha.1' )
+good_values+=( '3.2.4-alpha.beta' )
+good_values+=( '3.2.4-alpha.beta.2' )
+good_values+=( '3.2.4-alpha.beta.11' )
+
+good_values+=( '3.2.4-rc.1' )
+good_values+=( '3.2.4-ALPHA' )
+good_values+=( '3.2.4-ALPHA.1' )
+good_values+=( '3.2.4-ALPHA' )
+good_values+=( '3.2.4-ALPHA.1.3.2' )
+
+# If "buildinfo" is provided, it must come either immediately after the path
+# value (if there is no "pre-release" field present), else after the
+# pre-release field.
+#
+
+# In particular, the buildinfo value cannot come before the pre-release field.
+# (Because a '-' char is legit within a buildinfo field, there would be no way
+# to discern the pre-release field.)
+
+good_values+=( '1.0.0-alpha+001' )
+good_values+=( '1.0.0+20130313144700' )
+good_values+=( '1.0.0-beta+exp.sha.5114f85' )
+good_values+=( '1.0.0+21AF26D3—-117B344092BD' )
+
+bad_values+=( '' )  # empty
+bad_values+=( ' ' )  # blank-1
+bad_values+=( '  ' )  # blank-2
+bad_values+=( '   ' )  # blank-3
+bad_values+=( '    ' )  # blank-4
+bad_values+=( 'crap' )
+
+bad_values+=( 'a1.0.0' )
+bad_values+=( '1a.0.0' )
+bad_values+=( '1.a0.0' )
+bad_values+=( '1.0a.0' )
+bad_values+=( '1.0.a0' )
+bad_values+=( '1.0.0a' )
+
+
+# Stand-alone zeros are def. legit, but not multi-digit values with leading
+# zeros. See note below.
+bad_values+=( '01.0.0' )
+bad_values+=( '0.01.0' )
+bad_values+=( '0.0.01' )
+
+bad_values+=( '1.0.0-alpha+001+002' )  # has two buildinfo fields
+bad_values+=( '1.0.0-be_ta+exp.sha.5114f85' )  # pre-release field has invalid char (_)
+bad_values+=( '1.0.0++21AF26D3—-117B344092BD' )  # only one '+' allowed as separator for buildinfo field
+
+
+for dataset in 'GOOD' 'BAD'; do
+    printf '\nDATA SET: %s\n' "$dataset"
+
+    unset data_arr
+    declare -a data_arr=()
+
+    if test "${dataset}" = 'GOOD'; then
+        data_arr+=( "${good_values[@]}" )
+    elif test "${dataset}" = 'BAD'; then
+        data_arr+=( "${bad_values[@]}" )
+    else
+        printf "${PROG} (error): unrecognized data set label: %s\n" "${dataset}" 1>&2
+        exit 1
+    fi
+
+for found_cargo_version in "${data_arr[@]}"; do
+
+printf 'input: "%s"...' "${found_cargo_version}"
+
+# When extracting the M, m, and p values we use not only two separate sed
+# expressions, but two separate invocations.
+#
+# The first sed expression (in the first invocation) plucks out the relevant
+# number from the M.m.p triplet ("the M part", "the m part", or "the p
+# part"). This part only emits a non-empty value if it recognized the data.
+#
+# The second sed expression (in the second invocation) slices off any leading
+# zeros, but leaves stand-alone zeros alone. If the first expression did not
+# emit anything, then this cleanup step is effectively a NOOP. Note that the
+# Semantic Versioning 2.0.0 ("SemVer") spec requires this no-leading-zeros
+# behavior:
+#
+#     "A normal version number MUST take the form X.Y.Z where X, Y, and Z are
+#      non-negative integers, and MUST NOT contain leading zeroes."
+#
+# See also:
+#     https://semver.org/
+
+#set -x
+tval_M=$(printf '%s\n' "${found_cargo_version}" \
+           | sed -n -e 's/^\([[:digit:]]\{1,\}\)[.].*/\1/p' \
+           | sed    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+tval_m=$(printf '%s\n' "${found_cargo_version}" \
+           | sed -n -e 's/^[[:digit:]]\{1,\}[.]\([[:digit:]]\{1,\}\)[.].*/\1/p' \
+           | sed    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+tval_p=$(printf '%s\n' "${found_cargo_version}" \
+           | sed -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.]\([[:digit:]]\{1,\}\)\([-+].*\|$\)/\1/p' \
+           | sed    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+tval_prerel=$(printf '%s\n' "${found_cargo_version}" \
+                | sed -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.][[:digit:]]\{1,\}-\([0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\([+].*\|$\)/\1/p')
+
+tval_buildinfo=$(printf '%s\n' "${found_cargo_version}" \
+                  | sed -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.][[:digit:]]\{1,\}\(-[0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\{0,1\}[+]\([0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\{0,1\}$/\3/p' )
+#set +x
+
+tval_recombined="${tval_M}.${tval_m}.${tval_p}"
+if test -n "${tval_prerel}"; then
+    tval_recombined="${tval_recombined}-${tval_prerel}"
+fi
+if test -n "${tval_buildinfo}"; then
+    tval_recombined="${tval_recombined}+${tval_buildinfo}"
+fi
+
+printf 'recombined: "%s"...' "${tval_recombined}"
+
+
+if test "${tval_recombined}" = "${found_cargo_version}"; then
+    printf 'is legit\n'
+else
+    printf 'is BOGUS\n'
+fi
+
+# SemVer allows for pre-release tokens to factor into the precedence, but only
+# after the M.m.p have been found to be equal. In SemVer, the build metadata
+# (if any) does not factor into the precedence.
+#
+# In this macro we ignore most of the precedent rules that pertain to the
+# pre-release token, except for this one:
+# <quote>
+#     When major, minor, and patch are equal, a pre-release version has lower
+#     precedence than a normal version:
+#
+#         Example: 1.0.0-alpha < 1.0.0.
+# </quote>
+
+done
+done
