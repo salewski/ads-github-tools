@@ -1,0 +1,8 @@
+[package]
+name = "netrc"
+version = "0.4.1"
+authors = ["Jimmy Lu <gongchuo.lu@gmail.com"]
+repository = "https://github.com/Yuhta/netrc-rs"
+documentation = "http://yuhta.github.io/netrc-rs/doc/netrc/index.html"
+license = "MIT"
+description = "Parses and encapsulates the `netrc` file format"
