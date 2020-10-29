@@ -267,6 +267,12 @@ if test -z "$RUSTC_PROG"; then
     AC_MSG_ERROR([rustc not found])
 fi
 
+# sha256sum(1), from GNU 'coreutils'
+AC_PATH_PROG([SHA256SUM_PROG], [sha256sum])
+if test -z "$SHA256SUM_PROG"; then
+    AC_MSG_ERROR([sha256sum not found])
+fi
+
 # See: https://metacpan.org/release/Digest-SHA3
 #      https://packages.debian.org/jessie/libdigest-sha3-perl
 #      https://packages.debian.org/stretch/libdigest-sha3-perl
@@ -307,6 +313,18 @@ fi
 AC_PATH_PROG([XARGS_PROG], [xargs])
 if test -z "$XARGS_PROG"; then
     AC_MSG_ERROR([xargs not found])
+fi
+
+dnl XXX: Consider making zstd optional
+dnl
+
+# The zstd(1) compression tool
+#
+#     https://github.com/facebook/zstd
+#
+AC_PATH_PROG([ZSTD_PROG], [zstd])
+if test -z "$ZSTD_PROG"; then
+    AC_MSG_ERROR([zstd not found])
 fi
 
 
@@ -483,6 +501,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
   -e '"'"'s,[@]RUSTC_PROG[@],$(RUSTC_PROG),g'"'"' \
+  -e '"'"'s,[@]SHA256SUM_PROG[@],$(SHA256SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
@@ -490,6 +509,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
   -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
+  -e '"'"'s,[@]ZSTD_PROG[@],$(ZSTD_PROG),g'"'"' \
 '
 ]
 AC_SUBST([do_subst_command])

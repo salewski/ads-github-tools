@@ -29,7 +29,208 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (None)
+*** issue 59: new tool: ads-github-cache(1)
+
+    "implement cache for '/user/repos', other paths"
+    https://github.com/salewski/ads-github-tools/issues/59
+
+**** ads-github-cache: context
+
+     The program was implemented primarily for the internal use by other
+     utilities in the ads-github-tools, but may be used directly from the
+     command line, as well.
+
+     One major change is that users will want to get in the habit of
+     periodically invoking:
+
+     :    $ ads-github-cache -v --update
+
+     either manually or (more likely) from an automated process (such as a
+     daily cron job). Having the cache available is the difference between some
+     operations being painfully slow or pleasantly snappy on on large
+     collections of resources (e.g., GitHub repos).
+
+     Integration of the cache into the various utilities is still at the very
+     early stages. Expect to see regular improvements in this area in
+     subsequent releases. See ads-github-cache(1) for all the gory details.
+
+     Usage:
+
+     :     ads-github-cache --update
+     :
+     :     ads-github-cache --update 'https://api.github.com/user/repos'
+     :     ads-github-cache --update '/user/repos'
+     :
+     :     ads-github-cache --clear  '/user/repos'
+     :
+     :     ads-github-cache --clear-all
+     :
+     :     ads-github-cache --get        '/user/repos'
+     :
+     :     ads-github-cache --get-cached '/user/repos'
+
+
+**** ads-github-cache --help
+
+     :    $ ads-github-cache --help
+     :    usage: ads-github-cache { -h | --help }
+     :      or:  ads-github-cache { -V | --version }
+     :      or:  ads-github-cache [OPTION...] --update [--] [URL_OR_PATH...]
+     :      or:  ads-github-cache [OPTION...] { --get | --get-cached } [--] URL_OR_PATH
+     :      or:  ads-github-cache [OPTION...] --clear  [--] [URL_OR_PATH...]
+     :      or:  ads-github-cache [OPTION...] --clear-all
+     :
+     :    Manage a user-specific cache of GitHub v3 API responses.
+     :
+     :    Mandatory arguments to long options are mandatory for short options too.
+     :
+     :      -h, --help        Print this help message on stdout
+     :      -V, --version     Print the version of the program on stdout
+     :          --clear       Remove the specified URLs or paths from the cache
+     :          --clear-all   Remove all cached entries, for all cached URLs or paths
+     :          --get         Obtain content of specfied URL or path through the cache
+     :          --get-cached  Like '--get', but error out if item is not already present in cache.
+     :                          Avoids updating the cache to obtain the item. Think "offline".
+     :          --update      Update the cache entry for the specified URLs or paths, or all
+     :      -v, --verbose     Print program progress messages on stderr. Specify multiple
+     :                          times to increase verbosity: info, debug, and tracing (set -x)
+     :          --            Signals the end of options and disables further options processing.
+     :                          Any remaining argument(s) will be interpretted as a repo name
+     :
+     :    Report bugs to Alan D. Salewski <ads@salewski.email>.
+
+
+*** issue 60: new tool: parse-netrc
+
+    "offline usage: parse GitHub username from ~/.netrc (new tool: parse-netrc)"
+    https://github.com/salewski/ads-github-tools/issues/60
+
+
+**** parse-netrc: context
+
+     The motivation for this tool was to augment the new 'ads-github-cache'
+     program (see notes about issue #59 in this release, above). While
+     addressing that issue, it was realized that we needed a way to determine
+     the username of the "in-effect GitHub user" without accessing the
+     network, in the same way that curl(1) determines it when using its -n
+     (--netrc) option. This is needed because some GitHub users have multiple
+     GitHub accounts (e.g., work and personal), but access both from a single
+     Unix account. We need to be able to tell them apart so we can keep
+     separate per-GitHub-user caches.
+
+     We recently introduced the ads-github-whoami(1) utility[0] to obtain the
+     info about the authenticated GitHub user, but that tool requires network
+     access at runtime. Our cache needs to be able to work entirely offline
+     for some use cases.
+
+     [0] see issue #52, and our entry for it in the NEWS section for ads-github-tools 0.3.1
+
+     The first approach considered was to just use curl to get the info,
+     either from the 'curl' command line utility, or from a custom program
+     written against libcurl. It turns out that the functions related to
+     parsing the user's ~/.netrc file are not intended as public symbols in
+     libcurl, so we kept looking.
+
+     Eventually it was decided that a custom tool would be introduced for the
+     purpose. Enter the new 'parse-netrc' utility.
+
+     The program currently lives in-tree in the 'ads-github-tools' project,
+     but (as suggested by the lack of an "ads-github-" prefix in its name) it
+     is a candidate for extracting from the tree. Time will tell.
+
+
+**** Notes about integration of Rust and Cargo into the build tree
+
+     Of note is the fact that the 'parse-netrc' program is implemented in the
+     Rust programming language, the build of which has been integrated into
+     our GNU Autotools-based build.
+
+     In the Rust ecosystem, the primary dependency management and
+     build-orchestration tool is named "Cargo". It is distributed together
+     with the 'rustc' compiler.
+
+     Our build integration incorporates use of the Cargo tool, and during
+     development it is the primary tool used when directly working on the
+     'parse-netrc' program (or any other Rust-based program that we might
+     happen to introduce). In short, once your build tree is configured,
+     everything "just works" in the same way as with a stand-alone Rust
+     project that /only/ uses Cargo. Experienced Rust developers should feel
+     right at home.
+
+     Nevertheless, Cargo is a developer-focused tool. It is intended for use
+     by software developers working on Rust-based projects, and who are
+     interested in either consuming ecosystem libraries, or publishing new
+     libraries and programs into that ecosystem (or both). Its audience is
+     software developers, and software developers only. It sometimes gets
+     pressed into service, awkwardly, for other purposes, but we avoid doing
+     that here.
+
+     While working on the code base, we are wearing our developer hats. When
+     operating in that role we use Cargo's abilities just like any other Rust
+     project.
+
+     When packaging the 'ads-github-tools' for distribution, however, we
+     switch hats. The perspectives of the sysadmin and end-user take
+     precedence.
+
+     Toward that end, we want to isolate uses from the peculiarities of any
+     particular language tooling as possible. Sysadmins and end-users that
+     wish to build, install, and/or use the ads-github-tools should not need
+     to understand anything about Rust or Cargo other than that they need to
+     have the programs installed as prerequisites. Once the small number of
+     documented prerequisites are installed, we do not want the build process
+     to then reach out to the Internet and download a bunch of other stuff.
+
+     In that spirit, our incorporation of the Rust ecosystem involves
+     "vendoring" the source code for our third-party libraries. That means
+     copies of those source code artifacts live "in-tree" (beneath the
+     directory 'src/third-party/cargo-vendored'), and configuration is
+     provided that causes the 'cargo' build orchestration tool to reference
+     only those copies at build time. No network access is needed or even
+     desired; everything you need to build the ads-github-tools (that is not a
+     documented prerequisite) is included in the distribution tarball.
+
+     All of that means that the './configure', 'make', and 'make install'
+     recipe that we all know and love will continue to "just work". No new
+     language-inflicted or tool-inflicted weirdness is introduced. Unless you
+     consider the above weird  :-)
+
+     It also means that when we eventually get around to writing the
+     parse-netrc(1) manpage, it will automatically get installed in the normal
+     way (without introducing yet more language-specific tooling).
+
+     Finally, it's only appropriate to include a mention here that the parsing
+     of the netrc file is accomplished via the use of the third-party 'netrc'
+     crate:
+
+         http://yuhta.github.io/netrc-rs/doc/netrc/index.html
+
+     The library cannot yet parse netrc files that have comments in them, but
+     the rest of the needed core funcionality is there. In any event, it
+     allowed us to whip-up the 'parse-netrc' program with minimal effort, and
+     we appreciate having the library available.
+
+
+**** parse-netrc --help
+
+     :    $ parse-netrc --help
+     :    usage: parse-netrc { -h | --help }
+     :      or:  parse-netrc { -V | --version }
+     :      or:  parse-netrc [OPTION...] { -u USER | --user=USER } [--] HOSTNAME
+     :
+     :    Extract and print fields from matching netrc record, if any.
+     :
+     :    Mandatory arguments to long options are mandatory for short options too.
+     :
+     :      -h, --help        Print this help message on stdout
+     :      -V, --version     Print the version of the program on stdout
+     :      -u, --user=USER   Require match of USER in matched netrc record
+     :      -v, --verbose     Print program progress messages on stderr. Specify multiple
+     :                          times to increase verbosity: info, debug, and tracing
+     :          --            Signals the end of options and disables further options processing.
+     :                          Any remaining argument(s) will be interpretted as a hostname
+     :
+     :    Report bugs to Alan D. Salewski <ads@salewski.email>.
 
 
 * ads-github-tools 0.3.1 (2020-10-12)

@@ -7,6 +7,7 @@
 #          .
 
 INPUT_TEMPLATES = \
+    ads-github-cache.in               \
     ads-github-fetch-all-upstreams.in \
     ads-github-hash-url.in            \
     ads-github-merge-all-upstreams.in \

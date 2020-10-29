@@ -1,0 +1,4380 @@
+#!/bin/bash -
+# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+#     This program is free software; you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation; either version 2 of the License, or
+#     (at your option) any later version.
+#
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+#
+#     You should have received a copy of the GNU General Public License
+#     along with this program; if not, write to the Free Software Foundation,
+#     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+# ads-github-cache.in: Manipulate a user-specific cache of GitHub responses.
+#
+# The cache implicitly contains the JSON representations, as obtained from the
+# GitHub v3 API, for the supported resource paths. E.g., the GitHub API
+# operation: 'GET /user/repos' has a resource path (or "API path") of
+# '/user/repos'.
+#
+# Not all GitHub resource paths are supported (in fact, writing in 2020-10,
+# most are not). Support is added for resource paths based on the needs of the
+# 'ads-github-tools'; those that would provide the most benefit will be
+# implemented first. Some may never be implemented (but please open an issue
+# if there is one that is currently unsupported that you would find useful).
+#
+# For '--get' and '--get-cached' operations, objects from the cache are
+# written to stdout. The former retrieves objects "through the cache", which
+# requires network access; the operation checks the "Etag" of the cached
+# object with the GitHub API, and pulls down a new or updated copy if the
+# local copy is stale. The latter retrieves objects "from the cache", which is
+# a strictly offline operation; an error is emitted if a copy of the requested
+# item is not already in the cache.
+#
+# Representations for collections that may need to be paged when obtained from
+# the GitHub v3 API can be obtained through or from the cache by any arbitrary
+# page size by providing values for the 'page' and 'per_page' query params.
+#
+# However, callers who wish to obtain all of the items need not futz around
+# with paging at all. Just leave off the paging parameters ('page=N' and
+# 'per_page=M') from the requested URL (or path) to obtain the fully-catenated
+# representation. This allows the calling program to stream over all of the
+# results one object at a time without having to worry about paging.
+#
+# There are a lot of GitHub-related operations for which the caller (or user)
+# may not care about having up-to-the-moment cache correctness; in fact, most
+# data is probably of the sort that minutes-, hours-, or even days-old
+# information is probably fine for most interactive use cases. Also, the
+# 'max-age' values that the GitHub API provides in the 'Cache-Control:'
+# settings for many (most?) data elements are far shorter than what a user
+# might consider the useful lifetime of the cached data. In recognition of
+# this fact and also the fact that the user may wish to avoid most or all
+# network access, the program supports a '--get-cached' option that causes
+# data to be served ONLY from the cache (and error-out if the item is not in
+# the cache).
+#
+# All URL_OR_PATH parameters can be specified as either a full GitHub URL or
+# as a URI path. A full URL must begin with:
+#
+#     https://api.github.com/
+#
+# All URI path must begin with a slash ('/') character, and will be
+# interpretted as meaning the resource for the specified path at the above
+# GitHub v3 API URL. All other URLs and/or path values will be rejected.
+#
+# Usage:
+#
+#     ads-github-cache --update
+#
+#     ads-github-cache --update 'https://api.github.com/user/repos'
+#     ads-github-cache --update '/user/repos'
+#
+#     ads-github-cache --clear  '/user/repos'
+#
+#     ads-github-cache --clear-all
+#
+#     ads-github-cache --get        '/user/repos'
+#
+#     ads-github-cache --get-cached '/user/repos'
+#
+#
+# CAREFUL: Think twice before clearing items from the cache; cache misses can
+#          be very expensive (time-wise) to re-populate, especially for
+#          potentially large collections (such as '/user/repos'). Think three
+#          times before clearing the entire cache; same reason, only more
+#          so. Because clearing the entire cache can be so costly, doing so
+#          requires an explicit '--clear-all' command line option (the normal
+#          '--clear' option requires one or more paths to clear).
+#
+#
+# See also:
+#     https://developer.github.com/v3/
+#     https://developer.github.com/v3/#conditional-requests
+#     https://docs.github.com/en/free-pro-team@latest/rest
+#     https://docs.github.com/en/free-pro-team@latest/rest/overview
+#     https://docs.github.com/en/free-pro-team@latest/rest/reference
+#     https://docs.github.com/en/free-pro-team@latest/rest/guides
+#
+# TODO
+# ----
+#     * Consider whether or not it might be worthwhile to re-implement this
+#       program using a language that has direct support for nested data
+#       structures. There is a non-trivial amount of tedium involved with the
+#       current implementation, much of which revolves around consuming the
+#       data produced by __f_validate_and_parse_gh_url() and passing it
+#       around.
+#
+declare -r PROG='ads-github-cache'
+
+set -o pipefail
+
+declare -r COPYRIGHT_DATES='2020'
+
+# declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
+declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
+
+declare -r VERSION='@VERSION@'  # value filtered-in at build time
+
+declare -r gl_const_build_date='@BUILD_DATE@'  # value filtered-in at build time
+declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
+# declare -r gl_const_release="${VERSION}"
+
+
+# Note that we use an "application" $TRACING flag separate from bash's
+# built-in 'xtrace' (set -x) shell option. This allows us to have a general
+# notion of user-requested verbosity separate from any selectively placed
+# 'set -x/set +x' sections we may plug into the code while working on the
+# program itself; similarly for places where we might want to avoid trace
+# output while debugging by selectively placing 'set +x/set -x' sections; both
+# of those behaviors would be much more cumbersome to achieve if we just
+# checked for 'x' in $- at runtime.
+#
+BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
+DEBUGGING=false    # enable with two '-v' (--verbose) opts
+TRACING=false      # enable with three or more '-v' (--verbose) opts
+
+# Folks using GitHub Enterprise might access their API at a different
+# location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
+# URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
+# credentials being transmitted in cleartext!).
+#
+# This value DOES NOT end with a slash ('/') char because we want to be able
+# to easily combine URI path values to it, and we want to manage those path
+# value WITH a leading slash char.
+#
+declare -r gl_const_github_api_hostname='api.github.com'
+declare -r gl_const_github_api_base_url='https://'"${gl_const_github_api_hostname}"
+
+# We'll help future-proof this program by explicitly requesting version 3 of
+# the GitHub API (although it is still the default at the time of writing
+# (2020-10)).
+#
+declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
+
+
+# Per-page item count to fetch or otherwise expect in a "paged collection".
+#
+# CAREFUL: The paging of data from the GitHub API is controlled through the
+#          query params of the URL. The query params are one piece of
+#          information that gets factored into the hashing algorithm that
+#          controls where objects live in the cache. Therefore, if you change
+#          this perl-page size setting most or all of the objects already in
+#          the cache will not be found.
+#
+# During development, it might be convenient to adjust this value for various
+# purposes. The default setting of 100 is the generic maximum per-page item
+# count permitted by the GitHub API:
+#
+#     https://developer.github.com/v3/#pagination
+#
+# It is possible that specific resources would have a different value. If we
+# add support for them, we may need to augment this.
+#
+# Using a single, fixed page size value yields certain useful properties. For
+# example, unless you monkey around with this number (or manually over-futz
+# with your cache), there will only be a single 'HEAD-meta{,.zst}' file
+# beneath the logical API path. This means you can use normal Unix command
+# line tools to obtain information about the objects in the cache:
+#
+#     * How many "paged collections" do I have cached?
+#
+#           $ find ~/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/ -type f -name 'HEAD-meta*' | wc -l
+#           1
+#
+#       Explanation: Each "paged collection" is represented only by the HTTP
+#                    HEAD responses for the "page 1, per_page 100" request,
+#                    and is stored in a file named 'HEAD-meta' (or, more
+#                    likely, 'HEAD-meta.zst'). Objects that do not represent a
+#                    paged collection do not have a file with that
+#                    name. Combined with the fact that the paths immediately
+#                    beneath '.../gh-api-v3/' are flattened representations of
+#                    all API paths, you can see that counting just those files
+#                    yields the number of collections.
+#
+#     * What is is?
+#
+#           $ find ~/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/ -type f -name 'HEAD-meta*'
+#           /path/to/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/user--repos/af/5aebf8765867b59e7b689b251e0e779ccea8e89af5cef5c98bfdaa43cc196f/HEAD-meta.zs
+#
+#       "Ah, I see, it's '/user/repos'."
+#
+#     * How many pages are in that cached collection?
+#
+#       $ sed -n -e 's/^Link:.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]][^"]\{1,\}"last".*/\1/p' < <(zstd -dqcf ~/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/user--repos/af/5aebf8765867b59e7b689b251e0e779ccea8e89af5cef5c98bfdaa43cc196f/HEAD-meta.zst)
+#       18
+#
+#       Explanation: The GitHub v3 API communicates per-API-path paging
+#                    information in the HTTP 'Link:' header, which contains at
+#                    least two URLs, "first" and "last", of which "last"
+#                    contains the number of last "page" of results.
+#
+#                    The 'sed' regex to pluck out the last page number looks a
+#                    little hairy at first glance, but the key to remembering
+#                    it is a string of "not double-quote" followed by the
+#                    string literal '"last"' to constrain the match to the
+#                    correct URL in the header.
+#
+#                    Of course, the above does not guarantee that all 18 pages
+#                    of the resource actually /have/ been cached (the user
+#                    could have hit CTRL-C to interrupt the '--update'
+#                    operation that retrieved the header, for instance), but
+#                    for quick checks under normal operating use scenarios it
+#                    is good enough. You would know if you've futzed with your
+#                    cache, of have otherwise done something to render the
+#                    above info incomplete.
+#
+declare -r gl_const_per_page_size='100'
+# declare -r gl_const_per_page_size='2'
+
+
+declare -r RE_BLANK='^[[:space:]]*$'
+declare -r RE_EMPTY='^$'
+
+declare -r RE_STARTS_WITH_SLASH='^[/]'
+
+# The following regex and ASCII art doc taken or adapted from this
+# stackoverflow.com answer by Patryk Obara:
+#
+#     https://stackoverflow.com/a/45977232
+#
+# The below code comment is from the original snippet:
+#
+# "Following regex is based on https://tools.ietf.org/html/rfc3986#appendix-B with
+# additional sub-expressions to split authority into userinfo, host and port"
+#
+declare -r RE_URI='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
+#                   ↑↑            ↑  ↑↑↑            ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
+#                   |2 scheme     |  ||6 userinfo   7 host    | 9 port       | 11 rpath |  13 query | 15 fragment
+#                   1 scheme:     |  |5 userinfo@             8 :…           10 path    12 ?…       14 #…
+#                                 |  4 authority
+#                                 3 //…
+#
+# Variation of the above that only matches GitHub 'https' URIs:
+declare -r RE_GH_URI='^((https):)?(//((([^:/?#]+)@)?(api[.]github[.]com)(:(443))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
+#                      ↑↑         ↑  ↑↑↑            ↑                   ↑ ↑         ↑ ↑        ↑  ↑        ↑ ↑
+#                      |2 scheme  |  ||6 userinfo   7 host              | 9 port    | 11 rpath |  13 query | 15 fragment
+#                      1 scheme:  |  |5 userinfo@                       8 :…        10 path    12 ?…       14 #…
+#                                 |  4 authority
+#                                 3 //…
+
+# If the value being compared does not end at the ".com" (or ".com:443"), then
+# we ensure the next char is a slash.
+declare -r RE_STARTS_WITH_GITHUB_V3_API_URL_BASE='^'"${gl_const_github_api_base_url}"'(:443)?([/]|$)'
+
+RE_ALL_DIGITS='^[[:digit:]]+$'
+
+
+# Only one "command mode" can be in-effect during any invocation.
+HAVE_COMMAND_MODE=false
+COMMAND_MODE_NAME='<UNSET>'  # set by mode-specific enabling function
+
+DO_UPDATE=false          # set via '--update'
+# command mode 'clear' comes in two flavors: "some" and "all"
+DO_CLEAR=false
+WANT_CLEAR_SOME=false    # set via '--clear', plus one or more URLs/paths
+WANT_CLEAR_ALL=false     # set via '--clear'
+
+DO_GET_ONE=false         # set via '--get'
+DO_GET_CACHED_ONE=false  # set via '--get-cached'
+
+# Various places in the code will toggle this on or off to control whether
+# objects will be fetched "through the cache" (meaning the cache will be
+# updated, if needed) or strictly "from the existing cache" (meaning only
+# objects that are already in the cache can be obtained).
+#
+FETCH_ONLY_FROM_CACHE=false
+
+# When validating and parsing a GitHub URL, the code by default anticipates
+# the need to create files in the object-specific cache directory, so creates
+# the necessary directory structure with the correct permissions. There are
+# times, however, when we want to disable that behavior, such as when the user
+# asked us to remove an object that was not actually in the cache; with the
+# default behavior the directories for the object would be created only to
+# then be immediately removed. This knob exists to allow that kind of thing to
+# be avoided.
+#
+AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS=false
+
+
+# Each user-provided URL or URI path value will be added to this list.
+declare -a INPUT_URLS_OR_PATHS=()
+declare -a INPUT_URLS_OR_PATHS_NORMALIZED=()
+
+
+# We will read/write the cache files from a location beneath the user's home
+# directory, so we'll bomb out if $HOME is not set to a non-empty value.
+#
+# FIXME: Allow the cache base directory to be specified on the command line,
+#        overriding this. Also, validate this better (confirm it is a
+#        directory, and that we can write to it), and maybe fall back on
+#        something like:
+#
+#            $ getent passwd $(id -u) | awk -F: '{ print $6 }'
+#            /home/someuser
+#
+if test -z "${HOME}"; then
+    printf "${PROG} (error): HOME environment variable is not set; bailing out\n" 1>&2
+    exit 1
+fi
+
+
+# By default we'll use the external programs found at configure-time (values
+# are filtered-in here at build time). But we allow the user to override any
+# particular tool by setting an environment variable named after the tool
+# (with hyphen chars changed to underscores).
+
+CP_PROG="${CP:-@CP_PROG@}"
+MV_PROG="${MV:-@MV_PROG@}"
+RM_PROG="${RM:-@RM@}"
+TR_PROG="${TR:-@TR_PROG@}"
+
+AWK_PROG="${AWK:-@AWK_PROG@}"
+CAT_PROG="${CAT:-@CAT@}"
+SED_PROG="${SED:-@SED@}"
+
+CURL_PROG="${CURL:-@CURL_PROG@}"
+FIND_PROG="${FIND:-@FIND@}"
+GREP_PROG="${GREP:-@GREP@}"
+ZSTD_PROG="${ZSTD:-@ZSTD_PROG@}"
+
+CHMOD_PROG="${CHMOD:-@CHMOD_PROG@}"
+MKDIR_PROG="${MKDIR:-@MKDIR_PROG@}"
+RMDIR_PROG="${RMDIR:-@RMDIR@}"
+XARGS_PROG="${XARGS:-@XARGS_PROG@}"
+
+MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
+
+DIRNAME_PROG="${DIRNAME:-@DIRNAME_PROG@}"
+
+BASENAME_PROG="${BASENAME:-@BASENAME_PROG@}"
+READLINK_PROG="${READLINK:-@READLINK_PROG@}"
+
+SHA256SUM_PROG="${SHA256SUM:-@SHA256SUM_PROG@}"
+
+declare -a NEEDED_EXTERNAL_PROGS=(
+    "${CP_PROG}"
+    "${MV_PROG}"
+    "${RM_PROG}"
+
+    "${AWK_PROG}"
+    "${CAT_PROG}"
+    "${SED_PROG}"
+
+    "${CURL_PROG}"
+    "${ZSTD_PROG}"
+
+    "${CHMOD_PROG}"
+    "${MKDIR_PROG}"
+    "${RMDIR_PROG}"
+
+    "${MKTEMP_PROG}"
+
+    "${DIRNAME_PROG}"
+
+    "${BASENAME_PROG}"
+    "${READLINK_PROG}"
+
+    "${SHA256SUM_PROG}"
+)
+
+for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
+
+    t_path=$(builtin type -p "${ext_tool}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to locate \"%s\" on PATH; bailing out\n" "${ext_tool}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
+
+# For needed internal progs, we will just expect them to be installed "next
+# to" the current program.
+#
+# Note that the mechanism used here needs to work both "in-tree" and when
+# installed. When working in-tree, the other in-tree versions of our internal
+# tools must be found first (even if the tools are installed on the system).
+#
+t_script_dir=${0%/*}
+t_rp=$("${READLINK_PROG}" -f "${t_script_dir}") || exit 1
+t_p1=$("${BASENAME_PROG}" "${t_rp}")            || exit 1
+t_p2=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")") || exit 1
+t_p3=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")") || exit 1
+t_p4=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")")") || exit 1
+
+# The non-bash-based tools (e.g., those that are Perl- or Rust-based) may or
+# may not be in the same directory, depending on whether or not we are running
+# in-tree.
+#
+# Variable naming note: the 'parse-netrc' program currently (2020-10) lives in
+# the 'ads-github-tools' tree, but is being considered for extraction into a
+# small stand-alone project. Once polished, it likely has utility beyond just
+# the internal needs of the 'ads-github-tools'. To reflect that likely future
+# change, the program does not have the 'ads-github-' prefix, and our
+# PARSE_NETRC_PROG variable defined just below does not have the 'AGH_'
+# prefix.
+#
+# FIXME: This is ugly; is there a better way?
+if test "${t_p1}" = 'bin'  \
+&& test "${t_p2}" = 'bash' \
+&& test "${t_p3}" = 'main' \
+&& test "${t_p4}" = 'src'; then
+    # looks like we are running in-tree
+    AGH_NORMALIZE_URL_PROG="${t_script_dir}/../../perl/bin/ads-github-normalize-url"
+    PARSE_NETRC_PROG="${t_script_dir}/../../rust/bin/parse-netrc/target/release/parse-netrc"
+else
+    AGH_NORMALIZE_URL_PROG="${t_script_dir}/ads-github-normalize-url"
+    PARSE_NETRC_PROG="${t_script_dir}/parse-netrc"
+fi
+
+declare -a NEEDED_INTERNAL_PROGS=(
+    "${AGH_NORMALIZE_URL_PROG}"
+    "${PARSE_NETRC_PROG}"
+)
+for int_tool in "${NEEDED_INTERNAL_PROGS[@]}"; do
+    if test -x "${int_tool}"; then :; else
+        printf "${PROG} (error): was unable to locate internal tool: \"%s\"; bailing out\n" "${int_tool}" 1>&2
+        exit 1
+    fi
+    if $DEBUGGING; then
+        printf "${PROG} (debug): found internal tool: %s\n" "${int_tool}" 1>&2
+    fi
+done
+
+
+declare -a F_CLEANUP_HOOK_NAMES=()
+
+function f_add_cleanup_hook_name () {
+    F_CLEANUP_HOOK_NAMES+=( $1 );
+}
+
+
+function f_cleanup () {
+
+    if test ${#F_CLEANUP_HOOK_NAMES[@]} -eq 0; then
+        # No cleanup hooks, so nothing to do
+        return
+    fi
+
+    local cleanup_hook
+    local idx
+
+    let idx=${#F_CLEANUP_HOOK_NAMES[@]}-1
+
+    # Note that we're running the cleanup hooks in opposite order from which
+    # they were installed.
+    #
+    while test $idx -ge 0; do
+
+        cleanup_hook=${F_CLEANUP_HOOK_NAMES[$idx]}
+
+        if $DEBUGGING; then
+            printf "${PROG} (debug): running cleanup hook: [%s]\n" "${cleanup_hook}" 1>&2
+        fi
+
+        test -n "$cleanup_hook" && eval "$cleanup_hook"
+
+        let idx=$idx-1
+    done
+}
+
+function f_cleanup_and_die () {
+    f_cleanup
+    exit 1
+}
+
+trap 'printf "$PROG (warn): HUP signal caught; bailing out\n"  1>&2; f_cleanup_and_die' HUP
+trap 'printf "$PROG (warn): INT signal caught; bailing out\n"  1>&2; f_cleanup_and_die' INT
+trap 'printf "$PROG (warn): QUIT signal caught; bailing out\n" 1>&2; f_cleanup_and_die' QUIT
+trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_and_die' TERM
+
+trap 'f_cleanup' EXIT
+
+
+# It is possible that the local Unix user has more than one GitHub account
+# (e.g., separate personal and work accounts). We will keep separate caches
+# for each GitHub user (more correctly, we create a unique per-GitHub-user
+# cache for each GitHub user account used via this program -- we do not
+# proactively go searching for multiple GitHub user accounts).
+#
+# When communicating with the GitHub API via curl(1), curl (like all programs
+# that reference the ~/.netrc file) will use the first netrc entry that
+# matches the target hostname. We emulate that lookup here to determine the
+# GitHub username in-effect at the moment.
+#
+# For users that have only a single GitHub user account, the value used here
+# will always be the same, and the cache directory hierarchy will be one level
+# deeper than strictly necessary for that particular use case (no big deal).
+#
+GITHUB_USERNAME=$("${PARSE_NETRC_PROG}" "${gl_const_github_api_hostname}")
+t_estat=$?
+# The 'parse-netrc' program emits a "grep-like" exit status:
+#     0 - matching netrc record was found
+#     1 - no matching netrc record was found
+#     2 - some other processing error
+if test ${t_estat} -eq 0; then
+
+    if test -z "${GITHUB_USERNAME}"; then
+        # Should never happen...
+        printf "${PROG} (error): obtained empty string value for user's GitHub username from netrc; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${GITHUB_USERNAME}" =~ ${RE_BLANK} ]]; then
+        # Should never happen...
+        printf "${PROG} (error): obtained blank string value for user's GitHub username from netrc; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    declare -r GITHUB_USERNAME
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): GitHub login (username) from netrc: \"%s\"\n" \
+               "${GITHUB_USERNAME}" 1>&2
+    fi
+
+elif test ${t_estat} -eq 1; then
+    printf "${PROG} (error): no matching netrc record was found for host: \"%s\"; bailing out\n" \
+           "${gl_const_github_api_hostname}" 1>&2
+    exit 1
+else
+    # Hopefully some other more informative error message was emitted by 'parse-netrc'
+    printf "${PROG} (error): was unable to obtain user's GitHub username from netrc; bailing out\n" 1>&2
+    exit 1
+fi
+
+
+declare -r AGH_DOT_D_DIR="${HOME}/.ads-github-tools.d"
+if test -d "${AGH_DOT_D_DIR}"; then :; else
+    "${MKDIR_PROG}" --mode '0700' "${AGH_DOT_D_DIR}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+               "${AGH_DOT_D_DIR}" 1>&2
+        exit 1
+    fi
+fi
+
+declare -r AGH_CACHE_BASE_DIR="${AGH_DOT_D_DIR}/cache"
+if test -d "${AGH_CACHE_BASE_DIR}"; then :; else
+    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_BASE_DIR}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+               "${AGH_CACHE_BASE_DIR}" 1>&2
+        exit 1
+    fi
+fi
+
+declare -r AGH_CACHE_GHUSER_DIR="${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
+if test -d "${AGH_CACHE_GHUSER_DIR}"; then :; else
+    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GHUSER_DIR}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+               "${AGH_CACHE_GHUSER_DIR}" 1>&2
+        exit 1
+    fi
+fi
+
+# Cache file layout/format/whatever: v1
+declare -r AGH_CACHE_V1_DIR="${AGH_CACHE_GHUSER_DIR}/c-v1"
+if test -d "${AGH_CACHE_V1_DIR}"; then :; else
+    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_V1_DIR}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+               "${AGH_CACHE_V1_DIR}" 1>&2
+        exit 1
+    fi
+fi
+
+# Cache directory parent for objects from the GitHub v3 API
+#
+# This level gets us to this:
+#
+#     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/
+#
+# The full path to an object will have the form:
+#
+#     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/${API_PATH}.../${HASH_2}/${HASH_REST}/
+#
+# The GH_USERNAME in the above paths is the value as obtained from
+# parse-netrc(1) when provided with the GitHub API hostname.
+#
+# An object in the cache is represented by two files: the HTTP response
+# headers and the HTTP response body:
+#
+#     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/${API_PATH}.../${HASH_2}/${HASH_REST}/rsp-body.json
+#     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/${API_PATH}.../${HASH_2}/${HASH_REST}/rsp-headers
+#
+# Some objects in the cache a special in the sense that their API path
+# represents a "paged collection" of objects. Instead of the above two files,
+# paged collection objects are represented as a single file name in the form:
+#
+#     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/${API_PATH}.../${HASH_2}/${HASH_REST}/HEAD-meta
+#
+# As the name suggests, the 'HEAD-meta' file contains the HTTP HEAD response
+# for the resource, which is important because it contains the 'Link:' header
+# that GitHub uses to convey paging information. See:
+#
+#     https://developer.github.com/v3/#pagination
+#
+# Example:
+#
+# (Note that '/usr/repos' is two directory components, which together comprise
+# the '${API_PATH}' portion). Also, '01' is '${HASH_2}', and 'ba47...' is
+# '${HASH_REST}':
+#
+#     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json
+#     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers
+#
+declare -r AGH_CACHE_GH_V3_DIR="${AGH_CACHE_V1_DIR}/gh-api-v3"
+if test -d "${AGH_CACHE_GH_V3_DIR}"; then :; else
+    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GH_V3_DIR}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+               "${AGH_CACHE_GH_V3_DIR}" 1>&2
+        exit 1
+    fi
+fi
+
+# Supported path template path string mapped to a regex that can detect that
+# string.
+declare -A AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX=()
+
+# Supported path template path string mapped to a boolean flag indicating
+# whether or not the path represents a "paged collection". All path templates
+# representing paged collections should also be included in our
+# ...UPDATE_TPATHS list below, but the reverse is not necessarily true.
+declare -A AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG=()
+
+# An ordered list of the template paths that are "supported" (or "allowed"),
+# in the sense that we should be able to honor a caller's request that we
+# obtain a URL that matches. We do not support arbitrary paths because the use
+# cases we support are narrowly targetted; this is not intended to be a
+# general purpose cache.
+#
+# This list allows us to reject caller requests for unsupported GitHub paths
+# and for flat-out bogus paths.
+#
+# These are listed in the order in which they should be tried. The order is
+# important because some legit template paths could conceivably match more
+# than one real-value, so we try them in the order of most precise (or most
+# data required) to least.
+#
+declare -a AGH_CACHE_GH_V3_SUPPORTED_TPATHS=()
+
+# The set of "update-able template paths" for which our "update all" operation
+# will attempt to operate on.
+#
+# An "update all" operation will apply to those paths listed here (and only
+# those paths); the benefit is that the user does not need to request the
+# URLs/paths explicitly. Instead, the "update all" request means "update all
+# the normal stuff".
+#
+# This list DOES NOT play any role in an "update some" operation. An "update
+# some" operation requires that the user list the URLs/paths explicitly (some
+# of which may happen to be the same as those in this list -- that's
+# Officially Okay, and just another (more laborious) way of achieving the same
+# end for those items).
+#
+# In principle, this list should be able to include any API path that does not
+# require a parameter, or for which the only paremeter needed is the name of
+# the authenticated user (which we can obtain via the 'ads-github-whoami'
+# program).
+#
+declare -a AGH_CACHE_GH_V3_UPDATE_TPATHS=()
+
+# We will populate this with "normalized" versions of all the "update tpaths",
+# if we need to. We avoid doing it by default because it can be a little slow
+# on code paths that do not require the values.
+#
+declare -a AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED=()
+
+
+# Read a capital 'P' in the following as "parameter".
+#t_tmpl_path_user_Pusername_repos='/user/:username/repos'
+t_tmpl_path_user_repos='/user/repos'
+
+
+# Note that our local filesystem paths for our cache objects reflect the HTTP
+# ReST API URI paths. Where those URI paths contain a parameter (':foo'), our
+# local filesystem path will reflect the actual parameter value used.
+#
+#AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX["${t_tmpl_path_user_Pusername_repos}"]='^/user/([^/?&]){1,}/repos([/?]|$)'
+AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX["${t_tmpl_path_user_repos}"]='^/user/repos([/?]|$)'
+
+
+#AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG["${t_tmpl_path_user_Pusername_repos}"]='true'
+AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG["${t_tmpl_path_user_repos}"]='true'
+
+
+# CAREFUL: Order matters (see note above)
+#AGH_CACHE_GH_V3_SUPPORTED_TPATHS+=( "${t_tmpl_path_user_Pusername_repos}" )
+AGH_CACHE_GH_V3_SUPPORTED_TPATHS+=( "${t_tmpl_path_user_repos}" )
+
+
+#AGH_CACHE_GH_V3_UPDATE_TPATHS+=( "${t_tmpl_path_user_Pusername_repos}" )
+AGH_CACHE_GH_V3_UPDATE_TPATHS+=( "${t_tmpl_path_user_repos}" )
+
+
+declare -r AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX
+declare -r AGH_CACHE_GH_V3_SUPPORTED_TPATHS
+declare -r AGH_CACHE_GH_V3_UPDATE_TPATHS
+
+# Sanity check our assoc. array
+for t_sup_tpath in "${AGH_CACHE_GH_V3_SUPPORTED_TPATHS[@]}"; do
+    if test "${AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX["${t_sup_tpath}"]:+exists}"; then :; else
+        printf "${PROG} (BUG): [line $LINENO]: key \"%s\" not present in AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX; bailing out\n" \
+               "${t_sup_tpath}" 1>&2
+        exit 1
+    fi
+done
+
+
+f_print_help () {
+
+    cat <<EOF
+usage: $PROG { -h | --help }
+  or:  $PROG { -V | --version }
+  or:  $PROG [OPTION...] --update [--] [URL_OR_PATH...]
+  or:  $PROG [OPTION...] { --get | --get-cached } [--] URL_OR_PATH
+  or:  $PROG [OPTION...] --clear  [--] [URL_OR_PATH...]
+  or:  $PROG [OPTION...] --clear-all
+
+Manage a user-specific cache of GitHub v3 API responses.
+
+Mandatory arguments to long options are mandatory for short options too.
+
+  -h, --help        Print this help message on stdout
+  -V, --version     Print the version of the program on stdout
+      --clear       Remove the specified URLs or paths from the cache
+      --clear-all   Remove all cached entries, for all cached URLs or paths
+      --get         Obtain content of specfied URL or path through the cache
+      --get-cached  Like '--get', but error out if item is not already present in cache.
+                      Avoids updating the cache to obtain the item. Think "offline".
+      --update      Update the cache entry for the specified URLs or paths, or all
+  -v, --verbose     Print program progress messages on stderr. Specify multiple
+                      times to increase verbosity: info, debug, and tracing (set -x)
+      --            Signals the end of options and disables further options processing.
+                      Any remaining argument(s) will be interpretted as a repo name
+
+Report bugs to $MAINTAINER.
+EOF
+}
+
+f_print_version () {
+    cat <<EOF
+${PROG} ${gl_const_release}
+
+Copyright (C) ${COPYRIGHT_DATES} Alan D. Salewski <ads@salewski.email>
+License GPLv2+: GNU GPL version 2 or later <http://gnu.org/licenses/gpl.html>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Written by Alan D. Salewski.
+EOF
+}
+
+
+# Common global options for use in (nearly) every 'curl' invocation. Specific
+# invocations will require additional options, but such usages should not
+# modify the MY_CURL_DEFAULT_OPTS array.
+#
+# The MY_CURL_OPTS array is provided to be reused per invocation:
+#
+#     MY_CURL_OPTS=()  # (re)set
+#     MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+#     MY_CURL_OPTS+=( YOUR_STUFF )
+#
+# HTTP response status code gets written to stderr.
+#
+# The HTTP response payload (if any) is written to the file path named in
+# $MY_TMP_CURL_OUT_FPATH.
+#
+# CAREFUL: This assumes localized, sequential usage patterns of curl(1) and
+#          handling of the response body contents. If you need long-term
+#          access to the HTTP response body contents, copy it from
+#          $MY_TMP_CURL_OUT_FPATH to a different file location so you want
+#          have to worry about the data you need getting overwritten by other
+#          sections of the code making API requests with curl(1) as configured
+#          here.
+#
+declare -a MY_CURL_DEFAULT_OPTS=()
+declare -a MY_CURL_OPTS=()
+
+f_initialize_curl_default_opts () {
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # sanity check
+    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # This disables output of curl's progress meter /and/ output of error messages...
+    MY_CURL_DEFAULT_OPTS+=( '--silent' )
+    # ...but this re-enables output of the error messages.
+    MY_CURL_DEFAULT_OPTS+=( '--show-error' )
+
+
+    # Force use of TLS 1.2 (or later). Writing in 2020, all previous versions
+    # are known to be broken and susceptible to known attacks. Note that the
+    # '--tlsv1.2' option was added in curl 7.34.0
+    #
+    # This is absolutely essential since we're using HTTP Basic Auth (see below).
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--tlsv1.2' )
+
+    # Allow ONLY https, for both the initial request and for redirects
+    MY_CURL_DEFAULT_OPTS+=( '--proto')
+    MY_CURL_DEFAULT_OPTS+=( 'https')
+    MY_CURL_DEFAULT_OPTS+=( '--proto-redir')
+    MY_CURL_DEFAULT_OPTS+=( 'https')
+
+
+    # Tell curl to use HTTP Basic Authentication. This is the curl default, but
+    # we're explicit about what we expect (and want to avoid any surprises from
+    # weirdo ~/.curlrc files).
+    #
+    # See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--basic' )
+
+
+    # User's authentication credentials will be obtained from the user's ~/.netrc
+    # file. See curl(1) and netrc(5)
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--netrc'  )
+
+    MY_CURL_DEFAULT_OPTS+=( '--user-agent' )
+    MY_CURL_DEFAULT_OPTS+=( "$PROG"        )
+
+
+    # Even when we're just making HEAD requests, have curl fail
+    # MY_CURL_DEFAULT_OPTS+=( '--fail' )
+
+
+    # Tell the GitHub service that we're trying to speak v3 of the API. Writing in
+    # 2020, v3 is the default, but there is also a 'GraphQL API v4' version which
+    # we do not use here. Some newer version may become the default in the future,
+    # so we are explicit about which version we are using.
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--header' )
+    MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
+
+    # We always write the (JSON) output to a file in our temporary directory...
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--output' )
+    MY_CURL_DEFAULT_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
+
+    # ...and write the HTTP response status to stdout. This allows for robust
+    # error handling. Also, we cannot really know how to interpret the output
+    # returned from the remote server until we have examined (at least) the HTTP
+    # response code.
+    #
+    MY_CURL_DEFAULT_OPTS+=( '--write-out'  )
+    MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
+
+    # Before we actually use the output file, lets create an empty version of
+    # it with restricted perms
+    > "${MY_TMP_CURL_OUT_FPATH}"  # touch
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to create file: %s; bailing out\n" "${MY_TMP_CURL_OUT_FPATH}" 1>&2
+        exit 1
+    fi
+    "${CHMOD_PROG}" 0600 "${MY_TMP_CURL_OUT_FPATH}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "${MY_TMP_CURL_OUT_FPATH}" 1>&2
+        exit 1
+    fi
+
+    return 0
+}
+
+
+# @param VALUE_TO_DIGEST
+#
+# @param OUT_VAR_NAME - (required) The name of the global variable to which
+#                       the SHA-256 sum value should be written.
+#
+#                       Callers who do not otherwise have a more appropriate
+#                       global variable to use can use the $T_SHA256SUM_OUT
+#                       scratch variable provided for this purpose.
+#
+T_SHA256SUM_OUT=
+#
+f_sha256sum_for () {
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_val_in=$1
+    local __t_val_out
+
+    local __t_var_name_out=$2
+    if [[ "${__t_var_name_out}" =~ $RE_EMPTY ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() value provided for OUT_VAR_NAME param may not be empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${__t_var_name_out}" =~ $RE_BLANK ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}() value provided for OUT_VAR_NAME param may not be blank; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    __t_val_out=$("${SHA256SUM_PROG}" <<<"${__t_val_in}" | "${AWK_PROG}" '{ print $1 }')
+    if test $? -ne 0; then
+        # FIXME: We do not show the value on which we failed here because it
+        #        could be large. Re-review this later to see if that concern
+        #        still holds. Not showing the value is likely to make
+        #        debugging more difficult.
+        printf "${PROG} (error): was unable to calculate SHA-256 digest for value; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${__t_val_out}"; then
+        # Should be a can't happen scenario...
+        printf "${PROG} (error): sha256sum succeeded, but computed sum is empty? Bailing out\n" 1>&2
+        exit 1
+    fi
+
+    printf -v "${__t_var_name_out}" '%s' "${__t_val_out}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to set global variable \"%s\" to \"%s\"; bailing out\n" \
+               "${__t_var_name_out}" \
+               "${__t_val_out}" 1>&2
+        exit 1
+    fi
+}
+
+# @param CMD_MODE_NAME - (required) The name (or "label") for the mode, as it
+#                        should appear in user-visible error messages.
+#
+# @param CMD_FLAG_VAR_NAME - (required) The name of the global flag variable
+#                            that should be set to 'true' if we are able to
+#                            enable the mode.
+#
+# @param CLI_OPT_NAME - (required) The name of the command line option that
+#                       was provided.
+#
+# @return Always returns zero, if it returns at all. Exits with an error
+#         message if unable to set the specified mode.
+#
+__f_set_cmd_mode_foo_or_die () {
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=3
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __cmd_mode_name=$1
+    local __cmd_flag_var_name=$2
+    local __cli_opt_name=$3
+    if test -z "${__cmd_mode_name}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with empty value for required CMD_MODE_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${__cmd_flag_var_name}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with empty value for required CMD_FLAG_VAR_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -z "${__cli_opt_name}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with empty value for required CLI_OPT_NAME param; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # assert that the command mode has not yet been set
+    if $HAVE_COMMAND_MODE; then
+        printf "${PROG} (error): option \"%s\" provided, but command mode already set to \"%s\"; bailing out\n" \
+               "${__cli_opt_name}" \
+               "${COMMAND_MODE_NAME}" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): command mode: \"%s\"\n" "${__cmd_mode_name}" 1>&2
+    fi
+
+    printf -v "${__cmd_flag_var_name}" 'true'
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to set global variable \"%s\" to \"%s\"; bailing out\n" \
+               "${__cmd_flag_var_name}" \
+               'true' 1>&2
+        exit 1
+    fi
+
+    COMMAND_MODE_NAME=${__cmd_mode_name}
+    HAVE_COMMAND_MODE=true
+
+    return 0
+}
+
+# @param CLI_OPT_NAME - (required) The name of the command line option that
+#                       was provided.
+#
+f_set_cmd_mode_update_or_die () { __f_set_cmd_mode_foo_or_die 'update' 'DO_UPDATE' "$@"; }
+f_set_cmd_mode_clear_or_die ()  { __f_set_cmd_mode_foo_or_die 'clear'  'DO_CLEAR'  "$@"; }
+f_set_cmd_mode_get_one_or_die ()        { __f_set_cmd_mode_foo_or_die 'get one'        'DO_GET_ONE'        "$@"; }
+f_set_cmd_mode_get_cached_one_or_die () { __f_set_cmd_mode_foo_or_die 'get cached one' 'DO_GET_CACHED_ONE' "$@"; }
+
+
+__is_agh_cache_gh_v3_update_tpaths_normalized_populated=false
+f_populate_agh_cache_gh_v3_update_tpaths_normalized () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    if ${__is_agh_cache_gh_v3_update_tpaths_normalized_populated}; then
+        return 0
+    fi
+
+    local __t_one_update_tpath
+
+    local __t_url_full
+    local __t_url_full_normalized
+
+    # Populate our AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED list
+    #
+    # Our *_GH_V3_UPDATE_TPATHS list contains generic values that represent
+    # API paths for which cache objects should be manipulated for '--update'
+    # and '--clear-all' operations (possibly others, too, by the time you read
+    # this). We will make those path values look like fully normalized GitHub
+    # URLs, since that is the type of input expected by our primary
+    # f_perform_foo() functions.
+    # 
+    for __t_one_update_tpath in "${AGH_CACHE_GH_V3_UPDATE_TPATHS[@]}"; do
+
+        if [[ "${__t_one_update_tpath}" =~ $RE_EMPTY ]]; then
+            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: values set for \"update tpaths\" may not be empty; bailing out\n" 1>&2
+            exit 1
+        fi
+        if [[ "${__t_one_update_tpath}" =~ $RE_BLANK ]]; then
+            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: values set for \"update tpaths\" may not be blank; bailing out\n" 1>&2
+            exit 1
+        fi
+
+        __t_url_full=${__t_one_update_tpath}
+        if [[ "${__t_one_update_tpath}" =~ $RE_STARTS_WITH_SLASH ]]; then
+            __t_url_full="${gl_const_github_api_base_url}${__t_one_update_tpath}"
+        else
+            # Should never fall through here for our internally configured
+            # "update tpath" values.
+            #
+            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: values set for \"update tpaths\" must start with a slash; got: \"%s\"; bailing out\n" \
+                   "${__t_one_update_tpath}" 1>&2
+            exit 1
+        fi
+
+        # CAREFUL: ads-github-normalize-url will take any string we throw at
+        #          it and try to treat it as a URL to be "normalized", but
+        #          that does not guarantee that the thing we get back is a
+        #          legit URL.
+        #
+        __t_url_full_normalized=$("${AGH_NORMALIZE_URL_PROG}" "${__t_url_full}")
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to \"normalize\" URL: \"%s\"; bailing out" \
+                   "${__t_url_full}" 1>&2
+            exit 1
+        fi
+
+        if [[ "${__t_url_full_normalized}" =~ $RE_URI ]]; then :; else
+            printf "${PROG} (error): was unable to form a legit URI out of \"update tpath\" value \"%s\"; bailing out\n" \
+                   "${__t_one_update_tpath}" 1>&2
+            exit 1
+        fi
+
+        if [[ "${__t_url_full_normalized}" =~ $RE_STARTS_WITH_GITHUB_V3_API_URL_BASE ]]; then :; else
+
+            # Uh oh, we somehow mis-munged our API path when trying to turn it
+            # into a GitHub v3 API URL.
+            printf "${PROG} (BUG): [line $LINENO]: not a legit GitHub URL: provided: \"%s\"; munged: \"%s\"; bailing out\n" \
+                   "${__t_one_update_tpath}" \
+                   "${__t_url_full_normalized}" 1>&2
+            exit 1
+        fi
+
+        AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED+=("${__t_url_full_normalized}")
+    done
+
+    __is_agh_cache_gh_v3_update_tpaths_normalized_populated=true
+
+    return 0
+}
+
+
+# @param API_PATH - (required) The API path to check
+#
+# @param URL_QUERY - (required) The URL query string, if any, that accompanied
+#                    API_PATH. A non-empty query string will disqualify
+#                    API_PATH from being interpretted as representing a paged
+#                    collection. Callers should still call this function,
+#                    though, and not perform that policy rule check themselves
+#                    -- such code could break in the future whne we change the
+#                    rules.
+#
+f_is_api_path_a_paged_collection () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_api_path=$1
+    local __t_url_query=$2
+
+    local __t_val
+
+
+    # We interpret a non-empty query string as a qualifying the path for a
+    # specific instance (e.g., a particular page, or whatever), NOT as
+    # referring to the collection as a whole. Therefore, the query string must
+    # be empty in order for us to consider the path a paged collection.
+
+    if test -n "${__t_url_query}"; then
+        return 1  # false; path DOES NOT represent a paged collection
+    fi
+
+
+    # This is a "bug" because the caller is supposed to pass us known-good,
+    # already verified information.
+    if test "${AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG["${__t_api_path}"]:+exists}"; then :; else
+        printf "${PROG} (BUG): [line $LINENO]: key \"%s\" not present in AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG; bailing out\n" \
+               "${__t_api_path}" 1>&2
+        exit 1
+    fi
+
+    __t_val=${AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG["${__t_api_path}"]}
+
+    case ${__t_val} in
+        'true' )
+            : $PROG \(trace: $LINENO\): matched true, so represents a paged collection: ${__t_api_path}
+            return 0  # true
+            ;;
+        'false')
+            : $PROG \(trace: $LINENO\): matched false, so DOES NOT represent a paged collection: ${__t_api_path}
+            return 1  # false
+            ;;
+        *)
+            ;;  # fall through
+    esac
+
+    printf "${PROG} (BUG): [line $LINENO]: bogus value found for key \"%s\" in AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG; expected 'true' or 'false', but got: \"%s\"; bailing out\n" \
+           "${__t_api_path}" \
+           "${__t_val}" 1>&2
+    exit 1
+}
+
+
+# Validates that the provided value is a legit GitHub v3 API URL, and that it
+# references an API path that is "supported" by this program.
+#
+# The individual components of the parsed and validated URL are saved in the
+# user-specified output vars.
+#
+# If the provided INPUT_URL checks-out, then filesystem paths are constructed
+# for the cache objects that represent the value. The API path of a valid
+# GitHub v3 API URL can represent either a specific object in the cache (e.g.,
+# '/user/repos?page=4&per_page=100') or an entire collection of "paged
+# objects" (e.g., '/user/repos'). The paths constructed for the output
+# variables reflect whether the API path reflects an entire collection or a
+# specific object:
+#
+#     * If the API path represents a collection, then the two collection
+#       metadata variables (*_COLMETA and *_COLMETA_ZST) are set with paths to
+#       where the 'HEAD-meta' files (for zst compressed and non-compressed
+#       variants). The *_HEADERS{,_ZST} and *_BOXY{,_ZST} variables will be
+#       empty.
+#
+#     * If the API path represents a specific object (rather than a collection
+#       of objects), then the *_HEADERS{,_ZST} and *_BODY{,_ZST} variables
+#       will be set and the *_COLMETA{_ZST} variables will be empty. Since
+#       each object is stored as two separate files (response headers in one
+#       file, response body in another), four such paths are constructued
+#       (compressed and uncompressed flavors of each file).
+#
+# [ Note that the above implies that the caller can determine whether or not
+#   the API path of the provided URL is a collection or not by checking one of
+#   the *_COLMETA{,_ZST} variables for non-zero length. That approach is
+#   Officially Legit. ]
+#
+# We also emit a "PQF" value for logging purposes; see below.
+#
+# Finally, we emit a few pieces of information about the API path portion of
+# the provided GitHub API URL: "verified", "resolved", and "fpath"
+# values. These are provided because some callers would otherwise need to
+# duplicate the work performed here:
+#
+#     * The "verified" value is in the domain of the caller. It is the API
+#       path as the the user might have specified it on the command line.
+#       Ex.:
+#           - '/user/repos'
+#           - '/user/:username/repos'
+#           - '/user/salewski/repos'
+#
+#     * The "resolved" value is in the domain of the GitHub API. It looks like
+#       the path portion of the URL as it would actually be used when making a
+#       GitHub API call.
+#       Ex.:
+#           - '/user/repos'
+#           - '/user/salewski/repos'
+#
+#     * The "partpath" (read as: "partial filesystem path" or "partial path")
+#       value is in the domain of this cache implementation. It represents one
+#       or more filesystem directory names that are used by this cache
+#       implementation for storing objects in the cache. In all cases, the
+#       caller can safely assume that this value is relative to
+#       ${AGH_CACHE_GH_V3_DIR}. Because colon chars are conventionally used
+#       for parameter names in REST documentation (as they are in the GitHub
+#       v3 API documentation, in particular), we support that notation on the
+#       command line. However, when actually constructing filesystem paths we
+#       want to avoid using colons in the name components, so parameter names
+#       get mapped to a different value: The entire parameter name is changed
+#       to uppercase, and the leading colon char is changed to the prefix
+#       '00__' (zero zero underscore underscore). All API paths that have more
+#       than one "directory" component get mapped to a single directory named
+#       by replacing the directory separators by '--'.
+#
+#       Ex.:
+#           - '/user--repos'
+#           - '/user--00__USERNAME--repos/user--salewski--repos'
+#
+# @param INPUT_URL - (required) Full GitHub URL that represents an API
+#                    resource that is "supported" by this program.
+#
+# @param OUT_VN_PQF - (required) Name of a global variable to which the "path,
+#                     query, and fragment" value can be written. This is
+#                     useful mainly for the purposes of logging and error
+#                     reporting. If in doubt, use 'T_PQF'.
+#
+# ────────────────────────────────────────────────────────────────────────────
+#
+# @param OUT_URL_SCHEME
+# @param OUT_URL_USERINFO
+# @param OUT_URL_HOST
+# @param OUT_URL_PORT
+# @param OUT_URL_PATH
+# @param OUT_URL_QUERY
+# @param OUT_URL_FRAGMENT
+#
+# ────────────────────────────────────────────────────────────────────────────
+#
+# @param OUT_VN_OBJ_API_PATH_VERIFIED - (required) The API path from the
+#                                       provided GitHub URL. This value has
+#                                       been "verified" in the sense that it
+#                                       has been confirmed to represent one of
+#                                       the API paths "supported" by this
+#                                       program. The value may still be
+#                                       parameterized (may have ':fooparam'
+#                                       tokens in it). Ex. '/user/repos' or
+#                                       '/user/:username/repos'.
+#
+# @param OUT_VN_OBJ_API_PATH_RESOLVED - (required) The resolved counterpart to
+#                                       the above *_VERIFIED value. The
+#                                       *_RESOLVED value will have any
+#                                       ':fooparam' tokens in resolved to an
+#                                       actual value (e.g., ':username' would
+#                                       be expanded to an actual GitHub
+#                                       username value). Ex. '/user/repos' or
+#                                       '/user/salewski/repos'.
+#
+# @param OUT_VN_OBJ_API_PATH_PARTPATH - (required) The "partpath" counterpart to
+#                                       the above *_VERIFIED and *_RESOLVED values.
+#
+# ────────────────────────────────────────────────────────────────────────────
+#
+# @param OUT_VN_OBJ_RSP_FPATH_COLMETA - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_COLMETA'.
+#
+# @param OUT_VN_OBJ_RSP_FPATH_COLMETA_ZST - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_COLMETA_ZST'.
+#
+# @param OUT_VN_OBJ_RSP_FPATH_HEADERS - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_HEADERS'.
+#
+# @param OUT_VN_OBJ_RSP_FPATH_HEADERS_ZST - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_HEADERS_ZST'.
+#
+# @param OUT_VN_OBJ_RSP_FPATH_BODY - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_BODY'.
+#
+# @param OUT_VN_OBJ_RSP_FPATH_BODY_ZST - (required) If in doubt, use
+#                                       'T_OBJ_RSP_FPATH_BODY_ZST'.
+#
+T_PQF=
+#
+T_OUT_URL_SCHEME=
+T_OUT_URL_USERINFO=
+T_OUT_URL_HOST=
+T_OUT_URL_PORT=
+T_OUT_URL_PATH=
+T_OUT_URL_QUERY=
+T_OUT_URL_FRAGMENT=
+#
+T_OBJ_API_PATH_VERIFIED=
+T_OBJ_API_PATH_RESOLVED=
+T_OBJ_API_PATH_PARTPATH=
+#
+T_OBJ_RSP_FPATH_COLMETA=
+T_OBJ_RSP_FPATH_COLMETA_ZST=
+#
+T_OBJ_RSP_FPATH_HEADERS=
+T_OBJ_RSP_FPATH_HEADERS_ZST=
+T_OBJ_RSP_FPATH_BODY=
+T_OBJ_RSP_FPATH_BODY_ZST=
+#
+# Q: Doesn't this function seem a little nutty to you?
+# A: Yes.
+__f_validate_and_parse_gh_url () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=18  # Oy vey...
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __one_uri=$1
+
+    local __out_vn_pqf=$2
+
+    local __out_url_scheme=$3
+    local __out_url_userinfo=$4
+    local __out_url_host=$5
+    local __out_url_port=$6
+    local __out_url_path=$7
+    local __out_url_query=$8
+    local __out_url_fragment=$9
+
+    local __out_vn_obj_api_path_verified=${10}
+    local __out_vn_obj_api_path_resolved=${11}
+    local __out_vn_obj_api_path_partpath=${12}
+
+    local __out_vn_obj_rsp_fpath_colmeta=${13}
+    local __out_vn_obj_rsp_fpath_colmeta_zst=${14}
+
+    local __out_vn_obj_rsp_fpath_headers=${15}
+    local __out_vn_obj_rsp_fpath_headers_zst=${16}
+    local __out_vn_obj_rsp_fpath_body=${17}
+    local __out_vn_obj_rsp_fpath_body_zst=${18}
+
+    if [[ "${__out_vn_obj_rsp_fpath_headers}" =~ RE_BLANK ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}(): required param OUT_VN_OBJ_RSP_FPATH_HEADERS may not be empty or blank; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${__out_vn_obj_rsp_fpath_headers_zst}" =~ RE_BLANK ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}(): required param OUT_VN_OBJ_RSP_FPATH_HEADERS_ZST may not be empty or blank; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${__out_vn_obj_rsp_fpath_body}" =~ RE_BLANK ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}(): required param OUT_VN_OBJ_RSP_FPATH_BODY may not be empty or blank; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${__out_vn_obj_rsp_fpath_body_zst}" =~ RE_BLANK ]]; then
+        printf "${PROG} (BUG): ${FUNCNAME}(): required param OUT_VN_OBJ_RSP_FPATH_BODY_ZST may not be empty or blank; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    if [[ "${__one_uri}" =~ $RE_GH_URI ]]; then :; else
+        printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: not a valid GitHub API URI: \"%s\"; bailing out\n" \
+               "${__one_uri}" 1>&2
+        exit 1
+    fi
+    local __uri_scheme=${BASH_REMATCH[2]}
+    local __uri_userinfo=${BASH_REMATCH[6]}
+    local __uri_host=${BASH_REMATCH[7]}
+    local __uri_port=${BASH_REMATCH[9]}
+    local __uri_path=${BASH_REMATCH[10]}
+    local __uri_query=${BASH_REMATCH[13]}
+    local __uri_fragment=${BASH_REMATCH[15]}
+
+    :
+    : One GitHub URI: ${__one_uri}
+    : ----------------------------
+    : "${PROG} (trace: $LINENO):   scheme: \"${__uri_scheme}\""
+    : "${PROG} (trace: $LINENO): userinfo: \"${__uri_userinfo}\""
+    : "${PROG} (trace: $LINENO):     host: \"${__uri_host}\""
+    : "${PROG} (trace: $LINENO):     port: \"${__uri_port}\""
+    : "${PROG} (trace: $LINENO):     path: \"${__uri_path}\""
+    : "${PROG} (trace: $LINENO):    query: \"${__uri_query}\""
+    : "${PROG} (trace: $LINENO): fragment: \"${__uri_fragment}\""
+
+    # Supported template path
+    local __sup_tpath
+    local __t_tpath_regex
+    local __matched_key
+    local __t_found=false
+    for __sup_tpath in "${AGH_CACHE_GH_V3_SUPPORTED_TPATHS[@]}"; do
+
+# DEBUG go
+#        if test "${AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX["${__sup_tpath}"]:+exists}"; then :; else
+#            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: key \"%s\" not present in AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX; bailing out\n" \
+#                   "${__sup_tpath}" 1>&2
+#            exit 1
+#        fi
+# DEBUG end
+
+        __t_tpath_regex=${AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX["${__sup_tpath}"]}
+
+        if [[ "${__uri_path}" =~ ${__t_tpath_regex} ]]; then
+            __matched_key=${__sup_tpath}
+            __t_found=true
+            break
+        fi
+    done
+
+    if ${__t_found}; then :; else
+        printf "${PROG} (error): not a supported API path: \"%s\"; bailing out\n" "${__uri_path}" 1>&2
+        exit 1
+    fi
+
+
+    local __is_param_path=false
+
+    local __t_api_path_verified=${__matched_key}
+    local __t_api_path_resolved
+    local __t_api_path_partpath
+
+    # Some "resolved" values are identical to the raw "verified" value that
+    # was matched above. Any "verified" path that does not have any API
+    # parameter tokens (e.g., ':username') in it will have a "resolved" value
+    # that is the same as the "verified" value (e.g., '/user/repos').
+    #
+    __t_api_path_resolved=${__t_api_path_verified}
+    local __one_legit_param_symbol
+
+    case ${__t_api_path_resolved} in
+        *:*)
+            # the "verified" value has one or more API parameter tokens in it
+            __is_param_path=true
+            ;;
+        *)
+            ;;
+    esac
+
+    if ${__is_param_path}; then
+
+        if [[ "${GITHUB_USERNAME}" =~ ^[[:alnum:]_-]{1,}$ ]]; then :; else
+            # The GitHub username value is used on the right side of the sed
+            # subst below, which is used raw -- found value is not known to be
+            # safe for us to use in that context.
+            #
+            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: bailing out on uncommon GitHub username: \"%s\"; this code is not hardened enough to use such values\n" \
+                   "${GITHUB_USERNAME}" 1>&2
+            exit 1
+        fi
+
+        # TODO: Add support for additional API parameters as need
+        #       arises. Currently the only supported param is ':username'.
+        #
+        while [[ "${__t_api_path_resolved}" =~ [:]username ]]; do
+
+            # XXX: This is only tight-enough for our controlled universe of of
+            #      known values. In particular, we know that we have neither a
+            #      trailing query param section nor API parameters that
+            #      contain substring matches (hypothetical example:
+            #      ':user' vs. ':username').
+
+            __t_api_path_resolved=$(printf '%s\n' "${__t_api_path_resolved}" \
+                                      | "${SED_PROG}" -e 's,^\(.*\)\([/][:]username\)\($\|[?/].*\),\1/'"${GITHUB_USERNAME}"'\3,')
+            if test $? -ne 0; then
+                printf "${PROG} (error): was error while substituting API path param :username; bailing out\n" 1>&2
+                exit 1
+            fi
+        done
+    fi
+
+    case ${__t_api_path_resolved} in
+        *:*)
+            # The "verified" value /still/ has one or more API parameter
+            # tokens in it. WTF?
+            printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: __t_api_path_resolved value (\"%s\") should not have an API parameter token in it here; all such values should have been resolved. Bailing out\n" \
+                   "${__t_api_path_resolved}" 1>&2
+            exit 1
+            ;;
+        *)
+            ;;
+    esac
+
+
+    # ┌──────────────────────────────────────────────────────────────────────────────────────┐
+    # │  Construct "partpath"                                                                │
+    # │                                                                                      │
+    # │  Final results will yield a single directory name (for verified API paths            │
+    # │  that do not have any API parameters), or a parent/child directory                   │
+    # │  subtree (for verified API paths that do have API parameters):                       │
+    # │                                                                                      │
+    # │    Verified path                 Final directory name(s)                             │
+    # │    ───────────────────────       ──────────────────────────────────────────────────  │
+    # │    '/user/repos'            ──➤  '/user--repos'                                      │
+    # │                                                                                      │
+    # │    '/user/:username/repos'  ──➤  '/user--00__USERNAME--repos/user--salewski--repos'  │
+    # │                                                                                      │
+    # └──────────────────────────────────────────────────────────────────────────────────────┘
+    #
+    # Construct "partpath" (step 1 of (maybe) 3)
+    #
+    #     '/user/repos'           ==> '/user--repos'
+    #     '/user/:username/repos' ==> '/user--00__USERNAME--repos'
+    #
+    # Note that this transformation will continue to work without modification
+    # if we add additional supported API parameter paths. E.g.,:
+    #
+    #     '/user/:username/repos/:something/junk' ==> '/user--00__USERNAME--repos--00__SOMETHING--junk'
+    #
+    #
+    # Given                             Step 1
+    # [verified path]                   [verified path to flattened]
+    # ---------------------------       ----------------------------
+    #
+    #     '/user/repos'            ==>  '/user--repos'
+    #
+    #     '/user/:username/repos'  ==>  '/user--00__USERNAME--repos'
+    #
+    __t_api_path_partpath=$(printf '%s\n' "${__t_api_path_verified}" \
+                              | "${SED_PROG}" -e 's![:]\([^/]\{1,\}\)!00__\U\1!g' \
+                                              -e 's,/,--,g' \
+                                              -e 's,^--,/,' \
+                                              -e 's,--$,,'  )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to perform initial transformation for partpath; bailing out\n" 1>&2
+        exit 1
+    fi
+    if ${__is_param_path}; then
+        # Only API paths with parameters need steps 2 and 3 applied to them to
+        # produce the final partpath.
+
+        # Construct "partpath" (step 2 of (maybe) 3)
+        #
+        #     '/user/repos'           ==> '/user--repos'
+        #     '/user/:username/repos' ==> '/user--00__USERNAME--repos'
+        #
+        # A partpath of an API path that had parameters is made up up two
+        # directory components:
+        #
+        #     1. The "path class" value (created above in step 1) that
+        #        represents all resolved paths that share the same
+        #        parameterized API template.
+        #
+        #     2. Then we append the API resolved path to it as a single
+        #        subdirectory, transformed in a similar way to flatten any
+        #        subdirectory trees to a single subdirectory:
+        #
+        # Given                             Step 2
+        # [resolved path]                   [resolved path to flattened]
+        # ---------------------------       ----------------------------
+        #
+        #     '/user/repos'            ==>  [no step two (no params)]
+        #
+        #     '/user/salewski/repos'   ==>  '/user--salewski--repos'
+        #
+        local __t_resolved_flattened=$(printf '%s\n' "${__t_api_path_resolved}" \
+                                         | "${SED_PROG}" -e 's,/,--,g' -e 's,^--,/,' -e 's,--$,,')
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to perform step 2 transformation for partpath; bailing out\n" 1>&2
+            exit 1
+        fi
+
+        # Construct "partpath" (step 2 of (maybe) 3)
+        #
+        # Combine flattened verified and flattened resolved subdir names. Note
+        # that the flattened resolved value still starts with a slash ('/')
+        # char, so we do not need to introduce our own separator here.
+        #
+        __t_api_path_partpath="${__t_api_part_partpath}${__t_resolved_flattened}"
+
+        unset __t_resolved_flattened
+    fi
+
+
+    local __t_val_to_digest
+    __t_val_to_digest=${__t_api_path_verified}
+    if test -n "${__uri_query}"; then
+        __t_val_to_digest="${__t_val_to_digest}?${__uri_query}"
+    fi
+    if test -n "${__uri_fragment}"; then
+        __t_val_to_digest="${__t_val_to_digest}#${__uri_fragment}"
+    fi
+
+    f_sha256sum_for "${__t_val_to_digest}" 'T_SHA256SUM_OUT'
+    local __t_sha256_sum=${T_SHA256SUM_OUT}
+    # Two-step substitution: First generate a value that represents all chars
+    # except the first two, and then slice that off.
+    local __t_first_two=${__t_sha256_sum%${__t_sha256_sum#??}}
+    #
+    # Same general idea, but here we use the variable we created above that
+    # represents just the first two chars, and then slice that off to be left
+    # with a value that is everything except the first two chars.
+    local __t_the_rest=${__t_sha256_sum#${__t_first_two}}
+
+    # Note that ${__t_api_path_partpath} always starts with a '/' char
+    local __t_obj_dir_base="${AGH_CACHE_GH_V3_DIR}${__t_api_path_partpath}/${__t_first_two}/${__t_the_rest}"
+
+    # Usually it makes sense for us to create the object-specific directories,
+    # but it does not make sense for all scenarios (e.g., a caller that
+    # intends to delete an object if it is found to exist). Such callers can
+    # set this flag to inform us that we should avoid auto-creating the dirs.
+    #
+    if $AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS; then
+        : $PROG \(trace: $LINENO\): AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS is set
+    else
+        if test -d "${__t_obj_dir_base}"; then :; else
+            if $DEBUGGING; then
+                printf "${PROG} (debug): obj dir base does not exist; creating: %s\n" \
+                       "${__t_obj_dir_base}" 1>&2
+            fi
+            # We can depend on AGH_CACHE_GH_V3_DIR being present, but not
+            # necessarily anything beneath it. If we were to just 'mkdir -p',
+            # that would technically work, but our desired perms would not be
+            # applied to every parent directory created (except maybe by
+            # coincidence).
+            local __t_umask_hold=$(umask)
+            umask 0077
+            "${MKDIR_PROG}" -p -m '0700' "${__t_obj_dir_base}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to create obj dir base or one of its parents: %s; bailing out\n" \
+                       "${__t_obj_dir_base}" 1>&2
+                exit 1
+            fi
+            umask "${__t_umask_hold}"
+            unset __t_umask_hold
+        fi
+    fi
+
+    local _t_is_paged_collection=false
+    f_is_api_path_a_paged_collection "${__t_api_path_verified}" "${__uri_query}"
+    if test $? -eq 0; then
+        _t_is_paged_collection=true
+    fi
+
+    # Read "pqf" as "path, query, and fragment"; value is intended to be used
+    # only for the purposes of logging and error reporting.
+    local __t_pqf="${__uri_path}"
+    if test -n "${__uri_query}"; then
+        __t_pqf="${__t_pqf}?${__uri_query}"
+    fi
+    if test -n "${__uri_fragment}"; then
+        __t_pqf="${__t_pqf}#${__uri_fragment}"
+    fi
+
+    # Copy values of URL components to output vars
+    printf -v "${__out_url_scheme}"   '%s' "${__uri_scheme}"
+    printf -v "${__out_url_userinfo}" '%s' "${__uri_userinfo}"
+    printf -v "${__out_url_host}"     '%s' "${__uri_host}"
+    printf -v "${__out_url_port}"     '%s' "${__uri_port}"
+    printf -v "${__out_url_path}"     '%s' "${__uri_path}"
+    printf -v "${__out_url_query}"    '%s' "${__uri_query}"
+    printf -v "${__out_url_fragment}" '%s' "${__uri_fragment}"
+
+
+    local __t_obj_rsp_fpath_colm="${__t_obj_dir_base}/HEAD-meta"
+    local __t_obj_rsp_fpath_colm_zst="${__t_obj_dir_base}/HEAD-meta.zst"
+
+    local __t_obj_rsp_fpath_body="${__t_obj_dir_base}/rsp-body.json"
+    local __t_obj_rsp_fpath_hdrs="${__t_obj_dir_base}/rsp-headers"
+
+    local __t_obj_rsp_fpath_body_zst="${__t_obj_dir_base}/rsp-body.json.zst"
+    local __t_obj_rsp_fpath_hdrs_zst="${__t_obj_dir_base}/rsp-headers.zst"
+
+    printf -v "${__out_vn_pqf}" '%s' "${__t_pqf}"
+
+    printf -v "${__out_vn_obj_api_path_verified}" '%s' "${__t_api_path_verified}"  # ex: '/user/:username/repos'
+    printf -v "${__out_vn_obj_api_path_resolved}" '%s' "${__t_api_path_resolved}"  # ex: '/user/salewski/repos'
+    printf -v "${__out_vn_obj_api_path_partpath}" '%s' "${__t_api_path_partpath}"  # ex: '/user--00_USERNAME--repos/user-salewski-repos'
+
+
+    if ${_t_is_paged_collection}; then
+
+        printf -v "${__out_vn_obj_rsp_fpath_colmeta}"     '%s' "${__t_obj_rsp_fpath_colm}"
+        printf -v "${__out_vn_obj_rsp_fpath_colmeta_zst}" '%s' "${__t_obj_rsp_fpath_colm_zst}"
+
+        printf -v "${__out_vn_obj_rsp_fpath_headers}"     ''
+        printf -v "${__out_vn_obj_rsp_fpath_headers_zst}" ''
+
+        printf -v "${__out_vn_obj_rsp_fpath_body}"        ''
+        printf -v "${__out_vn_obj_rsp_fpath_body_zst}"    ''
+    else
+
+        printf -v "${__out_vn_obj_rsp_fpath_colmeta}"     ''
+        printf -v "${__out_vn_obj_rsp_fpath_colmeta_zst}" ''
+
+        printf -v "${__out_vn_obj_rsp_fpath_headers}"     '%s' "${__t_obj_rsp_fpath_hdrs}"
+        printf -v "${__out_vn_obj_rsp_fpath_headers_zst}" '%s' "${__t_obj_rsp_fpath_hdrs_zst}"
+
+        printf -v "${__out_vn_obj_rsp_fpath_body}"        '%s' "${__t_obj_rsp_fpath_body}"
+        printf -v "${__out_vn_obj_rsp_fpath_body_zst}"    '%s' "${__t_obj_rsp_fpath_body_zst}"
+    fi
+
+    return 0
+}
+
+
+# @param input_url - (required) Full GitHub URL that represents an API
+#                    resource that is "supported" by this program.
+#
+f_perform_do_get_one_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __one_uri=$1
+
+    __f_validate_and_parse_gh_url     \
+        "${__one_uri}"                \
+        \
+        'T_PQF'                       \
+        \
+        'T_OUT_URL_SCHEME'            \
+        'T_OUT_URL_USERINFO'          \
+        'T_OUT_URL_HOST'              \
+        'T_OUT_URL_PORT'              \
+        'T_OUT_URL_PATH'              \
+        'T_OUT_URL_QUERY'             \
+        'T_OUT_URL_FRAGMENT'          \
+        \
+        'T_OBJ_API_PATH_VERIFIED'     \
+        'T_OBJ_API_PATH_RESOLVED'     \
+        'T_OBJ_API_PATH_PARTPATH'     \
+        \
+        'T_OBJ_RSP_FPATH_COLMETA'     \
+        'T_OBJ_RSP_FPATH_COLMETA_ZST' \
+        \
+        'T_OBJ_RSP_FPATH_HEADERS'     \
+        'T_OBJ_RSP_FPATH_HEADERS_ZST' \
+        \
+        'T_OBJ_RSP_FPATH_BODY'        \
+        'T_OBJ_RSP_FPATH_BODY_ZST'
+
+    # Copy values out of global scratch variables into our own locals
+    #
+    local __t_pqf="${T_PQF}"
+
+    local __t_url_scheme="${T_OUT_URL_SCHEME}"
+    local __t_url_userinfo="${T_OUT_URL_USERINFO}"
+    local __t_url_host="${T_OUT_URL_HOST}"
+    local __t_url_port="${T_OUT_URL_PORT}"
+    local __t_url_path="${T_OUT_URL_PATH}"
+    local __t_url_query="${T_OUT_URL_QUERY}"
+    local __t_url_fragment="${T_OUT_URL_FRAGMENT}"
+
+    local __t_obj_api_path_verified="${T_OBJ_API_PATH_VERIFIED}"
+    local __t_obj_api_path_resolved="${T_OBJ_API_PATH_RESOLVED}"
+    local __t_obj_api_path_partpath="${T_OBJ_API_PATH_PARTPATH}"
+
+    local __t_obj_rsp_fpath_colm="${T_OBJ_RSP_FPATH_COLMETA}"
+    local __t_obj_rsp_fpath_colm_zst="${T_OBJ_RSP_FPATH_COLMETA_ZST}"
+
+    local __t_obj_rsp_fpath_hdrs="${T_OBJ_RSP_FPATH_HEADERS}"
+    local __t_obj_rsp_fpath_hdrs_zst="${T_OBJ_RSP_FPATH_HEADERS_ZST}"
+
+    local __t_obj_rsp_fpath_body="${T_OBJ_RSP_FPATH_BODY}"
+    local __t_obj_rsp_fpath_body_zst="${T_OBJ_RSP_FPATH_BODY_ZST}"
+
+
+    local __t_fn_to_call='f_get_one_validated_or_die'
+
+    # The collection metadata path (and it's *_zst partner) are only non-empty
+    # when the API path in the URL represents a "paged collection" of objects
+    # (as opposed to a particular object).
+    #
+    if test -n "${__t_obj_rsp_fpath_colm}"; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): will treat path as a paged collection: %s\n" \
+                   "${__t_pqf}" 1>&2
+        fi
+
+        __t_fn_to_call='f_get_one_collection_or_die'
+
+        # Note that f_get_one_collection_or_die() may cause multiple calls to
+        # be made back into f_get_one_validated_or_die() for individual
+        # members of the collection.
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): dynamically selected fn to call: %s\n" \
+               "${__t_fn_to_call}" 1>&2
+    fi
+
+    "${__t_fn_to_call}"                    \
+        "${__one_uri}"                     \
+        \
+        "${__t_pqf}"                       \
+        \
+        "${__t_url_scheme}"                \
+        "${__t_url_userinfo}"              \
+        "${__t_url_host}"                  \
+        "${__t_url_port}"                  \
+        "${__t_url_path}"                  \
+        "${__t_url_query}"                 \
+        "${__t_url_fragment}"              \
+        \
+        "${__t_obj_api_path_verified}"     \
+        "${__t_obj_api_path_resolved}"     \
+        "${__t_obj_api_path_partpath}"     \
+        \
+        "${__t_obj_rsp_fpath_colm}"        \
+        "${__t_obj_rsp_fpath_colm_zst}"    \
+        \
+        "${__t_obj_rsp_fpath_hdrs}"        \
+        "${__t_obj_rsp_fpath_hdrs_zst}"    \
+        \
+        "${__t_obj_rsp_fpath_body}"        \
+        "${__t_obj_rsp_fpath_body_zst}"
+
+    local __t_rtn=$?
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): ${FUNCNAME}() [line $LINENO]: returned (return val: %s) from call to fn: %s\n" \
+               "${__t_rtn}" \
+               "${__t_fn_to_call}" 1>&2
+    fi
+
+    return ${__t_rtn}
+}
+
+
+# Helper function for:
+#     f_perform_do_get_one_or_die()
+#     f_get_one_collection_or_die()
+#
+# Presumes the requested item represents a single cache object, as opposed to
+# a "paged collection" of objects.
+#
+f_get_one_validated_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=18
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_url=$1
+    local __t_pqf=$2
+
+    local __t_url_scheme=$3
+    local __t_url_userinfo=$4
+    local __t_url_host=$5
+    local __t_url_port=$6
+    local __t_url_path=$7
+    local __t_url_query=$8
+    local __t_url_fragment=$9
+
+    local __t_obj_api_path_verified=${10}
+    local __t_obj_api_path_resolved=${11}
+    local __t_obj_api_path_partpath=${12}
+
+    local __t_obj_rsp_fpath_colm=${13}      # collection metadata
+    local __t_obj_rsp_fpath_colm_zst=${14}  # likewise (.zst compressed)
+
+    local __t_obj_rsp_fpath_hdrs=${15}
+    local __t_obj_rsp_fpath_hdrs_zst=${16}
+
+    local __t_obj_rsp_fpath_body=${17}
+    local __t_obj_rsp_fpath_body_zst=${18}
+
+    # If we fetch the URL for the first time, or need to refresh our cached
+    # object, then we will keep the curl output separate from our cache object
+    # files until we are satisfied that everything is in order.
+    #
+    local __t_obj_rsp_fpath_body_tmp="${MY_TMP_DIR}/rsp-body.json"
+    local __t_obj_rsp_fpath_hdrs_tmp="${MY_TMP_DIR}/rsp-headers"
+
+
+    # Sanity check
+    if test -n "${__t_obj_rsp_fpath_colm}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: function invoked on a \"paged collection\" item (\"%s\"); colm is: \"%s\"; bailing out\n" \
+               "${__t_pqf}" \
+               "${__t_obj_rsp_fpath_colm}" 1>&2
+        exit 1
+    fi
+    if test -n "${__t_obj_rsp_fpath_colm_zst}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: function invoked on a \"paged collection\" item (\"%s\"); colm_zst is: \"%s\"; bailing out\n" \
+               "${__t_pqf}" \
+               "${__t_obj_rsp_fpath_colm_zst}" 1>&2
+        exit 1
+    fi
+
+    if $FETCH_ONLY_FROM_CACHE; then
+
+        # It has been requested that we obtain the object from the cache only
+        # if it is already present (implicit in this is that it is ignored
+        # whether or not the object is stale).
+
+        # XXX: We are checking not just for the presence of the response body
+        #      file, but also that it is non-zero in size. This is legit for
+        #      all response bodies that are currently supported, and is
+        #      /probably/ legit, in general. But we have not done research to
+        #      determine whether or not there are /any/ API responses that
+        #      might be legitimately empty. We would have to revisit this in
+        #      order to support such a thing.
+        #
+        if test -s "${__t_obj_rsp_fpath_body_zst}"; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): found (compressed) object in the cache: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_body_zst}"
+            return 0
+        fi
+
+        if test -s "${__t_obj_rsp_fpath_body}"; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): found object in the cache: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${CAT_PROG}" "${__t_obj_rsp_fpath_body}"
+            return 0
+        fi
+
+        printf "${PROG} (error): object not found in cache: %s\n" "${__t_pqf}" 1>&2
+        exit 1  # that's right -- exit rather than return
+    fi
+
+    local ff
+    # Make "final" files conditionally (only if they do not already exist)
+    for ff in \
+        "${__t_obj_rsp_fpath_body_zst}" \
+        "${__t_obj_rsp_fpath_hdrs_zst}" ; do
+        if test -e "${ff}"; then :; else
+            > "${ff}"  # touch
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to create file: %s; bailing out\n" "$ff" 1>&2
+                exit 1
+            fi
+            "${CHMOD_PROG}" 0600 "${ff}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "$ff" 1>&2
+                exit 1
+            fi
+        fi
+    done
+
+    # Make "scratch" files unconditionally (empty out if existing found)
+    for ff in \
+        "${__t_obj_rsp_fpath_body_tmp}" \
+        "${__t_obj_rsp_fpath_hdrs_tmp}" ; do
+        > "${ff}"  # touch
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create file: %s; bailing out\n" "$ff" 1>&2
+            exit 1
+        fi
+        "${CHMOD_PROG}" 0600 "${ff}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "$ff" 1>&2
+            exit 1
+        fi
+    done
+
+
+    local __t_etag=''
+    if test -s "${__t_obj_rsp_fpath_body_zst}" \
+    && test -s "${__t_obj_rsp_fpath_hdrs_zst}"; then
+        # Example:
+        #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
+        #
+        # We extract the etag from the stored response headers of the cached
+        # object, preserving the double-quote chars.
+        #
+        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
+                   < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_hdrs_zst}"))
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting ETag header from (compressed) cached obj headers: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_hdrs_zst}" 1>&2
+            exit 1
+        fi
+
+    elif test -s "${__t_obj_rsp_fpath_body}" \
+      && test -s "${__t_obj_rsp_fpath_hdrs}"; then
+        # Example:
+        #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
+        #
+        # We extract the etag from the stored response headers of the cached
+        # object, preserving the double-quote chars.
+        #
+        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_hdrs}")
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting ETag header from cached obj headers: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_hdrs}" 1>&2
+            exit 1
+        fi
+    fi
+
+    MY_CURL_OPTS=()  # (re)set
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+    MY_CURL_OPTS+=( '--dump-header' )
+    MY_CURL_OPTS+=( "${__t_obj_rsp_fpath_hdrs_tmp}" )
+
+    # Make the GET conditional, if possible
+    if test -n "${__t_etag}"; then
+        MY_CURL_OPTS+=( '--header' )  # -H
+        MY_CURL_OPTS+=( 'If-None-Match: '"${__t_etag}" )
+    fi
+
+    MY_CURL_OPTS+=( '--get' )
+
+    local t_http_code
+    local t_estat
+    t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" "${__one_uri}")
+    t_estat=$?
+    if test ${t_estat} -ne 0; then
+        printf "${PROG} (error): was error while invoking curl(1) to retrieve object \"%s\"; bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+    if test -z "${t_http_code}"; then
+        printf "${PROG} (error): ${FUNCNAME}(): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+        exit 1
+    fi
+    case ${t_http_code} in
+        '304')  # "Not Modified"
+            : $PROG \(trace: $LINENO\): HTTP 304 "Not Modified": ${__t_pqf}
+            ;;
+        '200')
+            if $DEBUGGING; then
+                printf "${PROG} (debug): GET request for \"%s\" succeeded\n" "${__t_pqf}" 1>&2
+            fi
+
+            # FIXME: We do not check to ensure the response header file or the
+            #        response body file has a non-zero size. We should at
+            #        least check the header file.
+
+            # The HTTP response body is in:     ${MY_TMP_CURL_OUT_FPATH}
+            # The HTTP response headers are in: ${__t_obj_rsp_fpath_hdrs_tmp}
+            #
+            # We copy both to the final locations. Note that we do this in two
+            # steps, since we do not know whether or not we are copying across
+            # filesystem boundaries.
+            #
+            "${CP_PROG}" "${MY_TMP_CURL_OUT_FPATH}" "${__t_obj_rsp_fpath_body}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to stage HTTP response body file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${CHMOD_PROG}" 0600 "${__t_obj_rsp_fpath_body}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "${__t_obj_rsp_fpath_body}.staged" 1>&2
+                exit 1
+            fi
+            "${CP_PROG}" "${__t_obj_rsp_fpath_hdrs_tmp}" "${__t_obj_rsp_fpath_hdrs}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to stage HTTP response headers file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${CHMOD_PROG}" 0600 "${__t_obj_rsp_fpath_hdrs}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "${__t_obj_rsp_fpath_hdrs}.staged" 1>&2
+                exit 1
+            fi
+            "${MV_PROG}" "${__t_obj_rsp_fpath_body}.staged" "${__t_obj_rsp_fpath_body}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to move HTTP response body file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${MV_PROG}" "${__t_obj_rsp_fpath_hdrs}.staged" "${__t_obj_rsp_fpath_hdrs}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to move HTTP response headers file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # Force zstd(1) to overwrite empty file we created manually above
+            "${ZSTD_PROG}" --force --quiet --rm -- "${__t_obj_rsp_fpath_body}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to compress HTTP response body file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # Force zstd(1) to overwrite empty file we created manually above
+            "${ZSTD_PROG}" --force --quiet --rm -- "${__t_obj_rsp_fpath_hdrs}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to compress HTTP response headers file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # We will remove the temporary HTTP headers file we created
+            # directly in MY_TMP_DIR, but we'll leave ${MY_TMP_CURL_OUT_FPATH}
+            # alone because it is technically being managed by code outside
+            # this function.
+            #
+            "${RM_PROG}" "${__t_obj_rsp_fpath_hdrs_tmp}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to remove temporary HTTP response headers file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            ;;
+        *)
+            printf "${PROG} (error): GET request for \"%s\" failed; HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                   "${__t_pqf}" \
+                   "${t_http_code}" 1>&2
+            exit 1
+            ;;
+    esac
+
+    # If we are falling through here, then our object is in the cache (was
+    # either just placed there (perhaps "refreshed"), or was already there).
+
+    if test -s "${__t_obj_rsp_fpath_body_zst}"; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): emitting (compressed) cached object: %s\n" "${__t_pqf}" 1>&2
+        fi
+        "${ZSTD_PROG}" --quiet -dcf "${__t_obj_rsp_fpath_body_zst}"
+        return 0
+    fi
+
+    if test -s "${__t_obj_rsp_fpath_body}"; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): emitting cached object: %s\n" "${__t_pqf}" 1>&2
+        fi
+        "${CAT_PROG}" "${__t_obj_rsp_fpath_body}"
+        return 0
+    fi
+
+    printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: cached object should have been emitted: %s; bailing out\n" \
+           "${__t_pqf}" 1>&2
+    exit 1
+}
+
+
+f_perform_do_get_cached_one_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # At the moment, the function is implemented in terms of
+    # f_perform_do_get_one_or_die(), which keys off of $FETCH_ONLY_FROM_CACHE
+    # to provide one behavior or the other.
+
+    FETCH_ONLY_FROM_CACHE=true
+
+    f_perform_do_get_one_or_die "$@"
+}
+
+
+f_perform_do_update_some_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local t_tot=$#
+
+    if $BE_VERBOSE; then
+        local maybe_ess='s'
+        if test $# -eq 1; then
+            maybe_ess=''
+        fi
+        printf "${PROG} (info): attempting to update %s item%s\n" "${t_tot}" "${maybe_ess}" 1>&2
+    fi
+
+    local t_one_url
+    local t_cnt=0
+
+    for t_one_url in "$@"; do
+        (( ++t_cnt ))
+        if ${BE_VERBOSE}; then
+            printf "${PROG} (info): updating item %s of %s: %s\n" \
+                   "${t_cnt}" "${t_tot}" "${t_one_url}" 1>&2
+        fi
+
+        # We're retrieving the URL "through" the cache for the side effect of
+        # priming the cache, hence the redirect of stdout to /dev/null.
+        #
+        f_perform_do_get_one_or_die "${t_one_url}" > /dev/null
+    done
+}
+
+f_perform_do_update_all_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # Rather than operate on a user-provided list of URLs or API paths, here
+    # we instead refernce our own internal list of "update-able template
+    # paths" -- that is, those that we have configured to be update-able here,
+    # because it has been decided that they are important enough to warrant a
+    # place on the list of "all the normal, update-able stuff".
+
+    f_populate_agh_cache_gh_v3_update_tpaths_normalized
+
+    f_perform_do_update_some_or_die "${AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED[@]}"
+}
+
+
+# Helper function for:
+#     f_get_one_collection_or_die()
+#
+# Presumes the requested item represents a "paged collection" of objects (as
+# opposed to a single cache object)
+#
+f_get_one_validated_colmeta_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=18
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_url=$1
+    local __t_pqf=$2
+
+    local __t_url_scheme=$3
+    local __t_url_userinfo=$4
+    local __t_url_host=$5
+    local __t_url_port=$6
+    local __t_url_path=$7
+    local __t_url_query=$8
+    local __t_url_fragment=$9
+
+    local __t_obj_api_path_verified=${10}
+    local __t_obj_api_path_resolved=${11}
+    local __t_obj_api_path_partpath=${12}
+
+    local __t_obj_rsp_fpath_colm=${13}      # collection metadata
+    local __t_obj_rsp_fpath_colm_zst=${14}  # likewise (.zst compressed)
+
+    local __t_obj_rsp_fpath_hdrs=${15}
+    local __t_obj_rsp_fpath_hdrs_zst=${16}
+
+    local __t_obj_rsp_fpath_body=${17}
+    local __t_obj_rsp_fpath_body_zst=${18}
+
+
+    # If we fetch the HEAD metadata for the URL for the first time, or need to
+    # refresh our cached copy of it, then we will keep the curl output
+    # separate from our cache file(s) until we are satisfied that everything
+    # is in order.
+    #
+    local __t_obj_rsp_fpath_colm_tmp="${MY_TMP_DIR}/HEAD-meta"
+
+    # Sanity check
+    if test -z "${__t_obj_rsp_fpath_colm}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: function may only be invoked on a \"paged collection\" item (\"%s\"); colm is empty; bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+    if test -z "${__t_obj_rsp_fpath_colm_zst}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: function may only be invoked on a \"paged collection\" item (\"%s\"); colm_zst is empty; bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+    if test -n "${__t_url_query}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: bogus input: the API path for a \"paged collection\" should not have a query path, but got \"%s\" for item \"%s\"; bailing out\n" \
+               "${__t_url_query}" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+
+
+# FIXME: Maybe sanity check the 'per_page' value of the 'rel="last"' URL in
+#        the cached metadata to determine whether or not it matches the value
+#        we have configured in ${gl_const_per_page_size}. Currently we (this
+#        whole program) just assume it.
+
+    if $FETCH_ONLY_FROM_CACHE; then
+
+        # It has been requested that we obtain the collection metadata (HTTP
+        # HEAD response) object from the cache only if it is already present
+        # (implicit in this is that it is ignored whether or not the object is
+        # stale).
+
+        # We are checking not just for the presence of the HEAD-meta
+        # file, but also that it is non-zero in size.
+        #
+        if test -s "${__t_obj_rsp_fpath_colm_zst}"; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): found (compressed) \"paged collection\" metadata in the cache for: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_colm_zst}"
+            return 0
+        fi
+
+        if test -s "${__t_obj_rsp_fpath_colm}"; then
+            if $DEBUGGING; then
+                printf "${PROG} (debug): found \"page collection\" metadata in the cache for: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${CAT_PROG}" "${__t_obj_rsp_fpath_colm}"
+            return 0
+        fi
+
+        printf "${PROG} (error): \"paged collection\" metadata not found in cache for: %s\n" "${__t_pqf}" 1>&2
+        exit 1  # that's right -- exit rather than return
+    fi
+
+    local ff
+    # Make "final" file(s) conditionally (only if they do not already exist)
+    for ff in \
+        "${__t_obj_rsp_fpath_colm_zst}" ; do
+        if test -e "${ff}"; then :; else
+            > "${ff}"  # touch
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to create file: %s; bailing out\n" "$ff" 1>&2
+                exit 1
+            fi
+            "${CHMOD_PROG}" 0600 "${ff}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "$ff" 1>&2
+                exit 1
+            fi
+        fi
+    done
+
+    # Make "scratch" file(s) unconditionally (empty out if existing found)
+    for ff in \
+        "${__t_obj_rsp_fpath_colm_tmp}" ; do
+        > "${ff}"  # touch
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create file: %s; bailing out\n" "$ff" 1>&2
+            exit 1
+        fi
+        "${CHMOD_PROG}" 0600 "${ff}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "$ff" 1>&2
+            exit 1
+        fi
+    done
+
+
+    local __t_etag=''
+    if test -s "${__t_obj_rsp_fpath_colm_zst}"; then
+        # Example:
+        #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
+        #
+        # We extract the etag from the (zstd-compressed) stored HEAD response
+        # headers of the \"paged collection\" metadata in the cache,
+        # preserving the double-quote chars.
+        #
+        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
+                   < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_colm_zst}"))
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting ETag header from (compressed) \"paged collection\" metadata file: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_colm_zst}" 1>&2
+            exit 1
+        fi
+
+    elif test -s "${__t_obj_rsp_fpath_colm}"; then
+        # Example:
+        #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
+        #
+        # We extract the etag from the (not compressed) stored HEAD response
+        # headers of the \"paged collection\" metadata in the cache,
+        # preserving the double-quote chars.
+        #
+        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_colm}")
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting ETag header from \"paged collection\" metadata file: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_colm}" 1>&2
+            exit 1
+        fi
+    fi
+
+
+    # We are about to peform a HEAD request for an API path that this program
+    # considers a "paged collection". As such, we know that the URL does not
+    # have query path. However, when asking the GitHub API how many pages of
+    # data are available, the per-page size is important.
+    #
+    # We request page 1 of the collection, with a per page size of whatever
+    # value is in ${gl_const_per_page_size}. This ensures our cached copy of
+    # the metadata will reflect our app-specific preference.
+    #
+    # We use pages of size ${gl_const_per_page_size}, which at the time of
+    # writing is 100 (the general max allowed by the GitHub v3 API). The
+    # intent is that we want fewer pages, each with more content. (If the
+    # default allowed for more than 100, we might continue to use 100, anyway;
+    # there's a practical limit to how big we want to allow the response to
+    # be).
+    #
+    # Note that without a per-page query param, GitHub would provide 30 items
+    # per page. that would mean more than 3x round trips to the server
+    # compared with our page size of 100.
+    #
+    local t_url_plus_paging="${__t_url}?page=1&per_page=${gl_const_per_page_size}"
+
+
+    MY_CURL_OPTS=()  # (re)set
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+
+    MY_CURL_OPTS+=( '--dump-header' )
+    MY_CURL_OPTS+=( "${__t_obj_rsp_fpath_colm_tmp}" )
+
+    # Make the HEAD request conditional, if possible
+    if test -n "${__t_etag}"; then
+        MY_CURL_OPTS+=( '--header' )  # -H
+        MY_CURL_OPTS+=( 'If-None-Match: '"${__t_etag}" )
+    fi
+
+    MY_CURL_OPTS+=( '--head' )  # -I
+
+    local t_http_code
+    local t_estat
+    t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" "${t_url_plus_paging}")
+    t_estat=$?
+    if test ${t_estat} -ne 0; then
+        printf "${PROG} (error): was error while invoking curl(1) to retrieve HEAD for \"%s\"; bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+    if test -z "${t_http_code}"; then
+        printf "${PROG} (error): ${FUNCNAME}(): curl(1) command succeeded, but no HTTP response code emitted; bailing out\n" 1>&2
+        exit 1
+    fi
+    case ${t_http_code} in
+        '304')  # "Not Modified"
+            : $PROG \(trace: $LINENO\): HTTP 304 "Not Modified": ${__t_pqf}
+            ;;
+        '200')
+            if $DEBUGGING; then
+                printf "${PROG} (debug): HEAD request succeeded for \"%s\"\n" "${__t_pqf}" 1>&2
+            fi
+
+            # The HTTP HEAD response is in: ${__t_obj_rsp_fpath_colm_tmp} (it
+            # happens to also be in ${MY_TMP_CURL_OUT_FPATH}, but we ignore
+            # that file here).
+
+            if test -s "${__t_obj_rsp_fpath_colm_tmp}"; then :; else
+                printf "${PROG} (error): HEAD response tmp file is empty (filesystem full?); was unable to stage HTTP HEAD file of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            # We copy the file to the final location. Note that we do this in
+            # two steps, since we do not know whether or not we are copying
+            # across filesystem boundaries.
+            #
+            "${CP_PROG}" "${__t_obj_rsp_fpath_colm_tmp}" "${__t_obj_rsp_fpath_colm}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to stage HTTP HEAD response file of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${CHMOD_PROG}" 0600 "${__t_obj_rsp_fpath_colm}.staged"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to chmod 0600 file: %s; bailing out\n" "${__t_obj_rsp_fpath_colm}.staged" 1>&2
+                exit 1
+            fi
+            "${MV_PROG}" "${__t_obj_rsp_fpath_colm}.staged" "${__t_obj_rsp_fpath_colm}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to move HTTP HEAD response fle of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # Force zstd(1) to overwrite empty file we created manually above
+            "${ZSTD_PROG}" --force --quiet --rm -- "${__t_obj_rsp_fpath_colm}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to compress HTTP HEAD response file of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # We will remove the temporary HTTP headers file we created
+            # directly in MY_TMP_DIR, but we'll leave ${MY_TMP_CURL_OUT_FPATH}
+            # alone because it is technically being managed by code outside
+            # this function.
+            #
+            "${RM_PROG}" "${__t_obj_rsp_fpath_colm_tmp}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to remove temporary HTTP HEAD response file of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            ;;
+        *)
+            printf "${PROG} (error): HEAD request for \"%s\" failed; HTTP response code was: \"%s\"; expected 200 (\"OK\"); bailing out\n" \
+                   "${__t_pqf}" \
+                   "${t_http_code}" 1>&2
+            exit 1
+            ;;
+    esac
+
+    # If we are falling through here, then our HEAD response file of "paged
+    # collection" metadata is in the cache (was either just placed there
+    # (perhaps "refreshed"), or was already there).
+
+    if test -s "${__t_obj_rsp_fpath_colm_zst}"; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): emitting (compressed) cached \"paged collection\" metadata for: %s\n" "${__t_pqf}" 1>&2
+        fi
+        "${ZSTD_PROG}" --quiet -dcf "${__t_obj_rsp_fpath_colm_zst}"
+        return 0
+    fi
+
+    if test -s "${__t_obj_rsp_fpath_colm}"; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): emitting cached \"paged collection\" metadata for: %s\n" "${__t_pqf}" 1>&2
+        fi
+        "${CAT_PROG}" "${__t_obj_rsp_fpath_colm}"
+        return 0
+    fi
+
+    printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: cached \"paged collection\" metadata should have been emitted for: %s; bailing out\n" \
+           "${__t_pqf}" 1>&2
+    exit 1
+}
+
+
+f_get_one_collection_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=18
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_url=$1
+    local __t_pqf=$2
+
+    local __t_url_scheme=$3
+    local __t_url_userinfo=$4
+    local __t_url_host=$5
+    local __t_url_port=$6
+    local __t_url_path=$7
+    local __t_url_query=$8
+    local __t_url_fragment=$9
+
+    local __t_obj_api_path_verified=${10}
+    local __t_obj_api_path_resolved=${11}
+    local __t_obj_api_path_partpath=${12}
+
+    local __t_obj_rsp_fpath_colm=${13}      # collection metadata
+    local __t_obj_rsp_fpath_colm_zst=${14}  # likewise (.zst compressed)
+
+    local __t_obj_rsp_fpath_hdrs=${15}
+    local __t_obj_rsp_fpath_hdrs_zst=${16}
+
+    local __t_obj_rsp_fpath_body=${17}
+    local __t_obj_rsp_fpath_body_zst=${18}
+
+    # Sanity check
+
+    if test -z "${__t_obj_rsp_fpath_colm}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: __t_obj_rsp_fpath_colm should not be the empty string here; pqf: \"%s\"; bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+
+    local __t_obj_fpath_root_child=$("${DIRNAME_PROG}" "${__t_obj_rsp_fpath_colm}") || exit 1
+    if test '.' = "${__t_obj_fpath_root_child}"; then
+        printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of __t_obj_fpath_root_child is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
+
+
+    local __t_obj_fpath_head_meta="${__t_obj_fpath_root_child}/HEAD-meta"
+
+    # Call f_get_one_validated_colmeta_or_die() for the side-effect of
+    # ensuring a copy of the HEAD response for our "paged collection" exists
+    # in the cache (that is why we redirect the output to /dev/null). We want
+    # the "or die" semantics of the call to apply to our current process, so
+    # we avoid invoking it in a subshell.
+    #
+    # Note: f_get_one_validated_colmeta_or_die() honors $FETCH_ONLY_FROM_CACHE
+    f_get_one_validated_colmeta_or_die     \
+        "${__t_url}"                       \
+        \
+        "${__t_pqf}"                       \
+        \
+        "${__t_url_scheme}"                \
+        "${__t_url_userinfo}"              \
+        "${__t_url_host}"                  \
+        "${__t_url_port}"                  \
+        "${__t_url_path}"                  \
+        "${__t_url_query}"                 \
+        "${__t_url_fragment}"              \
+        \
+        "${__t_obj_api_path_verified}"     \
+        "${__t_obj_api_path_resolved}"     \
+        "${__t_obj_api_path_partpath}"     \
+        \
+        "${__t_obj_rsp_fpath_colm}"        \
+        "${__t_obj_rsp_fpath_colm_zst}"    \
+        \
+        "${__t_obj_rsp_fpath_hdrs}"        \
+        "${__t_obj_rsp_fpath_hdrs_zst}"    \
+        \
+        "${__t_obj_rsp_fpath_body}"        \
+        "${__t_obj_rsp_fpath_body_zst}"    > /dev/null
+
+
+    # Extract the 'Link:' header.
+    #
+    # Example:
+    #     Link: <https://api.github.com/user/repos?page=2>; rel="next", <https://api.github.com/user/repos?page=57>; rel="last"
+    #
+    # We expect that the .zst file exists, but we'll accept either that or its
+    # non-compressed version. We may make zstd optional at some point, but we
+    # also want to be friendly to simple hand-hacking the cache (in which the
+    # user (me) might find it be useful to leave a file uncompressed for
+    # whatever reason).
+    #
+    local t_http_head_link
+    if test -s "${__t_obj_rsp_fpath_colm_zst}"; then
+
+        t_http_head_link=$("${GREP_PROG}" '^Link:[[:space:]]' \
+                             < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_colm_zst}" \
+                                   | "${TR_PROG}" -d '\r' ))
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting Link: header from (compressed) \"paged collection\" metadata file: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_colm_zst}" 1>&2
+            exit 1
+        fi
+    elif test -s "${__t_obj_rsp_fpath_colm}"; then
+
+        t_http_head_link=$("${GREP_PROG}" '^Link:[[:space:]]' < <("${TR_PROG}" -d '\r' < "${__t_obj_rsp_fpath_colm}"))
+        if test $? -ne 0; then
+            printf "${PROG} (error): was error while extracting Link: header from \"paged collection\" metadata file: %s; bailing out\n" \
+                   "${__t_obj_rsp_fpath_colm}" 1>&2
+            exit 1
+        fi
+    else
+        printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: file for \"paged collection\" metadata does not exist or is non-zero in size: %s (or %s); bailing out\n" \
+               "${__t_obj_rsp_fpath_colm_zst}" \
+               "${__t_obj_rsp_fpath_colm}" 1>&2
+        exit 1
+    fi
+    if test -z "${t_http_head_link}"; then
+        printf "${PROG} (error): Link: header value not present in \"paged collection\" metadata for \"%s\"; (file: \"%s\" (or: \"%s\")); bailing out\n" \
+               "${__t_pqf}"  \
+               "${__t_obj_rsp_fpath_colm_zst}" \
+               "${__t_obj_rsp_fpath_colm}" 1>&2
+        exit 1
+    fi
+
+
+    # After the 'Link: ' header label, we expect the content to contain a
+    # comma-space-separated list of values in the form:
+    #
+    #     <url>; rel="foo", <url>; rel="bar"
+    #
+    # Example:
+    #
+    #     Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+    #
+    # We'll look for the rel="last" entry, which should be present even when
+    # it's URL value would be the same as the rel="next" entry. The first
+    # 'sed' invocation lifts out the URL from the rel="last" entry, and the
+    # second then extracts the number of the last page from the 'page=N'
+    # parameter.
+    #
+    local t_last_page_number
+    t_last_page_number=$( echo "${t_http_head_link}" \
+                          | "${SED_PROG}" -n -e 's#.*\([<][^>]\{1,\}[>]\)[[:space:]]*[;][^,]*rel="last".*#\1#p' \
+                          | "${SED_PROG}" -n -e 's#.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]].*#\1#p' )
+    if test $? -ne 0; then
+        printf "${PROG} (error): was error while attempting to parse last page number from HTTP \"Link:\" header in \"paged collection\" metadata for %s; bailing out\n"\
+"    Full HTTP 'Link:' header value:\n        %s\n" \
+               "${__t_pqf}" \
+               "${t_http_head_link}" 1>&2
+        exit 1
+    fi
+    if test -z "${t_last_page_number}"; then
+        printf "${PROG} (error): extracted empty value for last page number from HTTP \"Link:\" header in \"paged collection\" metadata for %s; bailing out\n"\
+"    Full HTTP 'Link:' header value:\n        %s\n" \
+               "${__t_pqf}" \
+               "${t_http_head_link}" 1>&2
+        exit 1
+    fi
+
+    if [[ "${t_last_page_number}" =~ $RE_ALL_DIGITS ]]; then :; else
+        printf "${PROG} (error): obtained page counter that contains non-digits (\"%s\"); bailing out\n" \
+               "${t_last_page_number}" 1>&2
+        exit 1
+    fi
+
+
+    # Now we know how many pages of content are available. Note that the
+    # per-page size is controlled by ${gl_const_per_page_size}. We will just
+    # rip through all of them, emitting the content. Because we are making the
+    # requests "through the cache", this will have the side effect of saving
+    # or updating the values in the cache.
+    #
+    # If somebody (probably a developer, while testing) changed the value of
+    # ${gl_const_per_page_size}, you may see apparently crazy behavior here.
+    # We just assume that value is correct, and that the value in
+    # ${t_last_page_number} reflects pages of that size. If these assumptions
+    # are violated, you'll get errors. No big deal, but if you break it, you
+    # bought it.
+    #
+    local t_url_plus_paging
+    local this_page
+
+    this_page=0
+    while test ${this_page} -lt ${t_last_page_number}; do
+        (( ++this_page ))
+
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): \"paged collection\" %s: requesting page %s of %s (page size: %s)\n" \
+                   "${__t_pqf}"   \
+                   "${this_page}" \
+                   "${t_last_page_number}" \
+                   "${gl_const_per_page_size}" 1>&2
+        fi
+
+        t_url_plus_paging="${__t_url}?page=${this_page}&per_page=${gl_const_per_page_size}"
+
+        f_perform_do_get_one_or_die "${t_url_plus_paging}"
+    done
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): all pages for \"paged collection\" successfully emitted\n" \
+               "${__t_pqf}" 1>&2
+    fi
+    return 0
+}
+
+
+f_perform_do_clear_some_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __minimal_count=1
+    if test $# -lt ${__minimal_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; (at least) %d required; bailing out\n" \
+            $# ${__minimal_count} 1>&2
+        exit 1
+    fi
+
+    AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS=true
+
+    local __t_obj_fname_root  # basename
+    local __t_obj_fpath_root
+    local __t_obj_fpath_root_child
+
+    local __one_uri
+    for __one_uri in "$@"; do
+
+        __f_validate_and_parse_gh_url     \
+            "${__one_uri}"                \
+            \
+            'T_PQF'                       \
+            \
+            'T_OUT_URL_SCHEME'            \
+            'T_OUT_URL_USERINFO'          \
+            'T_OUT_URL_HOST'              \
+            'T_OUT_URL_PORT'              \
+            'T_OUT_URL_PATH'              \
+            'T_OUT_URL_QUERY'             \
+            'T_OUT_URL_FRAGMENT'          \
+            \
+            'T_OBJ_API_PATH_VERIFIED'     \
+            'T_OBJ_API_PATH_RESOLVED'     \
+            'T_OBJ_API_PATH_PARTPATH'     \
+            \
+            'T_OBJ_RSP_FPATH_COLMETA'     \
+            'T_OBJ_RSP_FPATH_COLMETA_ZST' \
+            \
+            'T_OBJ_RSP_FPATH_HEADERS'     \
+            'T_OBJ_RSP_FPATH_HEADERS_ZST' \
+            \
+            'T_OBJ_RSP_FPATH_BODY'        \
+            'T_OBJ_RSP_FPATH_BODY_ZST'
+
+        # Copy values out of global scratch variables into our own locals
+        #
+        local __t_pqf="${T_PQF}"
+
+        local __t_obj_api_path_partpath="${T_OBJ_API_PATH_PARTPATH}"
+
+        local __t_obj_rsp_fpath_colm="${T_OBJ_RSP_FPATH_COLMETA}"          # collection metadata
+        local __t_obj_rsp_fpath_colm_zst="${T_OBJ_RSP_FPATH_COLMETA_ZST}"  # likewise (.zst compressed)
+
+        local __t_obj_rsp_fpath_hdrs="${T_OBJ_RSP_FPATH_HEADERS}"
+        local __t_obj_rsp_fpath_hdrs_zst="${T_OBJ_RSP_FPATH_HEADERS_ZST}"
+
+        local __t_obj_rsp_fpath_body="${T_OBJ_RSP_FPATH_BODY}"
+        local __t_obj_rsp_fpath_body_zst="${T_OBJ_RSP_FPATH_BODY_ZST}"
+
+        # [Updated preface to the following explanation]
+        # Because the above call verifies that the API path is legit and
+        # "supported" (etc.), we know that the API path represents either a
+        # normal object in our cache, else a "paged collection" of objects. In
+        # the former case we will have the 'rsp-headers{,.zst}' and
+        # 'rsp-body.json{,.zst}' pair of files as described below. In the
+        # latter case we will instead have a 'HEAD-meta{,.zst}' file, but the
+        # rest of the cache filesystem path details are identical.
+        #
+        # [Original explanation follows]
+        # The above cache object file paths will contain a set that looks like
+        # this (response header and response body files, and a compressed and
+        # uncompressed variation of each):
+        #
+        #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json
+        #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json.zst
+        #
+        #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers
+        #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers.zst
+        #
+        # Under normal operating conditions, if the object is in the cached,
+        # then we would expect to find that only two of the above paths
+        # actually exist (those for the compressed files).
+        #
+        # Though it is unlikely, it is possible that the two SHA-256 digest
+        # directories could exist even if /none/ of the files exist. The two
+        # directories are created from the SHA-256 sum that represents the
+        # object. The digest is split into two pieces: the first two chars for
+        # the parent directory, and the rest for the child directory.
+        #
+        # In the above directory, root path directory for the object is '01',
+        # and the root child directory is the one that starts with 'ba4719...'
+        #
+        # If we find that both the root path and the root child directories
+        # exist, then we will do a recursive delete on the root child
+        # directory only. We only delete the root path directory if it is
+        # empty after we have deleted the root child directory.
+        #
+        # Note: The root path directory serves the purpose of partitioning all
+        # possible SHA-256 sums down into at most:
+        #
+        #     36 x 36 = 1,296
+        #
+        # different directories.
+
+        # Sanity check
+        if test -z "${__t_obj_rsp_fpath_colm}"; then
+            : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: __t_obj_rsp_fpath_colm is empty
+
+            if test -z "${__t_obj_rsp_fpath_hdrs}"; then
+                : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: __t_obj_rsp_fpath_hdrs is also empty
+
+                printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: internal consistency check failed: item (\"%s\") is neither an object nor a \"paged collection\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+        fi
+
+        local __t_is_collection=false
+        if test -n "${__t_obj_rsp_fpath_colm}"; then
+            __t_is_collection=true
+            : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: api path represents a paged collection: ${__t_pqf}
+        else
+            : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: api path represents a normal object: ${__t_pqf}
+        fi
+
+        if ${__t_is_collection}; then
+            __t_obj_fpath_root_child=$("${DIRNAME_PROG}" "${__t_obj_rsp_fpath_colm}") || exit 1
+            if test '.' = "${__t_obj_fpath_root_child}"; then
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of __t_obj_fpath_root_child is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+        else
+            __t_obj_fpath_root_child=$("${DIRNAME_PROG}" "${__t_obj_rsp_fpath_hdrs}") || exit 1
+            if test '.' = "${__t_obj_fpath_root_child}"; then
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of __t_obj_fpath_root_child is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+        fi
+
+        __t_obj_fpath_root=$("${DIRNAME_PROG}" "${__t_obj_fpath_root_child}")     || exit 1
+        if test '.' = "${__t_obj_fpath_root}"; then
+            printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of __t_obj_fpath_root is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+                   "${__t_pqf}" 1>&2
+            exit 1
+        fi
+
+        __t_obj_fname_root=$("${BASENAME_PROG}" "${__t_obj_fpath_root}") || exit 1
+
+        # sanity-check
+        if test "${#__t_obj_fname_root}" -eq 2; then :; else
+            printf "${PROG} (error): object root directory name expected to be length 2, but got %d (value is: \"%s\"; full path is: \"%s\"); bailing out\n" \
+                   "${#__t_obj_fname_root}" \
+                   "${__t_obj_fname_root}"  \
+                   "${__t_obj_fpath_root}"  1>&2
+            exit 1
+        fi
+
+        # Note that a "paged collection" object has all of the following
+        # structure, just like a normal object. For a paged collection,
+        # explicitly removing these bits in this next section is redundant
+        # since we are going to blow away the entire collection further down
+        # below. But it doesn't hurt anything, either, and just flowing
+        # through it as we do here is less error-prone than making it
+        # conditional.
+
+        if test -d "${__t_obj_fpath_root_child}"; then
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): removing object from cache: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${RM_PROG}" -fr "${__t_obj_fpath_root_child}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to remove object from cache: %s; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+        else
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): object not present in cache; nothing to clear for it (okay): %s\n" \
+                       "${__t_pqf}" 1>&2
+            fi
+        fi
+
+        if test -d "${__t_obj_fpath_root}"; then
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): removing object root path directory (if empty) for: %s\n" "${__t_pqf}" 1>&2
+            fi
+            "${RMDIR_PROG}" --ignore-fail-on-non-empty "${__t_obj_fpath_root}"
+            # The exit status from the rmdir program is always zero here, but
+            # the shell might complain if we invoked it wrong.
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to invoke rmdir on object root path directory for: %s; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+        fi
+
+        if ${__t_is_collection}; then
+
+            if $BE_VERBOSE; then
+                printf "${PROG} (info): API path represents a \"paged collection\"; will ensure member cached items are cleared: %s\n" \
+                       "${__t_pqf}" 1>&2
+            fi
+
+
+            # We will examine the "partial path" to determine which directory
+            # contains all of the objects (metadata) for the
+            # collection. Recall that the "partial path" will have either one
+            # or two layers of directory structure:
+            #
+            #     '/user--repos'
+            #     '/user--00__USERNAME--repos/user--salewski--repos'
+            #
+            # In either case, the basename of the "partial path" value should
+            # be the name of the parent directory of our ${__t_obj_fpath_root}
+            # path (the one whose basename was checked to be 2 characters
+            # above).
+            #
+            # Note that for API paths that have a parameter in their name
+            # (e.g., ':username'), we are only deleting the specific
+            # subdirectory named in the "partial path" data. We DO NOT delete
+            # the parent directory, which would have too broad of an effect.
+            # 
+            if test -z "${__t_obj_api_path_partpath}"; then
+                printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: __t_obj_api_path_partpath should not be empty here; (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            # The fact that it should always start with a '/' is important for
+            # our basename/dirname manipulations, so verify our assumption.
+            if [[ "${__t_obj_api_path_partpath}" =~ ^/.* ]]; then :; else
+                printf "${PROG} (BUG): ${FUNCNAME}() [line $LINENO]: __t_obj_api_path_partpath expected to start with a slash ('/') char, but got: \"%s\"; (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_obj_api_path_partpath}" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            # If the fpath root for the collection object is:
+            #
+            #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos/01
+            #
+            # then the fpath for the collection as a whole is:
+            #
+            #     ~/.ads-github-tools.d/cache/gh-user-${GH_USERNAME}/c-v1/gh-api-v3/user--repos
+            #
+            local __t_collection_fpath=$("${DIRNAME_PROG}" "${__t_obj_fpath_root}") || exit 1
+            if test '.' = "${__t_collection_fpath}"; then
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of __t_collection_fpath is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            local __t_expct_bname=$("${BASENAME_PROG}" "${__t_obj_api_path_partpath}") || exit 1
+            local __t_found_bname=$("${BASENAME_PROG}" "${__t_collection_fpath}") || exit 1
+
+            if test "${__t_found_bname}" = "${__t_expct_bname}"; then :; else
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: found collection bname (\"%s\") does match expected value (\"%s\"); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_found_bname}" \
+                       "${__t_expct_bname}" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            local t_parent_of_delete_target=$("${DIRNAME_PROG}" "${__t_collection_fpath}") || exit 1
+            if test -z "${t_parent_of_delete_target}"; then
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of collection fpath empty string (should be a \"can't happen\" scenario); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            if test '.' = "${t_parent_of_delete_target}"; then
+                printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of collection fpath is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); (was processing item: \"%s\"); bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            # Since we are being destructive, let's be extra careful...
+            if test -e "${t_parent_of_delete_target}"; then :; else
+                printf "${PROG} (warning): parent of cache collection directory to delete does not exist (nothing to do): %s\n" \
+                       "${t_parent_of_delete_target}" 1>&2
+                continue  # success, if you squint a little
+            fi
+            if test -d "${t_parent_of_delete_target}"; then :; else
+                printf "${PROG} (error): parent of cache directory to delete exists, but is not a directory: \"%s\"; bailing out\n" \
+                       "${t_parent_of_delete_target}" 1>&2
+                exit 1
+            fi
+
+            if test "${t_parent_of_delete_target}" = 'c-v1'; then
+                printf "${PROG} (error): internal consistency check failure: ascended too far up to 'c-v1' directory in cache; (was processing: \"%s\"); bainling out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+
+            # Okay, we have checked our surroundings and things look
+            # sane. Clearing the cache simply means deleting the files and
+            # directories beneath our target location.
+
+            local -a t_find_opts=()
+            local -a t_maybe_verbose=()
+
+            # Never follow symbolic links. This program does not create any
+            # symbolic links, so following them while performing a destructive
+            # action such as we are doing here could lead to accidental data
+            # loss. Even though we want our cache to be friendly to
+            # hand-hacking, we don't want that at the expense of safety. Hence
+            # we err on the side of safety here.
+            t_find_opts+=( '-P' )
+
+            t_find_opts+=( "${t_parent_of_delete_target}/" )  # yes, explicit trailing slash
+
+            # This ensures only item /beneath/ ${t_parent_of_delete_target}
+            # are emitted, and not the directory itself (which we do not want
+            # to delete).
+            t_find_opts+=( '-mindepth' )
+            t_find_opts+=( '1' )
+
+            t_find_opts+=( '-depth' )  # process directory contents in depth-first order;
+                                       # (yes, this is in POSIX)
+
+            if ${BE_VERBOSE}; then
+                t_maybe_verbose+=( '-v' )  # understood by both rm(1) and rmdir(1)
+            fi
+
+            # We'll take two passes over the cache subdir: first delete all
+            # the files, and then delete all the directories.
+
+            "${FIND_PROG}" "${t_find_opts[@]}" -type f -print0 \
+                | "${XARGS_PROG}" -0 --no-run-if-empty "${RM_PROG}" "${t_maybe_verbose[@]}"
+
+            if test $? -ne 0; then
+                printf "${PROG} (error): error clearing cache collection subdir files for %s; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            if ${BE_VERBOSE}; then
+                printf "${PROG} (info): successfully cleared cache collection subdir files for %s\n" \
+                       "${__t_pqf}" 1>&2
+            fi
+
+
+            "${FIND_PROG}" "${t_find_opts[@]}" -type d -print0 \
+                | "${XARGS_PROG}" -0 --no-run-if-empty "${RMDIR_PROG}" "${t_maybe_verbose[@]}"
+
+            if test $? -ne 0; then
+                printf "${PROG} (error): error clearing cache collection subdirs for %s; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            if ${BE_VERBOSE}; then
+                printf "${PROG} (info): successfully cleared cache collection subdirs for %s\n" \
+                       "${__t_pqf}" 1>&2
+            fi
+        fi
+    done
+}
+
+
+f_perform_do_clear_all_or_die () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # Recall that the path to a typical object in our cache has the following
+    # structure:
+    #
+    #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/${API_PATH}.../${HASH_2}/${HASH_REST}/rsp-body.json
+    #                                                               ^^^^^^^^^^^^^^
+    #
+    # Here we are deleting everything that is a subdir or file beneath the
+    # '/gh-api-v3/' path segment, as illustrated above. This has the effect of
+    # deleting all cached objects for this particular GitHub user (reflected
+    # in the path as /${GH_USERNAME}/).
+    #
+    # We conceivably could get rid of the 'gh-api-v3' parent directory, too,
+    # but there's little point in it. The primary use case for clearing the
+    # cache is to get a clean slate before repopulating it.
+    #
+    # We MUST NOT remove the '/c-v1/' directory. It is possible that we have
+    # other tools with their own subdirs beneath that location ('gh-api-v4'
+    # anyone?).
+
+    # This represents the path up through the 'gh-api-v3' token.
+    local t_parent_of_delete_target=${AGH_CACHE_GH_V3_DIR}
+
+    # Since we are being destructive, let's be extra careful...
+    if test -e "${t_parent_of_delete_target}"; then :; else
+        printf "${PROG} (warning): parent of cache directory to delete does not exist (nothing to do): %s\n" \
+               "${t_parent_of_delete_target}" 1>&2
+        return 0  # success, if you squint a little
+    fi
+    if test -d "${t_parent_of_delete_target}"; then :; else
+        printf "${PROG} (error): parent of cache directory to delete exists, but is not a directory: \"%s\"; bailing out\n" \
+               "${t_parent_of_delete_target}" 1>&2
+        exit 1
+    fi
+
+    local t_this_bname=$("${BASENAME_PROG}" "${t_parent_of_delete_target}") || exit 1
+
+    if test "${t_this_bname}" = 'gh-api-v3'; then :; else
+        printf "${PROG} (error): internal consistency check failure: basename of AGH_CACHE_GH_V3_DIR expected to be 'gh-api-v3', but got: \"%s\"; bainling out\n" \
+               "${t_this_bname}" 1>&2
+        exit 1
+    fi
+
+    local t_p1=$("${DIRNAME_PROG}" "${t_parent_of_delete_target}") || exit 1
+    if test '.' = "${t_p1}"; then
+        printf "${PROG} (error): ${FUNCNAME}() [line $LINENO]: dirname of t_p1 is '.' (probably misspelled variable caused 'dirname' to be invoked on an empty string); bailing out\n" 1>&2
+        exit 1
+    fi
+
+    local t_p1_bname=$("${BASENAME_PROG}" "${t_p1}") || exit 1
+
+    if test "${t_p1_bname}" = 'c-v1'; then :; else
+        printf "${PROG} (error): internal consistency check failure: basename of parent ('\${AGH_CACHE_GH_V3_DIR}/../') expected to be 'c-v1', but got: \"%s\"; bainling out\n" \
+               "${t_p1_bname}" 1>&2
+        exit 1
+    fi
+
+    # Okay, we have checked our surroundings and things look sane. Clearing
+    # the cache simply means deleting the files and directories beneath our
+    # target location, as explained above.
+
+    local -a t_find_opts=()
+    local -a t_maybe_verbose=()
+
+    # Never follow symbolic links. This program does not create any symbolic
+    # links, so following them while performing a destructive action such as
+    # we are doing here could lead to accidental data loss. Even though we
+    # want our cache to be friendly to hand-hacking, we don't want that at the
+    # expense of safety. Hence we err on the side of safety here.
+    t_find_opts+=( '-P' )
+
+    t_find_opts+=( "${t_parent_of_delete_target}/" )  # yes, explicit trailing slash
+
+    # This ensures only item /beneath/ ${t_parent_of_delete_target} are
+    # emitted, and not the directory itself (which we do not want to delete).
+    t_find_opts+=( '-mindepth' )
+    t_find_opts+=( '1' )
+
+    t_find_opts+=( '-depth' )  # process directory contents in depth-first order;
+                               # (yes, this is in POSIX)
+
+    if ${BE_VERBOSE}; then
+        t_maybe_verbose+=( '-v' )  # understood by both rm(1) and rmdir(1)
+    fi
+
+    # We'll take two passes over the cache: first delete all the files, and
+    # then delete all the directories.
+
+    "${FIND_PROG}" "${t_find_opts[@]}" -type f -print0 \
+      | "${XARGS_PROG}" -0 --no-run-if-empty "${RM_PROG}" "${t_maybe_verbose[@]}"
+
+    if test $? -ne 0; then
+        printf "${PROG} (error): error clearing cache files; bailing out\n" 1>&2
+        exit 1
+    fi
+    if ${BE_VERBOSE}; then
+        printf "${PROG} (info): successfully cleared cache files\n" 1>&2
+    fi
+
+
+    "${FIND_PROG}" "${t_find_opts[@]}" -type d -print0 \
+      | "${XARGS_PROG}" -0 --no-run-if-empty "${RMDIR_PROG}" "${t_maybe_verbose[@]}"
+
+    if test $? -ne 0; then
+        printf "${PROG} (error): error clearing cache subdirs; bailing out\n" 1>&2
+        exit 1
+    fi
+    if ${BE_VERBOSE}; then
+        printf "${PROG} (info): successfully cleared cache subdirs\n" 1>&2
+    fi
+
+    return 0  # success
+}
+
+
+pos_last_plus_one=$(( $# + 1 ))
+
+# Each value is one or zero, which indicates whether or not the option is
+# expected to have an argument.
+#
+declare -A longopt_spec=(
+    ['help']=0      # -h
+    ['version']=0   # -V
+
+    ['clear']=0
+    ['clear-all']=0
+
+    ['get']=0
+    ['get-cached']=0
+
+    ['update']=0
+
+    ['verbose']=0   # -v
+)
+
+# internal sanity check
+for one_key in "${!longopt_spec[@]}"; do
+    one_val=${longopt_spec[${one_key}]}
+    if [[ $one_val =~ ^[01]$ ]]; then :; else
+        printf "${PROG} (BUG) [line $LINENO]: value (%s) for longopt key '%s' must be either 0 or 1; bailing out\n" \
+               "${one_val}" "${one_key}" 1>&2
+        exit 1
+    fi
+done
+
+if test $# -gt 0; then
+
+    # Using getopts in "silent mode". Note that adding '-' to the optstring allows us to
+    # process GNU-style long-form options; that option is specified to take an argument to
+    # cause getopts to place whatever follows the second '-' character into OPTARG.
+    #
+    # Note that getopts will automatically stop processsing options upon encountering
+    # '--', but we still need to deal with the pathological form --=BLAH (no option name,
+    # just a value using the equals-sign syntax).
+    #
+    while getopts ':-:hVv' opt
+    do
+        : $PROG \(trace: $LINENO\): opt is: $opt
+
+        if test "${opt}" = '-'; then
+
+            # Intercepting processing of long-form option. This conditional
+            # block will set up the 'opt', 'OPTARG', and 'OPTIND' variables for
+            # the code that follows, just as if getopts had the capability to
+            # process long-form options.
+
+            # OPTARG here is one of:
+            #
+            #     =BLAH    (which means user specified '--=BLAH')
+            # or:
+            #     foo
+            # or:
+            #     foo=FOOVAL
+
+            if [[ ${OPTARG} =~ .*=.* ]]; then
+
+                : $PROG \(trace: $LINENO\): OPTARG is name=value style
+
+                # Keep everything up to the first '=' sign. Note that if the
+                # option was specified as: --foo=FOOVAL, then $opt here will be
+                # 'foo' (no hyphen chars).
+                opt=${OPTARG/=*/}
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                : $PROG \(trace: $LINENO\): a long option name must be at least two characters in length
+                if test ${#opt} -le 1; then
+                    printf "${PROG} (error): invalid long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                if $t_exists; then :; else
+                    # Note that we need to restore the leading '-' chars
+                    printf "${PROG} (error): unrecognized long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # Since we know the option was specified in --foo=BAR form, the
+                # option was specified erroneously unless the option's long-form
+                # spec indicates that it can accept an argument.
+                #
+                if test ${longopt_spec[${opt}]} -ne 1; then
+                    printf "${PROG} (error): option '--%s' does not take an argument; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                OPTARG=${OPTARG#*=}  # keep everything after the first '=' sign
+                : $PROG \(trace: $LINENO\): OPTARG is: $OPTARG
+
+                # All of our command line options that accept arguments
+                # require the values for those arguments to be non-empty
+                # strings.
+                if [[ "${OPTARG}" =~ $RE_BLANK ]]; then
+                    printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+            else
+                : $PROG \(trace: $LINENO\): OPTARG is name-only style
+
+                opt="$OPTARG"
+                : $PROG \(trace: $LINENO\): opt is: $opt
+
+                if test -z "${opt}"; then
+
+                    # This should be a "can't happen" scenario; since bash's 'getopts'
+                    # implementation should directly handle the magic '--' token, we
+                    # should never fall through here.
+
+                    printf "${PROG} (BUG) [line $LINENO]: received empty OPTARG, which means getopts did not handle the stand-alone '--' token; bailing out\n" 1>&2
+                    exit 1
+                fi
+
+                : $PROG \(trace: $LINENO\): a non-empty long option name must be at least two characters in length
+                if test ${#opt} -lt 2; then
+                    printf "${PROG} (error): invalid long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                t_exists=false
+                for one_key in "${!longopt_spec[@]}"; do
+                    if test "${opt}" = "${one_key}"; then
+                        t_exists=true
+                        break
+                    fi
+                done
+
+                if $t_exists; then :; else
+                    printf "${PROG} (error): unrecognized long option '--%s'; bailing out\n" "${opt}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+
+                # We know the option was specified in one of the following forms:
+                #
+                #     --foo
+                # or:
+                #     --foo FOOVAL
+                #
+                # The option's long-form spec will tell us whether or not an argument is
+                # expected for the option.
+                #
+                if test ${longopt_spec[${opt}]} -eq 1; then
+
+                    # If bumping OPTIND would put us more than one beyond the "last pos
+                    # plus one", then there is no argument provided at position OPTIND for
+                    # us to consume.
+                    #
+                    if (( $(( $OPTIND + 1 )) > pos_last_plus_one )); then
+
+                        printf "${PROG} (error): missing argument for option --${OPTARG}\n" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+
+                    OPTARG=${@:${OPTIND}:1}
+                    (( ++OPTIND ))
+                    : $PROG \(trace: $LINENO\): manually incremented OPTIND to: $OPTIND
+
+                    # All of our command line options that accept arguments
+                    # require the values for those arguments to be non-empty
+                    # strings.
+                    if [[ "${OPTARG}" =~ $RE_BLANK ]]; then
+                        printf "${PROG} (error): argument for option '--%s' may not be blank; bailing out\n" "${opt}" 1>&2
+                        f_print_help 1>&2
+                        exit 1
+                    fi
+                fi
+            fi
+        fi
+
+        # Normal getopts style processing happens beneath here, with the slight
+        # twist that 'opt' may contain a long-form option name.
+
+        case $opt in
+
+            'help' | 'h' )
+                # print help message
+                f_print_help
+                exit 0
+                ;;
+
+
+            'version' | 'V' )
+                # print program version info
+                f_print_version
+                exit 0
+                ;;
+
+            'clear')
+                f_set_cmd_mode_clear_or_die '--clear'
+                WANT_CLEAR_SOME=true
+                ;;
+
+            'clear-all')
+                f_set_cmd_mode_clear_or_die '--clear-all'
+                WANT_CLEAR_ALL=true
+                ;;
+
+            'get')
+                f_set_cmd_mode_get_one_or_die '--get'
+                ;;
+
+            'get-cached')
+                f_set_cmd_mode_get_cached_one_or_die '--get-cached'
+                ;;
+
+            'update')
+                f_set_cmd_mode_update_or_die '--update'
+                ;;
+
+
+            'verbose' | 'v' )
+                # Accumulating 'verbose' opt. A single -v opt simply turns
+                # BE_VERBOSE on (enables (additional) info-level messages). Two -v
+                # opts turns on $DEBUGGING, which additionally enables debug-level
+                # messages. Three or more '-v' opts turns $TRACING on. Note that
+                # if you intend to turn tracing on, you'll probably want your -v
+                # opts to be the first opts on the command line (so they take
+                # effect earlier).
+                if $BE_VERBOSE; then
+
+                    if $DEBUGGING; then
+
+                        # We've seen at least two -v opt before, so now we're
+                        # turning tracing on.
+
+                        if $TRACING; then
+                            : $PROG \(trace: $LINENO\): tracing already enabled
+                        else
+                            # See comments at the decl spot for $TRACING
+                            # pertaining to why we maintain an "application"
+                            # $TRACING flag separate from bash's built-in 'xtrace'
+                            # (set -x) shell option.
+
+                            # Enable tracking before setting our app-level
+                            # $TRACING flag so that setting it is the first thing
+                            # that appears in the trace.
+                            set -x
+                            TRACING=true
+                        fi
+                    else
+                        # Second -v opt we're seeing
+                        DEBUGGING=true
+                        # Just to give a warm and fuzzy...
+                        printf "${PROG} (debug): debug-level output enabled\n" 1>&2
+                    fi
+                else
+                    # First -v opt we're seeing
+                    BE_VERBOSE=true
+                fi
+                ;;
+
+
+            ':')  # getopts put : in opt
+                  # Note that we need to restore the leading '-' that getopts
+                  # has sliced off.
+                  printf "${PROG} (error): missing argument for option -${OPTARG}\n" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            '?')  # getopts put ? in opt
+                  # Unrecognized option; note that we need to restore the leading '-' that
+                  # getopts has sliced off.
+                  printf "${PROG} (error): unrecognized option '-%s'; bailing out\n" "${OPTARG}" 1>&2
+                  f_print_help 1>&2
+                  exit 1
+                  ;;
+
+            * )   printf "${PROG} (BUG) [line $LINENO]: unhandled option case; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                  exit 1
+                  ;;
+        esac
+    done
+fi
+
+# shift off all arguments already handled
+let ii=1;  # shell OPTIND index starts at 1
+while (( ii < ${OPTIND} )); do
+    shift
+    (( ++ii ))
+    : $PROG \(trace: $LINENO\): ii is now: $ii
+done
+
+# Any remaining command line parameters will be interpretted as URLs (or URI
+# paths).
+#
+while test $# -gt 0; do
+    INPUT_URLS_OR_PATHS+=("$1")
+    shift
+done
+
+MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
+if test $? -ne 0; then
+    printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
+    exit 1
+fi
+#
+# This should be a "can't happen" scenario, but since we do a 'rm -fr ...' on
+# the value when we are done, we want to be belt-and-suspenders about it...
+#
+if test -z "${MY_TMP_DIR}"; then
+    printf "${PROG} (error) temporary directory path is empty; bailing out\n" 1>&2
+    exit 1
+fi
+function f_cleanup_rmfr_tmpdir () {
+    local -a t_rm_opts=()
+    t_rm_opts+=('-f')
+    t_rm_opts+=('-r')
+    if $TRACING; then
+        t_rm_opts+=('-v')  # verbose
+    fi
+    "${RM_PROG}" "${t_rm_opts[@]}" "${MY_TMP_DIR}"
+    # Ignore exit status -- Is a cleanup hook, so do not exit the process if
+    # 'rm' failed; keep going...
+}
+F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
+
+declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
+
+f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
+
+
+# Validate and normalize all user-provided URL_OR_PATH parameters.
+# Populate $INPUT_URLS_OR_PATHS_NORMALIZED for use throughout the program.
+#
+for t_one_url_or_path in "${INPUT_URLS_OR_PATHS[@]}"; do
+
+    t_was_path=false
+
+    if [[ "${t_one_url_or_path}" =~ $RE_EMPTY ]]; then
+        printf "${PROG} (error): values provided for URL_OR_PATH may not be empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    if [[ "${t_one_url_or_path}" =~ $RE_BLANK ]]; then
+        printf "${PROG} (error): values provided for URL_OR_PATH may not be blank; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    t_url_full=${t_one_url_or_path}
+    if [[ "${t_one_url_or_path}" =~ $RE_STARTS_WITH_SLASH ]]; then
+        t_was_path=true
+        t_url_full="${gl_const_github_api_base_url}${t_one_url_or_path}"
+    else
+        # We are going to treat the user-provided value as a URL, so make sure
+        # it actually looks like one before we attempt to normalize it below.
+        #
+        # The below logic would catch a bad URL, anyway, but but we want to
+        # catch it as early as possible in order to provide the best error
+        # message possible. Here it is clearly a user error (or a bug in
+        # RE_URI), whereas below there could be a bug in our munging.
+        #
+        if [[ "${t_one_url_or_path}" =~ $RE_URI ]]; then :; else
+            printf "${PROG} (error): provided value \"%s\" is not a valid URL; bailing out\n" \
+                   "${t_one_url_or_path}" 1>&2
+            exit 1
+        fi
+    fi
+
+    # CAREFUL: ads-github-normalize-url will take any string we throw at it
+    #          and try to treat it as a URL to be "normalized", but that does
+    #          not guarantee that the thing we get back is a legit URL.
+    #
+    t_url_full_normalized=$("${AGH_NORMALIZE_URL_PROG}" "${t_url_full}")
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to \"normalize\" URL: \"%s\"; bailing out" \
+               "${t_url_full}" 1>&2
+        exit 1
+    fi
+
+    if [[ "${t_url_full_normalized}" =~ $RE_URI ]]; then :; else
+        if $t_was_path; then
+            printf "${PROG} (error): was unable to form a legit URI out of provided path value \"%s\"; bailing out\n" \
+                   "${t_one_url_or_path}" 1>&2
+            exit 1
+        else
+            # Since we checked the user-provided URL value above, a problem
+            # here might be related to our normalization munging (so print
+            # both values).
+            #
+            printf "${PROG} (error): was unable to form a legit, normalized URI: provided: \"%s\"; normalized: \"%s\"; bailing out\n" \
+                   "${t_one_url_or_path}" \
+                   "${t_url_full_normalized}" 1>&2
+            exit 1
+        fi
+    fi
+
+    if [[ "${t_url_full_normalized}" =~ $RE_STARTS_WITH_GITHUB_V3_API_URL_BASE ]]; then :; else
+        if $t_was_path; then
+            # User provided a path value, and we somehow munged it incorrectly
+            # into a GitHub v3 API URL.
+            printf "${PROG} (BUG): [line $LINENO]: not a legit GitHub URL: provided: \"%s\"; munged: \"%s\"; bailing out\n" \
+                   "${t_one_url_or_path}" \
+                   "${t_url_full_normalized}" 1>&2
+            exit 1
+        else
+            printf "${PROG} (error): provided URL not recognized as a GitHub v3 URL: \"%s\"; bailing out\n" \
+                   "${t_one_url_or_path}" 1>&2
+            exit 1
+        fi
+    fi
+
+    INPUT_URLS_OR_PATHS_NORMALIZED+=("${t_url_full_normalized}")
+done
+unset t_was_path
+unset t_url_full_normalized
+unset t_url_full
+
+
+# All code beyond this point
+# should be dealing with: INPUT_URLS_OR_PATHS_NORMALIZED
+#       rather than with: INPUT_URLS_OR_PATHS
+
+
+if $DO_UPDATE; then
+
+    # Note that there's a difference between "update all" and "update
+    # some".
+    #
+    # The threshold for which URLs/paths are accepted for "update some"
+    # operation is lower: any path that is "supported" by this program can be
+    # specified. The item will be fetched "through the cache", so will ensure
+    # the latest representation of it is represented in the cache. That does
+    # not, however, qualify the item for being updated in the future by an
+    # "update all" operation. Only "update-able template paths"[0] are updated
+    # during an "update all" operation, regardless of which items have been
+    # cached in the past.
+    #
+    # Also note that the two different categories of URLs/paths are not
+    # disjoint sets. Any path that happens to exist in our set of "update-able
+    # template paths" can also be explicitly listed for an "update some"
+    # operation, as well.
+    #
+    # [0] as reflected in the members of $AGH_CACHE_GH_V3_UPDATE_TPATHS[...]
+
+    if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -eq 0; then
+        if $DEBUGGING; then
+            printf "${PROG} (debug): update mode: will update all \"updatable\"\n" 1>&2
+        fi
+        f_perform_do_update_all_or_die
+    else
+        if $DEBUGGING; then
+            printf "${PROG} (debug): update mode: will attempt to update %d URLs/URI paths\n" \
+                   "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" 1>&2
+        fi
+        f_perform_do_update_some_or_die "${INPUT_URLS_OR_PATHS_NORMALIZED[@]}"
+    fi
+
+elif $DO_CLEAR; then
+
+    if $WANT_CLEAR_ALL; then
+        if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -gt 0; then
+            printf "${PROG} (error): \"clear all\" mode enabled, but specific URLs/URI paths provided; bailing out\n" 1>&2
+            f_print_help 1>&2
+            exit 1
+        fi
+        if $DEBUGGING; then
+            printf "${PROG} (debug): \"clear all\" mode: will clear all items from all caches\n" 1>&2
+        fi
+
+        f_perform_do_clear_all_or_die
+
+    elif $WANT_CLEAR_SOME; then
+        if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -eq 0; then
+            printf "${PROG} (error): \"clear some\" mode enabled, but no specific URLs/URI paths provided; bailing out\n" 1>&2
+            f_print_help 1>&2
+            exit 1
+        fi
+        if $DEBUGGING; then
+            printf "${PROG} (debug): \"clear some\" mode: will attempt to clear items from %d provided URLs/URI paths\n" \
+                   "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" 1>&2
+        fi
+
+        f_perform_do_clear_some_or_die "${INPUT_URLS_OR_PATHS_NORMALIZED[@]}"
+
+    else
+        printf "${PROG} (BUG): [line $LINENO]: expected WANT_CLEAR_ALL or WANT_CLEAR_SOME to be set here; bailing out\n" 1>&2
+        exit 1
+    fi
+
+elif $DO_GET_ONE; then
+
+    if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -eq 0; then
+        printf "${PROG} (error): \"get one\" mode enabled, but no specific URLs/URI path provided; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -gt 1; then
+        printf "${PROG} (error): \"get one\" mode enabled, but %d specific URLs/URI paths provided; bailing out\n" \
+               "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if $DEBUGGING; then
+        printf "${PROG} (debug): \"get one\" mode: will attempt to retrieve item for provided URLs/URI path: %s\n" \
+               "${INPUT_URLS_OR_PATHS_NORMALIZED[0]}" 1>&2
+    fi
+
+    f_perform_do_get_one_or_die "${INPUT_URLS_OR_PATHS_NORMALIZED[@]}"
+
+elif $DO_GET_CACHED_ONE; then
+
+    if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -eq 0; then
+        printf "${PROG} (error): \"get cached one\" mode enabled, but no specific URLs/URI path provided; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if test "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" -gt 1; then
+        printf "${PROG} (error): \"get cached one\" mode enabled, but %d specific URLs/URI paths provided; bailing out\n" \
+               "${#INPUT_URLS_OR_PATHS_NORMALIZED[@]}" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if $DEBUGGING; then
+        printf "${PROG} (debug): \"get cached one\" mode: will attempt to retrieve item for provided URLs/URI path: %s\n" \
+               "${INPUT_URLS_OR_PATHS_NORMALIZED[0]}" 1>&2
+    fi
+
+    f_perform_do_get_cached_one_or_die "${INPUT_URLS_OR_PATHS_NORMALIZED[@]}"
+
+else
+    printf "${PROG} (BUG): [line $LINENO]: unaccounted for command mode? (\"%s\"); bailing out\n" \
+           "${COMMAND_MODE_NAME}" 1>&2
+    exit 1
+fi
+
+exit 0
+
+
+#
+# ----------------------------------------------------------------------------
+# Documentation
+#
+# The docs are in Perl's POD format, so you can run either the 'perldoc' or
+# 'pod2man' programs on this file to produce a man page.
+#
+# To generate a man page for distribution (in a tarball or RPM, for instance),
+# you'll probably want to run pod2man something like this:
+#
+#     $ pod2man /path/to/this/file \
+#               --center='ads-github-tools' \
+#               --release='ads-github-tools-0.3.1' \
+#               --section='1' \
+#               > /outputdir/ads-github-cache.1
+#
+# To inspect the page formatting, etc., you can pipe the above 'pod2man'
+# command to:
+#
+#     'man -l -'
+#
+# instead of redirecting the output to a file.
+#
+# ----------------------------------------------------------------------------
+
+=pod
+
+=encoding utf8
+
+=head1 NAME
+
+  ads-github-cache - manipulate a user-specific cache of GitHub responses
+
+
+=head1 SYNOPSIS
+
+  ads-github-cache (-h | --help)
+  ads-github-cache (-V | --version)
+  ads-github-cache [(-v | --verbose)] --update [--] [URL_OR_PATH...]
+  ads-github-cache [(-v | --verbose)] (--get | --get-cached) [--] URL_OR_PATH
+  ads-github-cache [(-v | --verbose)] --clear  [--] [URL_OR_PATH...]
+  ads-github-cache [(-v | --verbose)] --clear-all
+
+
+=head1 DESCRIPTION
+
+The C<ads-github-cache> utility is part of the C<ads-github-tools> project.
+
+The C<ads-github-cache> program allows one to manipulate the user-specific
+cache of GitHub objects that are used by the utilities in the
+C<ads-github-tools> project.
+
+
+=head1 OPTIONS
+
+The options are as follows:
+
+=over 4
+
+=item -h, --help
+
+Print help usage message
+
+
+=item --clear
+
+Remove the specified B<URL_OR_PATH>s from the cache.
+
+
+=item --clear-all
+
+Remove all cached entries, for all URLs or API resource paths.
+
+
+=item --get
+
+Obtain content of the specified B<URL_OR_PATH> through the cache.
+
+Network access is required, even though the data may be served out of the
+locally cached storage of it. Before emitting the data, the program checks
+with the GitHub service to make sure the locally cached copy (if any) is
+up-to-data. For folks familiar with HTTP caching, the I<"Etag"> is checked
+against the resource at the GitHub server.
+
+Even though network access is performed, the cost of checking for updates is
+fast and cheap compared to the cost of fetching all of the data
+unconditionally.
+
+If you wish to avoid all network access, see the C<--get-cached> option.
+
+
+=item --get-cached
+
+Like C<--get>, but error out if the item for the specified B<URL_OR_PATH> is
+not already present in the cache.
+
+Avoids updating the cache to obtain the item. The data served may be stale.
+
+No network access is performed.
+
+
+=item --update
+
+Update the cache entry for the specified B<URL_OR_PATH>s, or for I<all> of the
+"update-able" paths.
+
+An "update" is similar to a C<--get>, except that the content for the cached
+item is not emitted on C<stdout>. A C<--get> happens to keep the cache current
+as a side-effect when the caller's real intention is to obtain the data
+(preferably inexpensively). By contrast, an C<--update> refreshes the cache as
+its primary intent.
+
+
+=item -V, --version
+
+Print the version of the program to stdout and then exit.
+
+
+=item -v, --verbose
+
+Turn on verbose mode. Causes program to emit messages on C<stderr> indicating
+what it is doing. The option may be specified multiple times to increase
+further the level of verbosity. One C<-v> option enables info-level output;
+two such opts enable debug-level output; three or more enable trace-level
+output.
+
+
+=item --
+
+Signals the end of options and disables further options processing.
+
+=back
+
+
+=head1 CONTEXT
+
+The primary, direct, day-to-day usage for most users will likely be:
+
+    $ ads-github-cache -v --update
+
+That operation will refresh the cache for the built-in list of supported
+"update-able" API resource paths. As you might expect, the first time the
+above command is run takes the longest because the local cache is empty.
+
+After the above invocation completes, the utilities in the C<ads-github-tools>
+project will operate I<much> faster than is possible when they need to
+repeatedly access the network (in most cases, to retrieve the exact same data
+that was retrieved earlier).
+
+=over 4
+
+=item B<Note:>
+
+Not all access paths are yet able to leverage the cache. Those
+C<ads-github-tools> utilities that predate the C<ads-github-cache> program
+will need to be modified in order to take advantage of the cache. Look for
+regular improvements in this area in upcoming releases.
+
+=back
+
+The cache itself is specific to the currently in-effect GitHub user, as
+determined by the first entry matching the host machine C<api.github.com> in
+the user's C<~/.netrc> file. Cached objects for different GitHub users are
+kept entirely separate. A single Unix user may therefore use different GitHub
+user accounts at different times without any accidental cross-account
+pollution of the cached objects from the various GitHub accounts.
+
+The content of the cache implicitly contains the JSON representations, as
+obtained from the GitHub v3 API, for the supported resource paths. E.g., the
+GitHub API operation: C<GET /user/repos> has a resource path (or "API path")
+of C</user/repos>. The JSON in the HTTP response body is stored byte-for-byte
+as it was received. The same goes for the HTTP response headers, but they are
+saved in a separate file on disk. Thus, everyB<[0]> object in the cache is
+represented by the content from two on-disk files: the headers and the body
+content.
+
+=over 4
+
+=item B<[0]> Well, I<almost> "every".
+
+There are "paged collections" that are stored with a slightly different
+representation, but those details are not important here.
+
+=back
+
+Not all GitHub resource paths are supported (in fact, writing in 2020-10, most
+are not). Support is added for resource paths based on the needs of the
+C<ads-github-tools>; those paths that would provide the most benefit will be
+implemented first. Some may never be implemented (but please open an issue if
+there is one that is currently unsupported that you would find useful).
+
+For C<--get> and C<--get-cached> operations, objects from the cache are
+written to C<stdout>. The former retrieves objects "I<through> the cache",
+which requires network access; the operation checks the I<"Etag"> of the
+cached object against the GitHub API, and pulls down a new or updated copy if
+the local copy is stale. The latter retrieves objects "I<from> the cache",
+which is a strictly offline operation; an error is emitted if a copy of the
+requested item is not already in the cache.
+
+Representations for collections that may need to be paged when obtained from
+the GitHub v3 API can be obtained through or from the cache by any arbitrary
+page size (subject to the typical max of 100 imposed by the GitHub API) by
+providing values for the C<page> and C<per_page> query params.
+
+However, B<callers who wish to obtain all of the items in a collection need
+not futz around with paging at all. Just leave off the paging parameters from
+the requested URL (or path) to obtain the fully-catenated representation.>
+This allows the calling program to stream over all of the results one object
+at a time without having to worry about paging.
+
+There are a lot of GitHub-related operations for which the caller (or user)
+may not care about having up-to-the-moment cache correctness; in fact, most
+data is of the sort that minutes-, hours-, or even days-old information is
+probably fine for most interactive use cases. With that being the case, and in
+recognition of the fact that the user may wish to avoid most or all network
+access, the program supports a C<--get-cached> option that causes data to be
+served I<only> from the cache (and error-out if the item is not in the cache).
+
+All B<URL_OR_PATH> parameters can be specified as either a full GitHub URL or
+as a URI path. A full URL must begin with:
+
+    https://api.github.com/
+
+All URI path must begin with a slash ('/') character, and will be interpreted
+as meaning the resource for the specified path at the above GitHub v3 API
+URL. All other URLs and/or path values will be rejected.
+
+
+=head2 Supported API resource paths
+
+Where the C<--help> documentation indicates that a B<URL_OR_PATH> may be
+specified (or is required to be specified), the value can be provided either
+as the full GitHub v3 API URL, or just the portion of the URL that consists of
+the resource path, the query parameters (if any), and the
+"fragment"B<[0]>. Therefore, the following are two equivalent ways to request
+the data for all GitHub repositories in the account of the currently
+authenticated GitHub user:
+
+    $ ads-github-cache --get '/user/repos'
+
+    $ ads-github-cache --get 'https://api.github.com/user/repos'
+
+
+When only a resource path is provided, it is always treated as being relative
+to C<https://api.github.com>.
+
+
+=over 4
+
+=item B<[0]> Note:
+
+The "fragment" component is allowed and recognized, but is otherwise ignored
+by the current implementation.
+
+=back
+
+
+Note that query parameters may be supplied with either form. The following are
+equivalent ways to request the data for just the first ten repositories:
+
+    $ ads-github-cache --get '/user/repos?page=1&per_page=10'
+
+    $ ads-github-cache --get 'https://api.github.com/user/repos?page=1&per_page=10'
+
+
+The list of currently supported GitHub API resource paths includes the
+following:
+
+=over 4
+
+=item * /user/repos
+
+See also: L<https://developer.github.com/v3/repos/#list-repositories-for-the-authenticated-user>
+
+=back
+
+The above resource paths may be specified on the command line for all
+operations that accept a URL or API resource path (C<--get>, C<--get-cached>,
+C<--update>, and C<--clear>).
+
+Over time, support for additional resource paths will be added, as informed by
+the needs of the other utilities that comprise the C<ads-github-tools>.
+
+
+=head2 Paged Collections
+
+GitHub imposes limits on the number of items that may be retrieved at one time
+from a single API call. A GitHub API resource request that represents a
+collection of items can, in general, only be requested 100 at a time. The
+number of items to be retrieved in a single API request is the "page size",
+and the maximum page size allowed for most resources is 100. Therefore,
+retrieving all of the items in a large collection must be done across multiple
+API requests. The total number of requests that would need to be made to
+obtain all items in a given collection is determined by both the maximum
+allowed page size and the number of items that exist in the collection.
+
+The C<ads-github-cache> program refers to such resources as "paged
+collections". Where the tool has built-in knowledge about some particular
+"paged collections", their resource paths I<without any query parameters> can
+be used to mean "all items in the collection". This goes a long way toward
+hiding the I<need> to do paging from the user (or invoking
+application). Rather than request:
+
+    /user/repos?per_page=100&page=1
+    /user/repos?per_page=100&page=2
+    /user/repos?per_page=100&page=3
+    /user/repos?per_page=100&page=4
+    /user/repos?per_page=100&page=5
+    ...
+
+the entire collection can instead be requested by simply omitting the query
+params:
+
+    /user/repos
+
+However, this capability does not preclude the use of explicit paging where
+that is desired.
+
+Internally, the C<ads-github-cache> program always uses a page size of
+100. This ensures the fewest number of round trips to the server, at the cost
+of consuming large data responses (which are just streamed to disk). This
+internal detail has local ramifications as well, though. The cache stores the
+objects as they were retrieved, one page at a time. Knowing that the page size
+is always 100, the caller can request individual pages from the cache even
+when operating without the network:
+
+    $ ads-github-cache --get-cached '/user/repos?per_page=100&page=7'
+
+It is also important when reconstituting the entire collection from the
+cache. Using a higher page size means there are fewer individual files to be
+manipulated, which is faster than accessing man small files (and also makes
+better use of the allocated disk blocks).
+
+
+=head2 Filesystem layout
+
+=over 4
+
+=item B<FIXME:>
+
+Document filesystem layout of the cache. For now, see the comments in the
+source code.
+
+=back
+
+
+=head2 Clearing the cache
+
+Think twice before clearing items from the cache. Cache misses can be very
+expensive (time-wise) to re-populate, especially for potentially large
+collections (such as '/user/repos').
+
+Think three times before clearing the entire cache; same reason, only more
+so.
+
+Because clearing the entire cache can be so costly, doing so requires an
+explicit C<--clear-all> command line option.
+
+
+=head2 General project direction
+
+Now that we have a working cache implementation, the C<ads-github-tools>
+project is (slowly) moving in the direction of having the tools assume an
+up-to-date cache, to the extent that that makes sense. That means cache data
+access pattern using the C<--get-cached> option wherever possible. Exceptions
+will be made for specific use cases where that model does not work, but no
+analysis has yet been done to categorize the particulars.
+
+The new approach will impact end-users in at least two ways:
+
+=over
+
+=item 1
+
+An explicit "update" operation will need to be run from time to time to ensure
+the cache is not too far out of date. It is expected that regular users will
+just perform this task via some automated means (e.g., a daily cron job). On
+Debian systems, folks regularly run C<apt-get update> prior to performing
+package management tasks, and that works well. Taking a similar approach with
+the cached used by the C<ads-github-tools> project is not expected to
+introduce any serious problems, either.
+
+=item 2
+
+The operations of the individual tools will become much faster as they
+integrate use of the cache. For example, it takes about a minute for the
+author to retrieve every page for his list of GitHub repos (18 pages, at 100
+items per page). When cached, slurping all of that data out of the cache takes
+less than one-tenth of a second; from the command line, that feels like it is
+"instantaneous".
+
+=back
+
+
+=head1 FILES
+
+=over 4
+
+=item C<~/.ads-github-tools.d/cache/>
+
+All cached objects are stored in subdirectory trees beneath this location.
+
+The cached objects for a particular GitHub user are stored in a subdirectory
+named in the form:
+
+    ~/.ads-github-tools.d/cache/gh-user-${GITHUB_USERNAME}/
+
+
+=item C<~/.netrc>
+
+Accessed indirectly (via the L</parse-netrc(1)> program) to determine the
+GitHub username (if any) that is currently in-effect.
+
+=back
+
+
+=head1 EXIT STATUS
+
+Exits with zero on success, non-zero on error.
+
+
+=head1 EXAMPLES
+
+=head2 Example 1: Update -- "Prime the cache"
+
+This is expected to be the most common operation performed by end users:
+
+    $ ads-github-cache --update
+
+or, to get some ongoing feedback about what the program is doing:
+
+    $ ads-github-cache -v --update
+
+The above commands update the cache for all of the built-in "update-able" API
+resource paths. Basically, any GitHub data that the C<ads-github-tools> use
+with any frequency (or which happens to be particularly expensive to retrieve)
+is a candidate to be added to that list. See above note in
+L</"General project direction">.
+
+
+=head2 Example 2: Update particular API resource paths
+
+Update using the full GitHub v3 API URL:
+
+    $ ads-github-cache --update 'https://api.github.com/user/repos'
+
+Same thing, specifying just the resource path:
+
+    $ ads-github-cache --update '/user/repos'
+
+
+=head2 Example 3: Clear a resource from the cache
+
+Clear the third page of repo data:
+
+    $ ads-github-cache --clear '/user/repos?per_page=100&page=3'
+
+Clear the entire "paged collection" of repo data:
+
+    $ ads-github-cache --clear '/user/repos'
+
+
+=head2 Example 4: Clear the entire cache
+
+If you just want to get rid of the entire cache and start over, you can
+achieve that like this:
+
+    $ ads-github-cache --clear-all
+
+
+=head2 Example 5: Obtain data I<through> the cache (online)
+
+Request an up-to-date view of all the repo data. This performs network access
+to confirm that the cached objects are not stale, and only retrieves from the
+network those objects that are stale or which do not yet exist in the local
+cache. The cache is updated as a side-effect:
+
+    $ ads-github-cache --get '/user/repos'
+
+
+=head2 Example 6: Obtain data I<from> the cache (offline)
+
+Request the full set of repo data from the cache, and errors out if a full
+copy is not present. The copy may or may not be old/stale; no freshness check
+is made. This is, by far, the fastest way to retrieve the data:
+
+    $ ads-github-cache --get-cached '/user/repos'
+
+
+=head1 FAQ
+
+Frequently Asked Questions (with answers!)
+
+=over 4
+
+=item *
+
+B<Q:> Why do C<--update> and C<--clear> accept multiple B<URL_OR_PATH>
+parameters, but C<--get> accepts only one?
+
+B<A:> The operations performed by C<--update> and C<--clear> do not require
+any program output, just the (possible) manipulation of items in the
+cache. The semantics of C<--get> with multiple items (of potentially different
+types of resources) does not make sense in the general case. If it happens to
+make sense in your particular case, though, then just catenate the output from
+two different C<--get> invocations.
+
+
+=item *
+
+B<Q:> The C<--clear> option requires one or more specific paths, and a
+special C<--clear-all> option is used to empty out the cache entirely.
+
+With that being the case, it would be more symmetrical if C<--update> also
+required one or more specific paths, and a special C<--update-all> option were
+introduced to mean "update all update-able". Wouldn't that make more sense? As
+it stands, C<--update> without any specific paths means "update all
+update-able".
+
+B<A:> Yes, at first look that might seem to make more sense, but would that
+really be better, ergonomically? Updating is a common-case operation. Clearing
+the cache entirely is expected to be a rare occurrence (possibly something
+only done with any regularity by the author, during development). It is a
+I<feature> that clearing the entire cache requires more effort, and is more
+difficult to do accidentally.
+
+=back
+
+
+=head1 SEE ALSO
+
+=over 4
+
+=item * L<ads-github-tools(7)>
+
+
+=item * L<ads-github-normalize-url(1)>
+
+Used to put user-entered and internally constructed URLs into a consistent
+form. Various attributes of the URL contribute to the "hash signature" used to
+locate objects in the cache, so it is important that those attributes be
+represented consistently. For example, the names of the query params should be
+sorted so that two "logically equivalent" URLs hash to the same value.
+
+OTOH, users should not be burdened with such persnickety details, so as long
+as something reasonable is provided, the program can put it into the
+particular form that it needs. The L<ads-github-normalize-url(1)> tool
+provides that service to this program.
+
+
+=item * L<parse-netrc(1)>
+
+Used to obtain the first C<api.github.com> machine host entry from the user's
+C<~/.netrc> file. This is used to determine the in-effect GitHub username from
+its C<login> field, even when the user has requested a strictly offline
+operation (such as C<--get-cached>). The approach used by the tool is modeled
+on that used by L<curl(1)>, as also used internally by the
+C<ads-github-tools>.
+
+
+=item * L<https://developer.github.com/v3/#pagination>
+
+GitHub API pagination docs.
+    
+
+=back
+
+
+=head1 HISTORY
+
+The C<ads-github-cache> program first appeared in C<ads-github-tools-0.3.2>,
+which was released in October 2020.
+
+
+=head1 AUTHOR
+
+=over 4
+
+=item Alan D. Salewski  <ads@salewski.email>
+
+=back
+
+
+=head1 BUGS
+
+=over 4
+
+=item *
+
+This early version of the program is still a little rough, and very few GitHub
+API resource paths are supported. More will be added over time, as informed by
+the needs of the C<ads-github-tools>.
+
+=back
+
+There are probably tons of other bugs, too. If you find any, please report
+them as described in the C<BUGS> file.
+
+
+=head1 COPYRIGHT
+
+Copyright 2020 Alan D. Salewski
+
+=cut
