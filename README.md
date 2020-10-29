@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.3.1` (released 2020-10-12), and can
+The latest version of the project is `0.3.2` (released 2020-10-29), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.1.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
@@ -41,8 +41,31 @@ Older releases are available from the project's downloads page:
 
 # Usage
 
-Typical invocation involves only one or two commands. The author typcially
-runs these two commands once daily:
+Typical usage involves ensuring there is an updated cache, and then just
+invoking a couple of commands.
+
+The cache is updated like this:
+```
+    $ ads-github-cache -v --update
+```
+First time users will want to update the cache prior to running any of the
+other commands. It may take a while to poplute the cache the first time
+(especially if you have a large number of GitHub repos), but updating it
+thereafer is done conditionally and on an as-needed basis. Note that the only
+objects cached are those used by the various utilities in the
+C<ads-github-tools>; it does not cache any data that is not used.
+
+The cache is provided in order to avoid unnecessary network round trips to the
+GitHub API servers. The cache storage is specific to the GitHub user. A Unix
+system user may have multiple GitHub accounts (say, work and personal); the
+cached data for those GitHub users would be stored separately.
+
+Regular users would probably just run the above cache update command (say,
+once or twice a day) from a cron job (or similar). That way the cached data is
+already available when you need it.
+
+With the cached data in hand, the author typcially runs these two commands
+once daily:
 
 ```
     $ ads-github-fetch-all-upstreams -v -c
@@ -67,7 +90,17 @@ repos (assuming only a minority of them are "missing", which is the common
 case). Note that the `'-m'` (`--missing-only`) option was introduced in the
 version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
 
-At the moment (2020-10-12) there are seven tools:
+At the moment (2020-10-29) there are nine tools:
+
+* `ads-github-cache` - Manipulate the `ads-github-tools` cache. Mainly used to
+  keep relevant GitHub data at-the-ready for use by the other utilities, but
+  will also be of interest to software developers working with the GitHub v3
+  API. Because the tool can hide the paging necessary to obtain all of the
+  items for a given resource, the following is a very fast way to get all of
+  data for all of the user's repo:
+  ```
+    $ ads-github-cache --get-cached '/user/repos' | jq '.'
+  ```
 
 * `ads-github-whoami` - Show the currently authenticated GitHub user. This
   program similar in spirit to the Unix `whoami(1)` and `id(1)` commands, but
@@ -146,6 +179,15 @@ At the moment (2020-10-12) there are seven tools:
   from scratch). The `ads-github-repo-create` command was added in
   `ads-github-tools-0.3.1`.
 
+* `parse-netrc` - Parses the user's `~/.netrc` file to obtain the first
+  matching record by host machine name (and optionally by user login
+  name). This is used by `ads-github-cache` to determine the name of the
+  in-effect GitHub user account, using the approach that emulates what
+  `curl(1)` does. This allows for entirely offline cache operations against
+  the user-specific cache. The tool name does not start with the
+  `'ads-github-'` prefix because it is being considered for extraction into a
+  small stand-alone project.
+
 
 See the "Prerequisites" section below for other programs that must be
 installed and configured on your system before you can install the
@@ -170,6 +212,14 @@ utilities (`cat`, `sed`, `awk`, `rm`, ...) to be present. These utilities are
 not explicitly listed below as prerequisites as they should be present on any
 modern Unix or GNU/Linux system (or in Cygwin, if you happen to be running on
 MS Windows).
+
+The `parse-netrc` program is implemented in Rust, and requires that the
+`rustc` compiler and `cargo` programs be installed. They are distributed
+together, so if you have one you likely have the other, as well. On Debian
+based systems:
+```
+    # apt-get -u install rustc cargo
+```
 
 Many of the programs provided by `'ads-github-tools'` are implemented in Bash
 (a Bourne shell derivative). The 'ads-github-tools' project was developed and
@@ -240,18 +290,24 @@ change where things will get installed, use `./configure --prefix=/some/path`.
 
 # Future directions
 
-I'm working on sketching out a caching system for results from the GitHub API
-with the intent of making it easy to use from shell scripts or similar. The
-first two scripts noted above are a step in that direction.
+The `ads-github-tools-0.3.2` release (October 2020) introduced the foundations
+for the long-wanted caching system. It delivers on the ability to
+conditionally retrieve objects "through the cache" using `ETag:` and
+`If-None-Match:` to pull full objects over the network only when necessary. It
+also delivers on the goal of being easy to use from shell scripts or even in
+an interactive shell.
 
-Once the caching implementation is functional, the
-`ads-github-fetch-all-upstreams` will be modified to use it, perhaps via a set
-of intermediary tools. These tools will make use of the `ETag:`,
-`Last-Modified:`, and `If-Modified-Since:` HTTP headers both to avoid
-incurring unnecessary hits against the user's GitHub API rate limit and to cut
-down on unnecessary retrieval of the same data over and over.
+Note that conditionally fetching objects as described also has the benefit of
+avoiding incurring unnecessary hits against the user's GitHub API rate
+limit. (Not sure where you stand? Try `ads-github-show-rate-limits -h` to find
+out!)
 
-My current thinking is that there will be three levels of tools:
+At the moment, the caching foundation is in place, and the
+`ads-github-fetch-all-upstreams` tool uses it to good effect. But at the
+moment it is the *only* tool that does so. Others will be enhanced, as well,
+in upcoming releases.
+
+My earlier thinking was that there will be three levels of tools:
  
 1. low-level tools that store and retrieve objects from the cache, and related
    * `ads-github-cache update` (similar in spirit to `apt-get update` and `apt-file update`)
@@ -275,6 +331,9 @@ My current thinking is that there will be three levels of tools:
    * `ads-github-fetch-all-upstreams`
    * `ads-github-merge-all-upstreams`
    * `...`
+
+That does not seem like a terrible arrangement, but we have learned that there
+is value in allowing the high-level tools access the low-level cache directly.
 
 
 # License
