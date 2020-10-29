@@ -21,7 +21,7 @@
         <p class="view"><a href="https://github.com/salewski/ads-github-tools">View the Project on GitHub <small>salewski/ads-github-tools</small></a></p>
 
         <ul>
-          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2020-10-12</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.1.tar.gz"><code>ads-github-tools-0.3.1.tar.gz</code></a></li>
+          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2020-10-29</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.2.tar.gz"><code>ads-github-tools-0.3.2.tar.gz</code></a></li>
         </ul>
 
         <ul>
@@ -62,10 +62,46 @@ Enter the <code>ads-github-tools</code>.
 
 <h2>Usage</h2>
 <p>
-Typical invocation involves only one or two commands, both invoked from the
-parent directory of the user's directory that contains his GitHub projects
-(forked and otherwise). The <tt>'ads-github-tools'</tt> author typcially runs
-these two commands once or twice daily:
+Typical usage involves ensuring there is an updated cache, and then just
+invoking a couple of commands.
+</p>
+
+<p>
+The cache is updated like this:
+</p>
+<pre>
+    $ <strong>ads-github-cache -v --update</strong>
+</pre>
+<p>
+First time users will want to update the cache prior to running any of the
+other commands. It may take a while to poplute the cache the first time
+(especially if you have a large number of GitHub repos), but updating it
+thereafer is done conditionally and on an as-needed basis. Note that the only
+objects cached are those used by the various utilities in the
+<code>ads-github-tools</code>; it does not cache any data that is not used.
+</p>
+
+<p>
+The cache is provided in order to avoid unnecessary network round trips to the
+GitHub API servers and allow the utilities to work quickly in an interactive
+shell process. The cache storage is specific to each GitHub user. A Unix
+system user may have multiple GitHub accounts (say, work and personal); the
+cached data for those GitHub users would be stored separately.
+</p>
+
+<p>
+Regular users would probably just run the above cache update command (say,
+once or twice a day) from a cron job (or similar). That way the cached data is
+already available when you need it.
+</p>
+
+<p>
+With the cached data in hand, you're ready to run the other utilities. Typical
+invocation involves only one or two commands, both invoked from the parent
+directory of the user's directory that contains his GitHub projects (forked
+and otherwise). The <tt>'ads-github-tools'</tt> author typcially runs these
+two commands once or twice daily:
+</p>
 <pre>
     $ ads-github-fetch-all-upstreams -v -c
 
@@ -75,16 +111,16 @@ these two commands once or twice daily:
 
 <p>
 Many users would prefer to run those commands from a crontab (or similar); the
-author runs them manually because he's actively hacking on the tools and wants
+author runs them manually because he is actively hacking on the tools and wants
 to inspect the output.
 </p>
 
 <p>The following invocation is also handy for creating local clones of recently
-forked GitHub repos:
+forked GitHub repos:</p>
 <pre>
     $ ads-github-fetch-all-upstreams -m
 </pre>
-
+<p>
 That will clone all of a user's GitHub repos for which there is no working
 directory beneath the current directory. It can be thought of as creating
 clones of "all the new stuff (and <em>just</em> the new stuff)"; it operates much
@@ -110,8 +146,18 @@ Installation should be as simple as:
 
 <h2>Progams provided by <tt>ads-github-tools</tt></h2>
 <p>
-At the time of writing (<tt>2020-10-12</tt>) there are seven tools:
+At the time of writing (<tt>2020-10-29</tt>) there are nine tools:
 <ul>
+
+  <li><p><strong><tt>ads-github-cache</tt></strong> - Manipulate
+      the <tt>ads-github-tools</tt> cache. Mainly used to keep relevant GitHub
+      data at-the-ready for use by the other utilities, but will also be of
+      interest to software developers working with the GitHub v3 API. Because
+      the tool can hide the paging necessary to obtain all of the items for a
+      given resource, the following is a very fast way to get all of data for
+      all of the user's repo:</p><pre>
+    $ <strong>ads-github-cache --get-cached '/user/repos' | jq '.'</strong>
+</pre></li>
 
   <li><p><strong><tt>ads-github-whoami</tt></strong> - Show the currently authenticated GitHub user. This
       program similar in spirit to the Unix <strong><tt>whoami(1)</tt></strong> and <strong><tt>id(1)</tt></strong> commands, but
@@ -223,30 +269,48 @@ At the time of writing (<tt>2020-10-12</tt>) there are seven tools:
       was added in
       <strong><tt>ads-github-tools-0.3.1</tt></strong>.</p>
   </li>
+  <li><p><strong><tt>parse-netrc</tt></strong> - Parses the user's <tt>'~/.netrc'</tt> file to obtain the first
+      matching record by host machine name (and optionally by user login
+      name). This is used by <tt>ads-github-cache</tt> to determine the name of the
+      in-effect GitHub user account, using the approach that emulates what
+      <tt><a href="https://curl.haxx.se/docs/manpage.html"
+             title="manpage: curl(1)">curl(1)</a></tt> does. This allows for
+      entirely offline cache operations against the user-specific cache. The
+      tool name does not start with the <tt>'ads-github-'</tt> prefix because
+      it is being considered for extraction into a small stand-alone project.
+  </li>
 </ul>
 
 
 <h2>Future directions</h2>
 
 <p>
-The author is (casually) working on sketching out a caching system for results
-from the GitHub API with the intent of making it easy to use from shell
-scripts or similar. The first two scripts noted above are a step in that
-direction.
+The <strong><tt>ads-github-tools-0.3.2</tt></strong> release <strong>(October
+2020)</strong> introduced the foundations for the long-wanted caching
+system. It delivers on the ability to conditionally retrieve objects "through
+the cache" using <strong><tt>'ETag:'</tt></strong> and
+<strong><tt>'If-None-Match:'</tt></strong> to pull full objects over the
+network only when necessary. It also delivers on the goal of being easy to use
+from shell scripts or even in an interactive shell.
 </p>
 
 <p>
-Once the caching implementation is functional, the
-<tt>'ads-github-fetch-all-upstreams'</tt> will be modified to use it, perhaps
-via a set of intermediary tools. These tools will make use of the
-<tt>'ETag:'</tt>, <tt>'Last-Modified:'</tt>, and <tt>'If-Modified-Since:'</tt>
-HTTP headers both to avoid incurring unnecessary hits against the user's
-GitHub API rate limit and to cut down on unnecessary retrieval of the same
-data over and over.
+Note that conditionally fetching objects as described also has the benefit of
+avoiding incurring unnecessary hits against the user's GitHub API rate
+limit. (<em>Not sure where you stand?
+Try <strong><tt>'ads-github-show-rate-limits -h'</tt></strong> to find
+out!</em>)
 </p>
 
 <p>
-The author's current thinking is that there will be three levels of tools:
+At the moment, the caching foundation is in place, and the
+<tt>ads-github-fetch-all-upstreams</tt> tool uses it to good effect. But
+currently it is the <em>only</em> tool that does so. Others will be enhanced,
+as well, in upcoming releases.
+</p>
+
+<p>
+My earlier thinking was that there will be three levels of tools:
 <ol type="1">
   <li><p>low-level tools that store and retrieve objects from the cache, and related
     <ul>
@@ -286,6 +350,8 @@ The author's current thinking is that there will be three levels of tools:
     </p>
   </li>
 </ol>
+That does not seem like a terrible arrangement, but we have learned that there
+is value in allowing the high-level tools access the low-level cache directly.
 </p>
 
 <br></br>
