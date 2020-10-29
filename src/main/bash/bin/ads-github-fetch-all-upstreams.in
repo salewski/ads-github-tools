@@ -26,6 +26,37 @@
 #
 # All requests are made over HTTPS.
 #
+# UPDATE (2020-10): The program is now able to leverage the new
+#        ads-github-tools cache. The use of the cache is optional, but the
+#        default behavior has been changed to use it (Hey, we're still pre
+#        1.0.0 here  ;-)
+#
+#        The the old behavior is still supported, and available via the
+#        '--no-cache' option.
+#
+#        See ads-github-fetch-all-upstreams(1) for all the gory details.
+#
+#        When the cache is being used, the '/user/repo' data will be obtained
+#        either "through" the cache (online mode) or "from" the cache
+#        (offline-only mode) (controlled by the internal variable
+#        ${CACHE_MODE}). To control which is used, see the '--cache-mode=MODE'
+#        command line option.
+#
+#        Note that "offline" mode is usually what you want. The idea is that
+#        the cache gets updated out of band (say, once a day, via an
+#        invocation of 'ads-github-cache -v --udpate' (probably from a cron
+#        job, or similar)), and then the cached data is availble to be
+#        repeatedly leveraged by the tools to speed up operations
+#        significantly. "ONLINE" cache mode is still faster than avoiding the
+#        cache altogether, but it is still /a lot/ slower than offline-only
+#        mode. For the author, at the time of writing (2020-10) the relative
+#        timings for this operation are:
+#
+#                avoid cache: ~58 seconds
+#             cache (online): ~19 seconds
+#            cache (offline): < 1 second
+#
+#
 # Authentication
 # ==============
 # No authentication data is used directly; the curl(1) '-n' (--netrc) option
@@ -161,6 +192,35 @@ declare -r GIT_CFG_KEY_HUB_TRIANGULAR='hub.triangular'
 declare -r GIT_CFG_KEY_HUB_FORKREMOTE='hub.forkremote'
 declare -r GIT_CFG_KEY_HUB_UPSTREAMREMOTE='hub.upstreamremote'
 
+# Caching mode:
+#
+#     * User-provide tokens to '--cache-mode=MODE' are in lowercase:
+#       'none', 'online', or 'offline'.
+#
+#     * Internally, $CACHE_MODE has only two values, and they are uppercase
+#       (which makes them easier to distinguish from the userland tokens):
+#       'ONLINE' or 'OFFLINE'
+#
+#     * The '--cache-mode=none' scenario is reflected in the DO_USE_CACHE
+#       flag being set to false.
+#
+# By default, we will use the cache in 'OFFLINE' mode, as it is the fastest,
+# and reflects what the user (probably) wants in the common case.
+#
+CACHE_MODE_DEFAULT='OFFLINE'
+DO_USE_CACHE=true
+#
+HAVE_CACHE_OPT=false  # flips to true if user provided '--cache-mode=MODE' (or '--no-cache')
+#
+#
+# This only has an effect when DO_USE_CACHE is true.
+#
+# Note: To avoid accidental use of the value, CACHE_MODE gets set to the
+#       string 'IGNORE' when DO_USE_CACHE is false. This is purely a debugging
+#       device; node code should depend on that behavior.
+#
+CACHE_MODE=${CACHE_MODE_DEFAULT}  # override with '--cache-mode=MODE'
+
 
 # If specified, the '--clone-if-missing' command line option directs this
 # program to clone any repository from GitHub where the local git working
@@ -291,6 +351,8 @@ XARGS_PROG="${XARGS:-@XARGS_PROG@}"
 
 MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 
+# DIRNAME_PROG="${DIRNAME:-@DIRNAME_PROG@}"
+
 # FIXME: How to make this selectable? Would need to influence git's search
 #        path to find the specified version of the tool, but how to do that
 #        without changing PATH?
@@ -302,6 +364,9 @@ MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 #
 # GIT_HUB_PROG="${GIT_HUB:-@GIT_HUB_PROG@}"
 GIT_HUB_PROG='git-hub'
+
+# BASENAME_PROG="${BASENAME:-@BASENAME_PROG@}"
+# READLINK_PROG="${READLINK:-@READLINK_PROG@}"
 
 declare -a NEEDED_EXTERNAL_PROGS=(
     "${RM_PROG}"
@@ -322,7 +387,11 @@ declare -a NEEDED_EXTERNAL_PROGS=(
 
     "${MKTEMP_PROG}"
 
+    # "${DIRNAME_PROG}"
     "${GIT_HUB_PROG}"
+
+    # "${BASENAME_PROG}"
+    # "${READLINK_PROG}"
 )
 
 for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
@@ -335,6 +404,55 @@ for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
 
     if $DEBUGGING; then
         printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
+    fi
+done
+
+
+# For needed internal progs, we will just expect them to be installed "next
+# to" the current program.
+#
+# Note that the mechanism used here needs to work both "in-tree" and when
+# installed. When working in-tree, the other in-tree versions of our internal
+# tools must be found first (even if the tools are installed on the system).
+#
+t_script_dir=${0%/*}
+# t_rp=$("${READLINK_PROG}" -f "${t_script_dir}") || exit 1
+# t_p1=$("${BASENAME_PROG}" "${t_rp}")            || exit 1
+# t_p2=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")") || exit 1
+# t_p3=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")") || exit 1
+# t_p4=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")")") || exit 1
+
+AGH_CACHE_PROG="${t_script_dir}/ads-github-cache"
+
+# # The non-bash-based tools (e.g., those that are Perl- or Rust-based) may or
+# # may not be in the same directory, depending on whether or not we are running
+# # in-tree.
+# #
+# # FIXME: This is ugly; is there a better way?
+# if test "${t_p1}" = 'bin'  \
+# && test "${t_p2}" = 'bash' \
+# && test "${t_p3}" = 'main' \
+# && test "${t_p4}" = 'src'; then
+#     # looks like we are running in-tree
+#     AGH_NORMALIZE_URL_PROG="${t_script_dir}/../../perl/bin/ads-github-normalize-url"
+#     PARSE_NETRC_PROG="${t_script_dir}/../../rust/bin/parse-netrc/target/release/parse-netrc"
+# else
+#     AGH_NORMALIZE_URL_PROG="${t_script_dir}/ads-github-normalize-url"
+#     PARSE_NETRC_PROG="${t_script_dir}/parse-netrc"
+# fi
+
+declare -a NEEDED_INTERNAL_PROGS=(
+    "${AGH_CACHE_PROG}"
+    # "${AGH_NORMALIZE_URL_PROG}"
+    # "${PARSE_NETRC_PROG}"
+)
+for int_tool in "${NEEDED_INTERNAL_PROGS[@]}"; do
+    if test -x "${int_tool}"; then :; else
+        printf "${PROG} (error): was unable to locate internal tool: \"%s\"; bailing out\n" "${int_tool}" 1>&2
+        exit 1
+    fi
+    if $DEBUGGING; then
+        printf "${PROG} (debug): found internal tool: %s\n" "${int_tool}" 1>&2
     fi
 done
 
@@ -404,6 +522,11 @@ Mandatory arguments to long options are mandatory for short options too.
 
   -h, --help                        Print this help message on stdout
   -V, --version                     Print the version of the program on stdout
+
+      --no-cache                    Synonym for '--cache-mode=none'
+      --cache-mode=MODE             Specify the caching mode to use
+                                      Valid values: 'none', 'online', ['offline']
+
   -c, --clone-if-missing            Use git-hub(1) to clone your missing repos from GitHub
   -m, --missing-only                Operate on (clone) only repos that are missing locally (implies '-c')
       --[no-]triangular             Whether or not newly cloned repos are configured to support a
@@ -1072,6 +1195,7 @@ f_get_gh_user_repos_pagination_count_or_die () {
 #
 #
 # @see f_get_gh_user_repos_pagination_count_or_die()
+# @see f_build_repo_data_lines_from_cache_or_die()
 #
 f_build_repo_data_lines_or_die () {
 
@@ -1301,6 +1425,187 @@ f_build_repo_data_lines_or_die () {
 }
 
 
+# @param ONLINE_OFFLINE -- (required) Either 'ONLINE' or 'OFFLINE', to
+#                          indicate the desired freshness/speed
+#                          tradeoff. Online fetches data "through" the cache,
+#                          but requires network access. It is faster than
+#                          pulling all of the data, but still feels slow for
+#                          interactive use.
+#
+#                          Offline, as its name implies, does not access the
+#                          network. It will only retrieve data that is already
+#                          cached locally, and will error out if the requested
+#                          is not already present. This is by far the fastest
+#                          way to obtain the data. As user's move toward
+#                          priming the cache out-of-band (e.g., via
+#                          'ads-github-cache --update'), this approach is
+#                          expected to become the dominant use case for the
+#                          current program.
+#
+# @param OUT_VAR_NAME -- (required) the name of the pre-existing global
+#                        variable to which the repo data lines should be
+#                        appended.
+#
+# @return 0 always, if it returns at all. All internal errors are fatal.
+#
+#
+# @see f_build_repo_data_lines_or_die()
+#
+f_build_repo_data_lines_from_cache_or_die () {
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_online_offline=$1
+    local __t_out_var_name=$2
+
+    if [[ "${__t_online_offline}" =~ ^(ONLINE|OFFLINE)$ ]]; then :; else
+        printf "${PROG} (BUG): ${FUNCNAME}() value for ONLINE_OFFLINE param must be either 'ONLINE' or 'OFFLINE', but got: \"%s\"; bailing out\n" \
+               "${__t_online_offline}" 1>&2
+        exit 1
+    fi
+
+    # sanity check
+    if test -z "$MY_TMP_DIR"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_DIR is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # The ads-github-cache(1) progam hides the paging details from us, and
+    # just emits all of the data from all of the pages catenated together. We
+    # could feed that directly in jq(1), and that would be more efficient, but
+    # it would also be more difficult to debug because data between the
+    # processes would be transient. For now we are going to copy it all into a
+    # temporary file, and then let jq(1) chew on that. We revisit this if it
+    # becomes an issue.
+    #
+    local __t_tmp_fpath_from_cache_user_repos=$("${MKTEMP_PROG}" --tmpdir="${MY_TMP_DIR}" 'gh-data-from-cache-user-repos-FULL.XXXXXXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to generate temporary file name for repo data (full \"paged collection\"); bailing out\n" 1>&2
+        exit 1
+    fi
+    #
+    # This is where jq(1) will write its transformed output
+    local __t_tmp_fpath_jq_xformed_user_repos=$("${MKTEMP_PROG}" --tmpdir="${MY_TMP_DIR}" 'gh-data-jq-xformed-user-repos-FULL.XXXXXXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to generate temporary file name for repo data (for jq transformed output); bailing out\n" 1>&2
+        exit 1
+    fi
+
+    local -a t_agh_cache_opts=()
+
+    if ${BE_VERBOSE}; then
+        t_agh_cache_opts+=( '--verbose' )
+    fi
+    if ${DEBUGGING}; then
+        t_agh_cache_opts+=( '--verbose' )
+    fi
+    if ${TRACING}; then
+        t_agh_cache_opts+=( '--verbose' )
+    fi
+
+    if test "${__t_online_offline}" = 'ONLINE'; then
+        t_agh_cache_opts+=( '--get' )
+    else
+        t_agh_cache_opts+=( '--get-cached' )
+    fi
+
+    t_agh_cache_opts+=( '--' )
+    t_agh_cache_opts+=( '/user/repos' )  # entire "paged collection"
+
+    "${AGH_CACHE_PROG}" "${t_agh_cache_opts[@]}" > "${__t_tmp_fpath_from_cache_user_repos}"
+    if test $? -ne 0; then
+        # Hopefully a more descriptive error message was already printed by
+        # the 'ads-github-cache' program.
+        #
+        # Note that we will be falling through here, too, if we specified
+        # '--get-cache', but the data was not already present in the cache.
+        printf "${PROG} (error): was unable to obtain /user/repos data from cache; bailing out\n" 1>&2
+        exit 1
+    fi
+    #
+    # XXX: This check is right in the common case, in which a user has one or
+    #      more GitHub repos. But what about a new user that does not yet have
+    #      any repos?
+    if test -s "${__t_tmp_fpath_from_cache_user_repos}"; then :; else
+        printf "${PROG} (error): call to obtain /user/repos data from cache succeeded, but data file is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+
+
+    "${JQ_PROG}" --raw-output '.[] '\
+'| select( .owner.type == "User" ) '\
+'| .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' \
+        < "${__t_tmp_fpath_from_cache_user_repos}" \
+        > "${__t_tmp_fpath_jq_xformed_user_repos}"
+
+    if test $? -ne 0; then
+        printf "${PROG} (error): Was unable to extract data from /user/repos output; bailing out\n" 1>&2
+        exit 1
+    fi
+    if test -s "${__t_tmp_fpath_jq_xformed_user_repos}"; then :; else
+        printf "${PROG} (error): Extracted data file for /user/repos is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+
+
+    # For now we'll just slurp up all of the repo info into memory; we'll
+    # revisit this if needed, but <famous-last-words>we're not expecting to
+    # have enough repos that it will be a problem</famous-last-words>.
+    #
+    #     $ jq -r '.[] | .name + ":" + .full_name + ":" + .default_branch + ":" + if (.fork) then "true" else "false" end' < all-repos-per_page-105-001.js | head -n 5
+    #     aas:salewski/aas:master:true
+    #     abcl:salewski/abcl:master:true
+    #     abstract-tables:salewski/abstract-tables:master:true
+    #     ac-nrepl:salewski/ac-nrepl:master:true
+    #     ack2:salewski/ack2:dev:true
+    #
+    # UPDATE (2016-07-06): [issue #12] Note that we are working only with
+    # repos with owner type 'User' (we are ignoring those with owner type
+    # 'Organization'). This is to work around the previously unrealized issue
+    # that the /user/repos/ data can include repos that that user (as a member
+    # of a particular organization) merely has access to, regardless of
+    # whether he also has a personal fork of those repos. The authenticated
+    # user's personal fork of such a repo, if he has one, is presented
+    # separately.
+    #
+    # XXX: This has the undesirable effect of preventing this program from
+    #      working directly on organization-owned repos. The author needs to
+    #      further review how those are intended to work, but if this turns
+    #      out to be an artificial limitation is interested in having it
+    #      fixed. Patches/pull requests welcome!
+    #
+    # See also: https://github.com/salewski/ads-github-tools/issues/12
+    #
+    printf -v "${__t_out_var_name}" '%s' \
+           "$("${CAT_PROG}" "${__t_tmp_fpath_jq_xformed_user_repos}")"
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable slurp repo data file into output variable; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # cleanup
+    "${RM_PROG}" "${__t_tmp_fpath_jq_xformed_user_repos}"
+    if test $? -ne 0; then
+        printf "${PROG} (warning): was unable to delete temporary file: %s; continuing anyway\n" \
+               "${__t_tmp_fpath_jq_xformed_user_repos}" 1>&2
+        # keep going...
+    fi
+    "${RM_PROG}" "${__t_tmp_fpath_from_cache_user_repos}"
+    if test $? -ne 0; then
+        printf "${PROG} (warning): was unable to delete temporary file: %s; continuing anyway\n" \
+               "${__t_tmp_fpath_from_cache_user_repos}" 1>&2
+        # keep going...
+    fi
+
+    return 0  # success
+}
+
+
 pos_last_plus_one=$(( $# + 1 ))
 
 # Each value is one or zero, which indicates whether or not the option is
@@ -1309,6 +1614,9 @@ pos_last_plus_one=$(( $# + 1 ))
 declare -A longopt_spec=(
     ['help']=0      # -h
     ['version']=0   # -V
+
+    ['cache-mode']=1  # --cache-mode=MODE
+    ['no-cache']=0    # --no-cache (synonym for '--cache-mode=none')
 
     ['clone-if-missing']=0            # -c
     ['missing-only']=0                # -m
@@ -1491,6 +1799,55 @@ if test $# -gt 0; then
                 ;;
 
 
+            'cache-mode' )
+                if ${HAVE_CACHE_OPT}; then
+                    printf "${PROG} (error): only one --cache-mode=MODE or --no-cache option may be provided; bailing out\n" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+                if [[ "${OPTARG}" =~ ^(none|online|offline)$ ]]; then :; else
+                    printf "${PROG} (error): invalid MODE argument provided to --cache-mode=MODE option: \"%s\"; bailing out\n" \
+                           "${OPTARG}" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+                HAVE_CACHE_OPT=true
+                case ${OPTARG} in
+                    'none')  # see also: --no-cache
+                        DO_USE_CACHE=false
+                        CACHE_MODE='IGNORE'
+                        ;;
+                    'online')
+                        DO_USE_CACHE=true    # just for clarity (is redundant with the default)
+                        CACHE_MODE='ONLINE'
+                        ;;
+                    'offline')
+                        DO_USE_CACHE=true    # just for clarity (is redundant with the default)
+                        CACHE_MODE='OFFLINE' # likewise
+                        ;;
+                    *)
+                        printf "${PROG} (BUG) [line $LINENO]: unhandled cache mode argument; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                        exit 1
+                esac
+                if ${BE_VERBOSE}; then
+                    printf "${PROG} (info): cache mode: %s\n" "${OPTARG}" 1>&2
+                fi
+                ;;
+            'no-cache' )  # synonym for '--cache-mode=none'
+                if ${HAVE_CACHE_OPT}; then
+                    printf "${PROG} (error): only one --cache-mode=MODE or --no-cache option may be provided; bailing out\n" 1>&2
+                    f_print_help 1>&2
+                    exit 1
+                fi
+                HAVE_CACHE_OPT=true
+                DO_USE_CACHE=false
+                CACHE_MODE='IGNORE'
+                if ${BE_VERBOSE}; then
+                    printf "${PROG} (info): cache mode: %s\n" 'none' 1>&2
+                fi
+                ;;
+
+
             'c' | 'clone-if-missing' )
                 DO_CLONE_IF_NOT_PRESENT=true
                 ;;
@@ -1555,6 +1912,7 @@ if test $# -gt 0; then
                   ;;
 
             * )   printf "${PROG} (BUG) [line $LINENO]: unhandled option case; opt: '$opt',  OPTARG: '$OPTARG'\n" 1>&2
+                  exit 1
                   ;;
 
         esac
@@ -1807,39 +2165,69 @@ MY_GITHUB_REPOS_URL="${gl_const_github_api_base_url}user/repos?per_page=100"
 #
 REPO_DATA_LINES=''
 
-# Pagination: 
+if ${DO_USE_CACHE}; then
 
-# HTTP/1.1 200 OK
-# ...
-# Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+    # The /user/repo data will be obtained either "through" the cache (online
+    # mode) or "from" the cache (offline-only mode), depending on the
+    # ${CACHE_MODE}.
 
-# Note that we still obtain info on /all/ repos even if the user has specified
-# that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
-# the user specified only a couple of repos, then we lose here because we
-# technically could query the GitHub service for the info on just those
-# specific repos to accomplish our work.  If the user explicitly specifies
-# more than a few, though, we're back on solid ground because we can typically
-# get the info on all available user repos with fewer than 5 GitHub API calls
-# (it is unlikely that a typical GitHub user has more than 500 repos). In any
-# event, we do not know which page of the results a particular repo will be
-# on, so we need to pull full summary data anyway.
-#
-f_get_gh_user_repos_pagination_count_or_die 'MY_TOTAL_REPO_PAGES'
+    # Note that "OFFLINE" mode is usually what you want. The idea is that the
+    # cache gets updated out of band (say, once a day), and then the tools
+    # leverage that cached data to speed up operations. "ONLINE" cache mode is
+    # still faster than avoiding the cache altogether, but it is still /a lot/
+    # slower than offline-only mode. For the author, at the time of writing
+    # (2020-10) the relative timings for this operation are:
+    #
+    #         avoid cache: ~58 seconds
+    #      cache (online): ~19 seconds
+    #     cache (offline): < 1 second
+    #
+    f_build_repo_data_lines_from_cache_or_die "${CACHE_MODE}"  'REPO_DATA_LINES'
 
-# Build REPO_DATA_LINES. Each record (line) in the table data structure will
-# be in the form:
-#
-#     <REPO_NAME>:<REPO_FULL_NAME>:<DEFAULT_BRANCH>:<IS_FORK>
-#
-# Example:
-#
-#     aas:salewski/aas:master:true
-#     abcl:salewski/abcl:master:true
-#     abstract-tables:salewski/abstract-tables:master:true
-#     ac-nrepl:salewski/ac-nrepl:master:true
-#     ack2:salewski/ack2:dev:true
-#     ...
-f_build_repo_data_lines_or_die "${MY_TOTAL_REPO_PAGES}" 'REPO_DATA_LINES'
+else
+    # The /uer/repo data will be obtained directly from the GitHub API. This
+    # path is the slowest approach, as it forces us to retrieve all of the
+    # data for all of the user's GitHub repos.
+    #
+    # This code path avoids the cache completely.
+    #
+    # This is the older code path that was used before the ads-github-tools
+    # had a cache implementation.
+
+    # Pagination: 
+
+    # HTTP/1.1 200 OK
+    # ...
+    # Link: <https://api.github.com/user/repos?per_page=100&page=2>; rel="next", <https://api.github.com/user/repos?per_page=100&page=4>; rel="last"
+
+    # Note that we still obtain info on /all/ repos even if the user has specified
+    # that we operate only on specific repos (in $EXPLICITLY_REQUESTED_REPOS). If
+    # the user specified only a couple of repos, then we lose here because we
+    # technically could query the GitHub service for the info on just those
+    # specific repos to accomplish our work.  If the user explicitly specifies
+    # more than a few, though, we're back on solid ground because we can typically
+    # get the info on all available user repos with fewer than 5 GitHub API calls
+    # (it is unlikely that a typical GitHub user has more than 500 repos). In any
+    # event, we do not know which page of the results a particular repo will be
+    # on, so we need to pull full summary data anyway.
+    #
+    f_get_gh_user_repos_pagination_count_or_die 'MY_TOTAL_REPO_PAGES'
+
+    # Build REPO_DATA_LINES. Each record (line) in the table data structure will
+    # be in the form:
+    #
+    #     <REPO_NAME>:<REPO_FULL_NAME>:<DEFAULT_BRANCH>:<IS_FORK>
+    #
+    # Example:
+    #
+    #     aas:salewski/aas:master:true
+    #     abcl:salewski/abcl:master:true
+    #     abstract-tables:salewski/abstract-tables:master:true
+    #     ac-nrepl:salewski/ac-nrepl:master:true
+    #     ack2:salewski/ack2:dev:true
+    #     ...
+    f_build_repo_data_lines_or_die "${MY_TOTAL_REPO_PAGES}" 'REPO_DATA_LINES'
+fi
 
 
 while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
@@ -2369,6 +2757,7 @@ exit 0;
   ads-github-fetch-all-upstreams (-h | --help)
   ads-github-fetch-all-upstreams (-V | --version)
   ads-github-fetch-all-upstreams [(-v | --verbose)]
+                                 [--no-cache | --cache-mode=(none|online|offline)]
                                  [(-c | --clone-if-missing)]
                                  [(-m | --missing-only)]
                                  [--[no-]triangular]
@@ -2391,9 +2780,7 @@ FIXME: docs still a wip
 
 =head1 OPTIONS
 
-Below are the command line options currently accepted by
-C<ads-github-fetch-all-upstreams>.
-
+The options are as follows:
 
 =over 4
 
@@ -2405,6 +2792,15 @@ Print help usage message
 =item -V, --version
 
 Print the version of the program to stdout and then exit.
+
+
+=item --cache-mode=MODE
+
+Specify the caching mode to use. Valid values include: C<none>, C<online>, and
+C<offline>.
+
+The default behavior of the program (since C<ads-github-tools-0.3.2>) is
+equivalent to C<--cache-mode=offline>.
 
 
 =item -c, --clone-if-missing
@@ -2437,6 +2833,11 @@ GitHub repos and want to have them cloned locally without having to wait for
 the status of all existing repositories to be checked (which can be a long
 time if you have a large number of GitHub repos), and without having to
 explicitly name the missing repos on the command line.
+
+
+=item --no-cache
+
+This option is just a synonym for C<--cache-mode=none> (q.v.).
 
 
 =item --triangular
@@ -2494,6 +2895,105 @@ be interpreted as a command line option.
 =back
 
 
+=head1 CONTEXT
+
+=head2 Caching
+
+Starting with C<ads-github-tools-0.3.2> (released in October 2020), the
+default behavior of the program was changed to take advantage of the newly
+available C<ads-github-tools> cache. The cache, as implemented by the
+L<ads-github-cache(1)> program, allows I<much> faster access to the user's
+GitHub repository data.
+
+The cache provides three modes of operation:
+
+=over 4
+
+=item I<offline>
+
+This is the default mode used by C<ads-github-fetch-all-upstreams>. It is
+I<by far the fastest> mode of operation, and when the data in cache is
+"relatively fresh" there is no downside to using it. Your list of GitHub repos
+is not changing by the minute, right?
+
+When talking about C<offline> mode, we say that we are retrieving data
+"I<from> the cache". The data must be present in the cache or the operation
+will fail.
+
+=item I<online>
+
+This mode is faster than not using the cache at all, but is significantly
+slower than C<offline> mode for large collections of repos.
+
+The benefit of this mode is that the cache will check with the GitHub API to
+determine if the local copy of the data is up-to-date. Under typical usage,
+the amount of data transferred from the GitHub servers is significantly less
+than would be the case without using any cache at all. The only object data
+transferred is for those objects that are missing from the cache, or for which
+the cached version is out-of-date.
+
+When talking about C<online> mode, we say that we are retrieving data
+"I<through> the cache". If the requested data is not present, or is present
+but stale, then the cache will obtain an updated copy of it before returning
+it to this program. Otherwise the verison of the data already in the cache is
+returned.
+
+=item I<none>
+
+This mode of operation ignores the cache entirely. It is by far the I<slowest>
+mode of operation. All repo data needed by the program is fetched from the
+GitHub servers. Every time the program is run in this mode. Not fast.
+
+Prior to C<ads-github-tools-0.3.2>, this mode was the only mode available for
+the C<ads-github-fetch-all-upstreams> program. In that regard, it is "the old
+default behavior".
+
+=back
+
+
+=head2 Missing (empty) cache
+
+In the default mode of operation (C<--cache-mode=offline>, when the data is
+not available in the cache the user will see the following error:
+
+    $ ads-github-fetch-all-upstreams -vcu
+    ads-github-cache (error): "paged collection" metadata not found in cache for: /user/repos
+    ads-github-fetch-all-upstreams (error): was unable to obtain /user/repos data from cache; bailing out
+
+The intent is that the cache be made available, and then kept up to date by
+periodically running (say, once a day) a command to update the cache (perhaps
+via a L<cron(8)> job, or similar):
+
+    $ ads-github-cache -v --update
+
+The above approach is probably the easiest, since it will ensure the cached
+data is available when need by the other utilities in the C<ads-github-tools>
+project.
+
+If you are going to have to wait for the cache to populate, anyway, you
+accomplish an approximation of both steps with the single command:
+
+    $ ads-github-fetch-all-upstreams -vcu --cache-mode=online
+
+That will only cache the data requested by the
+C<ads-github-fetch-all-upstreams> utility, but for a one-off use case that may
+be exactly what you need.
+
+
+=head2 Cache avoidance
+
+Finally, if you wish to avoid using the cache altogether, you can achieve that
+like this:
+
+    $ ads-github-fetch-all-upstreams -vcu --no-cache
+
+or (equivalently):
+
+    $ ads-github-fetch-all-upstreams -vcu --cache-mode=none
+
+The C<--no-cache> option is just a synonym for C<--cache-mode=none>.
+
+
 =head1 EXIT_STATUS
 
 Exits with zero on success, non-zero on error.
@@ -2503,16 +3003,7 @@ Exits with zero on success, non-zero on error.
 
 =over 4
 
-=item Results from calls to the GitHub API are not currently cached
-
-At the time of writing (2016-05) the author is still working on the
-'ads-github-tools' cache implementation, so any information needed from the
-upstream GitHub service is requested directly. This may incur unnecessary hits
-against the user's GitHub API rate limit. Don't worry, in the typical case we
-are only talking about a handful of requests even if the user has a very large
-number of repositories (i.e., several hundred).
-
-=item Probably others
+=item Probably tons
 
 If you find any, please report them as described in the C<BUGS> file.
 
@@ -2524,6 +3015,8 @@ If you find any, please report them as described in the C<BUGS> file.
 =over 4
 
 =item * ads-github-tools(7)
+
+=item * ads-github-cache(1)
 
 =item * ads-github-merge-all-upstreams(1)
 
