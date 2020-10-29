@@ -85,18 +85,14 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-subdir = .
+subdir = src/main/rust/bin
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
-DIST_COMMON = $(srcdir)/Makefile.am $(top_srcdir)/configure \
-	$(am__configure_deps) $(am__DIST_COMMON)
-am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
- configure.lineno config.status.lineno
+DIST_COMMON = $(srcdir)/Makefile.am $(am__DIST_COMMON)
 mkinstalldirs = $(install_sh) -d
-CONFIG_CLEAN_FILES = .cargo/config.toml \
-	src/main/rust/bin/parse-netrc/.cargo/config.toml
+CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
@@ -132,7 +128,7 @@ am__recursive_targets = \
   $(RECURSIVE_CLEAN_TARGETS) \
   $(am__extra_recursive_targets)
 AM_RECURSIVE_TARGETS = $(am__recursive_targets:-recursive=) TAGS CTAGS \
-	cscope distdir distdir-am dist dist-all distcheck
+	distdir distdir-am
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 # Read a list of newline-separated strings from the standard input,
 # and print each of them once, without duplicates.  Input order is
@@ -152,25 +148,9 @@ am__define_uniq_tagged_files = \
   done | $(am__uniquify_input)`
 ETAGS = etags
 CTAGS = ctags
-CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
-am__DIST_COMMON = $(srcdir)/Makefile.in \
-	$(top_srcdir)/.cargo/config.toml.in \
-	$(top_srcdir)/build-aux/install-sh \
-	$(top_srcdir)/build-aux/missing \
-	$(top_srcdir)/src/main/rust/bin/parse-netrc/.cargo/config.toml.in \
-	AUTHORS COPYING INSTALL NEWS build-aux/install-sh \
-	build-aux/missing
+am__DIST_COMMON = $(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
-distdir = $(PACKAGE)-$(VERSION)
-top_distdir = $(distdir)
-am__remove_distdir = \
-  if test -d "$(distdir)"; then \
-    find "$(distdir)" -type d ! -perm -200 -exec chmod u+w {} ';' \
-      && rm -rf "$(distdir)" \
-      || { sleep 5 && rm -rf "$(distdir)"; }; \
-  else :; fi
-am__post_remove_distdir = $(am__remove_distdir)
 am__relativize = \
   dir0=`pwd`; \
   sed_first='s,^\([^/]*\)/.*$$,\1,'; \
@@ -196,13 +176,6 @@ am__relativize = \
     dir1=`echo "$$dir1" | sed -e "$$sed_rest"`; \
   done; \
   reldir="$$dir2"
-DIST_ARCHIVES = $(distdir).tar.gz
-GZIP_ENV = --best
-DIST_TARGETS = dist-gzip
-distuninstallcheck_listfiles = find . -type f -print
-am__distuninstallcheck_listfiles = $(distuninstallcheck_listfiles) \
-  | sed 's|^\./|$(prefix)/|' | grep -v '$(infodir)/dir$$'
-distcleancheck_listfiles = find . -type f -print
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
@@ -330,74 +303,45 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-SUBDIRS = bin \
-          src \
-          .
 
-
-# The ACLOCAL_AMFLAGS are used by 'autoreconf' and by the Makefile rebuild
-# rule when they need to run 'aclocal'.
+# Each subdir beneath here is a Rust "package". Each package contains one or
+# more "binary" crates (executable programs).
 #
-ACLOCAL_AMFLAGS = -I autotools
-EXTRA_DIST = BUGS HACKING \
-    src/third-party/cargo-vendored
-
-MAINTAINERCLEANFILES = config.status \
-                       config.log    \
-                       $(PACKAGE)-$(VERSION).tar.gz \
-                       *~
-
-@USING_PERL5_EXTRA_INCLUDES_FALSE@_DC_WITH_PERL_INCLUDES = 
-
-# If we have specified '--with-perl-includes' to configure to allow us to
-# find Perl modules installed on the local workstation in non-standard
-# locations, then 'make distcheck' will need to use that same option in
-# order to complete successfully.
-@USING_PERL5_EXTRA_INCLUDES_TRUE@_DC_WITH_PERL_INCLUDES = "--with-perl-includes=$(ads_perl5_extra_includes)"
-DISTCHECK_CONFIGURE_FLAGS = $(_DC_WITH_PERL_INCLUDES)
-CARGO_MANIFEST_FILES = \
-    src/main/rust/bin/parse-netrc/Cargo.toml
+SUBDIRS = parse-netrc \
+          .
 
 all: all-recursive
 
 .SUFFIXES:
-am--refresh: Makefile
-	@:
 $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	@for dep in $?; do \
 	  case '$(am__configure_deps)' in \
 	    *$$dep*) \
-	      echo ' cd $(srcdir) && $(AUTOMAKE) --foreign'; \
-	      $(am__cd) $(srcdir) && $(AUTOMAKE) --foreign \
-		&& exit 0; \
+	      ( cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh ) \
+	        && { if test -f $@; then exit 0; else break; fi; }; \
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/main/rust/bin/Makefile'; \
 	$(am__cd) $(top_srcdir) && \
-	  $(AUTOMAKE) --foreign Makefile
+	  $(AUTOMAKE) --foreign src/main/rust/bin/Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
 	  *config.status*) \
-	    echo ' $(SHELL) ./config.status'; \
-	    $(SHELL) ./config.status;; \
+	    cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh;; \
 	  *) \
-	    echo ' cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__maybe_remake_depfiles)'; \
-	    cd $(top_builddir) && $(SHELL) ./config.status $@ $(am__maybe_remake_depfiles);; \
+	    echo ' cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@ $(am__maybe_remake_depfiles)'; \
+	    cd $(top_builddir) && $(SHELL) ./config.status $(subdir)/$@ $(am__maybe_remake_depfiles);; \
 	esac;
 
 $(top_builddir)/config.status: $(top_srcdir)/configure $(CONFIG_STATUS_DEPENDENCIES)
-	$(SHELL) ./config.status --recheck
+	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 
 $(top_srcdir)/configure:  $(am__configure_deps)
-	$(am__cd) $(srcdir) && $(AUTOCONF)
+	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
-	$(am__cd) $(srcdir) && $(ACLOCAL) $(ACLOCAL_AMFLAGS)
+	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
-.cargo/config.toml: $(top_builddir)/config.status $(top_srcdir)/.cargo/config.toml.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
-src/main/rust/bin/parse-netrc/.cargo/config.toml: $(top_builddir)/config.status $(top_srcdir)/src/main/rust/bin/parse-netrc/.cargo/config.toml.in
-	cd $(top_builddir) && $(SHELL) ./config.status $@
 
 # This directory's subdirectories are mostly independent; you can cd
 # into them and run 'make' without going through this Makefile.
@@ -479,12 +423,6 @@ GTAGS:
 	here=`$(am__cd) $(top_builddir) && pwd` \
 	  && $(am__cd) $(top_srcdir) \
 	  && gtags -i $(GTAGS_ARGS) "$$here"
-cscope: cscope.files
-	test ! -s cscope.files \
-	  || $(CSCOPE) -b -q $(AM_CSCOPEFLAGS) $(CSCOPEFLAGS) -i cscope.files $(CSCOPE_ARGS)
-clean-cscope:
-	-rm -f cscope.files
-cscope.files: clean-cscope cscopelist
 cscopelist: cscopelist-recursive
 
 cscopelist-am: $(am__tagged_files)
@@ -503,14 +441,11 @@ cscopelist-am: $(am__tagged_files)
 
 distclean-tags:
 	-rm -f TAGS ID GTAGS GRTAGS GSYMS GPATH tags
-	-rm -f cscope.out cscope.in.out cscope.po.out cscope.files
 
 distdir: $(BUILT_SOURCES)
 	$(MAKE) $(AM_MAKEFLAGS) distdir-am
 
 distdir-am: $(DISTFILES)
-	$(am__remove_distdir)
-	test -d "$(distdir)" || mkdir "$(distdir)"
 	@srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
 	topsrcdirstrip=`echo "$(top_srcdir)" | sed 's/[].[^$$\\*]/\\\\&/g'`; \
 	list='$(DISTFILES)'; \
@@ -565,137 +500,6 @@ distdir-am: $(DISTFILES)
 	      || exit 1; \
 	  fi; \
 	done
-	-test -n "$(am__skip_mode_fix)" \
-	|| find "$(distdir)" -type d ! -perm -755 \
-		-exec chmod u+rwx,go+rx {} \; -o \
-	  ! -type d ! -perm -444 -links 1 -exec chmod a+r {} \; -o \
-	  ! -type d ! -perm -400 -exec chmod a+r {} \; -o \
-	  ! -type d ! -perm -444 -exec $(install_sh) -c -m a+r {} {} \; \
-	|| chmod -R a+r "$(distdir)"
-dist-gzip: distdir
-	tardir=$(distdir) && $(am__tar) | eval GZIP= gzip $(GZIP_ENV) -c >$(distdir).tar.gz
-	$(am__post_remove_distdir)
-
-dist-bzip2: distdir
-	tardir=$(distdir) && $(am__tar) | BZIP2=$${BZIP2--9} bzip2 -c >$(distdir).tar.bz2
-	$(am__post_remove_distdir)
-
-dist-lzip: distdir
-	tardir=$(distdir) && $(am__tar) | lzip -c $${LZIP_OPT--9} >$(distdir).tar.lz
-	$(am__post_remove_distdir)
-
-dist-xz: distdir
-	tardir=$(distdir) && $(am__tar) | XZ_OPT=$${XZ_OPT--e} xz -c >$(distdir).tar.xz
-	$(am__post_remove_distdir)
-
-dist-tarZ: distdir
-	@echo WARNING: "Support for distribution archives compressed with" \
-		       "legacy program 'compress' is deprecated." >&2
-	@echo WARNING: "It will be removed altogether in Automake 2.0" >&2
-	tardir=$(distdir) && $(am__tar) | compress -c >$(distdir).tar.Z
-	$(am__post_remove_distdir)
-
-dist-shar: distdir
-	@echo WARNING: "Support for shar distribution archives is" \
-	               "deprecated." >&2
-	@echo WARNING: "It will be removed altogether in Automake 2.0" >&2
-	shar $(distdir) | eval GZIP= gzip $(GZIP_ENV) -c >$(distdir).shar.gz
-	$(am__post_remove_distdir)
-
-dist-zip: distdir
-	-rm -f $(distdir).zip
-	zip -rq $(distdir).zip $(distdir)
-	$(am__post_remove_distdir)
-
-dist dist-all:
-	$(MAKE) $(AM_MAKEFLAGS) $(DIST_TARGETS) am__post_remove_distdir='@:'
-	$(am__post_remove_distdir)
-
-# This target untars the dist file and tries a VPATH configuration.  Then
-# it guarantees that the distribution is self-contained by making another
-# tarfile.
-distcheck: dist
-	case '$(DIST_ARCHIVES)' in \
-	*.tar.gz*) \
-	  eval GZIP= gzip $(GZIP_ENV) -dc $(distdir).tar.gz | $(am__untar) ;;\
-	*.tar.bz2*) \
-	  bzip2 -dc $(distdir).tar.bz2 | $(am__untar) ;;\
-	*.tar.lz*) \
-	  lzip -dc $(distdir).tar.lz | $(am__untar) ;;\
-	*.tar.xz*) \
-	  xz -dc $(distdir).tar.xz | $(am__untar) ;;\
-	*.tar.Z*) \
-	  uncompress -c $(distdir).tar.Z | $(am__untar) ;;\
-	*.shar.gz*) \
-	  eval GZIP= gzip $(GZIP_ENV) -dc $(distdir).shar.gz | unshar ;;\
-	*.zip*) \
-	  unzip $(distdir).zip ;;\
-	esac
-	chmod -R a-w $(distdir)
-	chmod u+w $(distdir)
-	mkdir $(distdir)/_build $(distdir)/_build/sub $(distdir)/_inst
-	chmod a-w $(distdir)
-	test -d $(distdir)/_build || exit 0; \
-	dc_install_base=`$(am__cd) $(distdir)/_inst && pwd | sed -e 's,^[^:\\/]:[\\/],/,'` \
-	  && dc_destdir="$${TMPDIR-/tmp}/am-dc-$$$$/" \
-	  && am__cwd=`pwd` \
-	  && $(am__cd) $(distdir)/_build/sub \
-	  && ../../configure \
-	    $(AM_DISTCHECK_CONFIGURE_FLAGS) \
-	    $(DISTCHECK_CONFIGURE_FLAGS) \
-	    --srcdir=../.. --prefix="$$dc_install_base" \
-	  && $(MAKE) $(AM_MAKEFLAGS) \
-	  && $(MAKE) $(AM_MAKEFLAGS) dvi \
-	  && $(MAKE) $(AM_MAKEFLAGS) check \
-	  && $(MAKE) $(AM_MAKEFLAGS) install \
-	  && $(MAKE) $(AM_MAKEFLAGS) installcheck \
-	  && $(MAKE) $(AM_MAKEFLAGS) uninstall \
-	  && $(MAKE) $(AM_MAKEFLAGS) distuninstallcheck_dir="$$dc_install_base" \
-	        distuninstallcheck \
-	  && chmod -R a-w "$$dc_install_base" \
-	  && ({ \
-	       (cd ../.. && umask 077 && mkdir "$$dc_destdir") \
-	       && $(MAKE) $(AM_MAKEFLAGS) DESTDIR="$$dc_destdir" install \
-	       && $(MAKE) $(AM_MAKEFLAGS) DESTDIR="$$dc_destdir" uninstall \
-	       && $(MAKE) $(AM_MAKEFLAGS) DESTDIR="$$dc_destdir" \
-	            distuninstallcheck_dir="$$dc_destdir" distuninstallcheck; \
-	      } || { rm -rf "$$dc_destdir"; exit 1; }) \
-	  && rm -rf "$$dc_destdir" \
-	  && $(MAKE) $(AM_MAKEFLAGS) dist \
-	  && rm -rf $(DIST_ARCHIVES) \
-	  && $(MAKE) $(AM_MAKEFLAGS) distcleancheck \
-	  && cd "$$am__cwd" \
-	  || exit 1
-	$(am__post_remove_distdir)
-	@(echo "$(distdir) archives ready for distribution: "; \
-	  list='$(DIST_ARCHIVES)'; for i in $$list; do echo $$i; done) | \
-	  sed -e 1h -e 1s/./=/g -e 1p -e 1x -e '$$p' -e '$$x'
-distuninstallcheck:
-	@test -n '$(distuninstallcheck_dir)' || { \
-	  echo 'ERROR: trying to run $@ with an empty' \
-	       '$$(distuninstallcheck_dir)' >&2; \
-	  exit 1; \
-	}; \
-	$(am__cd) '$(distuninstallcheck_dir)' || { \
-	  echo 'ERROR: cannot chdir into $(distuninstallcheck_dir)' >&2; \
-	  exit 1; \
-	}; \
-	test `$(am__distuninstallcheck_listfiles) | wc -l` -eq 0 \
-	   || { echo "ERROR: files left after uninstall:" ; \
-	        if test -n "$(DESTDIR)"; then \
-	          echo "  (check DESTDIR support)"; \
-	        fi ; \
-	        $(distuninstallcheck_listfiles) ; \
-	        exit 1; } >&2
-distcleancheck: distclean
-	@if test '$(srcdir)' = . ; then \
-	  echo "ERROR: distcleancheck can only run from a VPATH build" ; \
-	  exit 1 ; \
-	fi
-	@test `$(distcleancheck_listfiles) | wc -l` -eq 0 \
-	  || { echo "ERROR: files left in build directory after distclean:" ; \
-	       $(distcleancheck_listfiles) ; \
-	       exit 1; } >&2
 check-am: all-am
 check: check-recursive
 all-am: Makefile
@@ -731,13 +535,11 @@ distclean-generic:
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
 	@echo "it deletes files that may require special tools to rebuild."
-	-test -z "$(MAINTAINERCLEANFILES)" || rm -f $(MAINTAINERCLEANFILES)
 clean: clean-recursive
 
 clean-am: clean-generic mostlyclean-am
 
 distclean: distclean-recursive
-	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -f Makefile
 distclean-am: clean-am distclean-generic distclean-tags
 
@@ -782,8 +584,6 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-recursive
-	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf $(top_srcdir)/autom4te.cache
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
@@ -803,13 +603,10 @@ uninstall-am:
 
 .MAKE: $(am__recursive_targets) install-am install-strip
 
-.PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am \
-	am--refresh check check-am clean clean-cscope clean-generic \
-	cscope cscopelist-am ctags ctags-am dist dist-all dist-bzip2 \
-	dist-gzip dist-lzip dist-shar dist-tarZ dist-xz dist-zip \
-	distcheck distclean distclean-generic distclean-tags \
-	distcleancheck distdir distuninstallcheck dvi dvi-am html \
-	html-am info info-am install install-am install-data \
+.PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am check \
+	check-am clean clean-generic cscopelist-am ctags ctags-am \
+	distclean distclean-generic distclean-tags distdir dvi dvi-am \
+	html html-am info info-am install install-am install-data \
 	install-data-am install-dvi install-dvi-am install-exec \
 	install-exec-am install-html install-html-am install-info \
 	install-info-am install-man install-pdf install-pdf-am \
@@ -821,29 +618,134 @@ uninstall-am:
 .PRECIOUS: Makefile
 
 
-# Target to iterate over all of the Cargo.toml manifest files in the tree, and
-# pre-populate/update our local cache of source code for our "vendored" deps
-# ("crates", in Rust parlance):
+# Notes on the Rust build tooling and how we integrate it here.
 #
-#     $ cargo vendor --no-delete --versioned-dirs -v --manifest-path ./src/main/rust/bin/my-prog/Cargo.toml ./src/third-party/cargo-vendored
+# In the Rust ecosystem, code is organized as follows:
 #
-# This target is never run as part of the normal build on an end-user's
-# system, but is provided for use of the author when adjusting the
-# dependencies (e.g., adding a new dependency, or bumping up the version of an
-# existing dep).
+#     modules -- Organizational construct to hierarchically arrange code in
+#                logical units.
+#             -- Provide namespacing to control scope and visibility.
+#             -- Several modules may exist within a single source file,
+#                or be spread out across multiple files.
+#             -- When spread across files, the module hierarchy is (at least
+#                partially) reflected in the filesystem hierarchy.
+#             -- Modules may contain other modules.
 #
-# See also: cargo-vendor(1)
+#     crate   -- An executable binary program, or a library.
+#             -- The fundamental compilation unit in Rust.
+#             -- A single crate is composed of modules.
+#             -- A crate always has an implicit "root module", even if no
+#                modules are explicitly declared. In an executable
+#                (a.k.a. "binary crate"), this is the 'main.rs' file; in a
+#                "library crate" this is the 'lib.rs' file.
+#             -- All modules within a crate are compiled together as a unit;
+#                individual modules ARE NOT compiled individually, even if
+#                they exist in separate source files.
 #
-.PHONY: cargo-vendor-update
-cargo-vendor-update:
-	for fpath in $(CARGO_MANIFEST_FILES); do    \
-	    "${CARGO_PROG}" vendor --verbose        \
-	                           --no-delete      \
-	                           --versioned-dirs \
-	                           --manifest-path "$${fpath}" \
-	                           "$(cargo_vendored_root)" \
-	    || exit 1 ;\
-	done
+#     package -- One or more crates (that presumably provide a set of related
+#                functionality).
+#             -- Contains a 'Cargo.toml' file (a.k.a. the "manifest file")
+#                that describes how the group of related crates are to be
+#                built.
+#             -- Are strict rules about what a package can contain:
+#                    * A package must contain zero or one library crates
+#                    * It may contain an arbitrary number of binary crates
+#                    * A package must contain at least one crate, either
+#                      binary or a library.
+#             -- Cargo builds all crates within a given package.
+#
+# The cargo(1) tool is the standard dependency management and build
+# orchestration tool that comes with Rust. We integrate it into our build as
+# described below.
+#
+# Under its default mode of operation, Cargo would connect to network
+# resources (crates.io; others, too, if so configured) to obtain dependencies
+# and check for updates. (Yes, I'm glossing over a lot of details here.)
+#
+# We want our build to work without needing network access. Toward this end,
+# the developer "vendors" the dependencies (both direct deps and transitive
+# deps) in the source tree under:
+#
+#     ${top_srcdir}/src/third-party/cargo-vendored/
+#
+# There is a 'cargo-vendor-update' Makefile target defined in the top-level
+# Makefile.am file that is aware of all the 'Cargo.toml' package files in the
+# source tree.
+#
+# During development, the author can run that target after adding (in a
+# 'Cargo.toml' file) new dependencies to a given Rust package, or after
+# updating the version numbers for existing deps. The Makefile rule uses the
+# cargo-vendor(1) subcommand to download any deps not already present in the
+# vendored subdirectory. The pristine dependencies are checked into source
+# control (git) along with the project sources, and are distributed in the
+# source tarball artifacts of the current project.
+#
+# The end result is that an end user installing the package will need to have
+# only the 'rustc' compiler installed and the 'cargo' build tool (which is
+# shipped with rustc, so that should not be a problem). Everything else needed
+# to build the Rust source code is contained in the source tarball.
+#
+# This practice of "vendoring" is an experiment here. We are intersted in
+# avoiding network connectivity during normal builds. Having the third-party
+# deps in-tree also helps ensure repeatable builds (using the exact same
+# versions of the deps that were tested during development), and also acts as
+# an insurance policy against any of the deps disappearing from the Internet
+# (which happens).
+#
+# Cargo integration with GNU Autotools
+# ------------------------------------
+# The 'cargo' operations ('build', 'run', etc.) all pertain to a single Rust
+# "package" (one or more related crates). The build definition for that
+# package comes from a package-specific 'Cargo.toml' file. The 'Cargo.toml'
+# file contains metadata about the package (name, version, various URLs, and
+# dependencies).
+#
+# Cargo is also influenced by '.cargo/config.toml' files. Among other things,
+# these files control the type and location of the artifact repositories that
+# Cargo will attempt to contact to obtain dependency artifacts. Cargo will
+# check for '.cargo/config.toml' files in the package-specific directory, all
+# its parent directories, and a default location (~/.cargo/config.toml); it
+# will merge these definitions together, with those files found "closer" to
+# the package-specific directory having higher precedence.
+#
+# In the case of the current project, each Cargo package directory contains a
+# relative .cargo/config.toml with commented out example settings. There is
+# also a '.cargo/config.toml' file that exists relative to the project's
+# ${top_srcdir}; that file contains the configuration that tells Cargo to use
+# our vendored sources from the in-tree location rather than obtain them from
+# the network.
+#
+# At configure time, we check for 'cargo' and 'rustc' dependencies, and
+# generate the '.cargo/config.toml' files.
+#
+# At build time, the normal 'make all' build target invokes 'cargo' as needed
+# to build all of the Rust "packages" in the tree.
+#
+# Our 'make install' target takes care of copying files into the correct
+# locations. We do not use the Rust/Cargo-specific cargo-install(1), or
+# similar; we treat those as developer-focused tools. Instead, we tell the
+# autotools which files are which (programs, manpages, etc.) and have those
+# installed in the normal way.
+#
+# Our 'make clean' target invokes 'cargo clean', etc.
+#
+# Once the project has been configured, developers are free to invoke the
+# high-level operations through 'make' or invoke 'cargo' directly while
+# working on a given package. Neither approach precludes the other; sometimes
+# one or the other will be the more convenient interface, depending on the
+# task at hand. Think of the GNU Autotools as higher-level project
+# orchestration, and Cargo as one-specific build tool that participates in
+# that orchestration.
+#
+# One thing to be aware of is that the make-based targets (with the single
+# exception of the 'cargo-vendor-update' target mentioned above) all use Cargo
+# command line flags to avoid accessing the network. We do that in preference
+# to setting 'offline = true' in the top-level '.cargo/config.toml' file
+# because it is intended as the main end-user experience. Developers working
+# on the codebase, however, would likely be inconvenienced by such an
+# option. The trade-off, of course, is that developers invoking 'cargo'
+# directly will need to remember to provide the '--offline' option themselves,
+# when needed.
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.

@@ -197,7 +197,8 @@ test -x / || exit 1"
   as_suggested="  as_lineno_1=";as_suggested=$as_suggested$LINENO;as_suggested=$as_suggested" as_lineno_1a=\$LINENO
   as_lineno_2=";as_suggested=$as_suggested$LINENO;as_suggested=$as_suggested" as_lineno_2a=\$LINENO
   eval 'test \"x\$as_lineno_1'\$as_run'\" != \"x\$as_lineno_2'\$as_run'\" &&
-  test \"x\`expr \$as_lineno_1'\$as_run' + 1\`\" = \"x\$as_lineno_2'\$as_run'\"' || exit 1"
+  test \"x\`expr \$as_lineno_1'\$as_run' + 1\`\" = \"x\$as_lineno_2'\$as_run'\"' || exit 1
+test \$(( 1 + 1 )) = 2 || exit 1"
   if (eval "$as_required") 2>/dev/null; then :
   as_have_required=yes
 else
@@ -590,6 +591,7 @@ adsgithubtools_perl5_inc_begin_block_snippet_filepath
 sed_srsanitize_command
 sed_slsanitize_command
 do_subst_command
+cargo_vendored_root
 perl5_pkgvlibdir
 perl5_pkgvdatadir
 USING_PERL5_EXTRA_INCLUDES_FALSE
@@ -598,6 +600,7 @@ ads_perl5_extra_includes_opt
 ads_perl5_extra_includes
 POD2MAN
 PERL
+ZSTD_PROG
 XARGS_PROG
 WC_PROG
 USERMOD
@@ -606,10 +609,14 @@ GROUPADD
 TR_PROG
 TAIL_PROG
 SHA3SUM_PROG
+SHA256SUM_PROG
+RUSTC_PROG
 RMDIR
 RM
-SED
+READLINK_PROG
+MV_PROG
 MKTEMP_PROG
+MKDIR_PROG
 JQ_PROG
 ID_PROG
 HEAD_PROG
@@ -619,13 +626,20 @@ GIT_PROG
 FIND
 EXPR_PROG
 ECHO_PROG
+DIRNAME_PROG
 DATE_PROG
 CURL_PROG
+CP_PROG
 CHOWN
+CHMOD_PROG
 CHGRP
 CAT
+CARGO_PROG_VERSION
+CARGO_PROG
+SED
 BC_PROG
 BASH_SH
+BASENAME_PROG
 AWK_PROG
 LN_S
 AM_BACKSLASH
@@ -2328,9 +2342,125 @@ AMTAR='$${TAR-tar}'
 
 
 # We'll loop over all known methods to create a tar archive until one works.
-_am_tools='gnutar  pax cpio none'
+_am_tools='gnutar plaintar pax cpio none'
 
-am__tar='$${TAR-tar} chof - "$$tardir"' am__untar='$${TAR-tar} xf -'
+# The POSIX 1988 'ustar' format is defined with fixed-size fields.
+      # There is notably a 21 bits limit for the UID and the GID.  In fact,
+      # the 'pax' utility can hang on bigger UID/GID (see automake bug#8343
+      # and bug#13588).
+      am_max_uid=2097151 # 2^21 - 1
+      am_max_gid=$am_max_uid
+      # The $UID and $GID variables are not portable, so we need to resort
+      # to the POSIX-mandated id(1) utility.  Errors in the 'id' calls
+      # below are definitely unexpected, so allow the users to see them
+      # (that is, avoid stderr redirection).
+      am_uid=`id -u || echo unknown`
+      am_gid=`id -g || echo unknown`
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether UID '$am_uid' is supported by ustar format" >&5
+$as_echo_n "checking whether UID '$am_uid' is supported by ustar format... " >&6; }
+      if test $am_uid -le $am_max_uid; then
+         { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      else
+         { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+         _am_tools=none
+      fi
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether GID '$am_gid' is supported by ustar format" >&5
+$as_echo_n "checking whether GID '$am_gid' is supported by ustar format... " >&6; }
+      if test $am_gid -le $am_max_gid; then
+         { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      else
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+        _am_tools=none
+      fi
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking how to create a ustar tar archive" >&5
+$as_echo_n "checking how to create a ustar tar archive... " >&6; }
+
+  # Go ahead even if we have the value already cached.  We do so because we
+  # need to set the values for the 'am__tar' and 'am__untar' variables.
+  _am_tools=${am_cv_prog_tar_ustar-$_am_tools}
+
+  for _am_tool in $_am_tools; do
+    case $_am_tool in
+    gnutar)
+      for _am_tar in tar gnutar gtar; do
+        { echo "$as_me:$LINENO: $_am_tar --version" >&5
+   ($_am_tar --version) >&5 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); } && break
+      done
+      am__tar="$_am_tar --format=ustar -chf - "'"$$tardir"'
+      am__tar_="$_am_tar --format=ustar -chf - "'"$tardir"'
+      am__untar="$_am_tar -xf -"
+      ;;
+    plaintar)
+      # Must skip GNU tar: if it does not support --format= it doesn't create
+      # ustar tarball either.
+      (tar --version) >/dev/null 2>&1 && continue
+      am__tar='tar chf - "$$tardir"'
+      am__tar_='tar chf - "$tardir"'
+      am__untar='tar xf -'
+      ;;
+    pax)
+      am__tar='pax -L -x ustar -w "$$tardir"'
+      am__tar_='pax -L -x ustar -w "$tardir"'
+      am__untar='pax -r'
+      ;;
+    cpio)
+      am__tar='find "$$tardir" -print | cpio -o -H ustar -L'
+      am__tar_='find "$tardir" -print | cpio -o -H ustar -L'
+      am__untar='cpio -i -H ustar -d'
+      ;;
+    none)
+      am__tar=false
+      am__tar_=false
+      am__untar=false
+      ;;
+    esac
+
+    # If the value was cached, stop now.  We just wanted to have am__tar
+    # and am__untar set.
+    test -n "${am_cv_prog_tar_ustar}" && break
+
+    # tar/untar a dummy directory, and stop if the command works.
+    rm -rf conftest.dir
+    mkdir conftest.dir
+    echo GrepMe > conftest.dir/file
+    { echo "$as_me:$LINENO: tardir=conftest.dir && eval $am__tar_ >conftest.tar" >&5
+   (tardir=conftest.dir && eval $am__tar_ >conftest.tar) >&5 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); }
+    rm -rf conftest.dir
+    if test -s conftest.tar; then
+      { echo "$as_me:$LINENO: $am__untar <conftest.tar" >&5
+   ($am__untar <conftest.tar) >&5 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); }
+      { echo "$as_me:$LINENO: cat conftest.dir/file" >&5
+   (cat conftest.dir/file) >&5 2>&5
+   ac_status=$?
+   echo "$as_me:$LINENO: \$? = $ac_status" >&5
+   (exit $ac_status); }
+      grep GrepMe conftest.dir/file >/dev/null 2>&1 && break
+    fi
+  done
+  rm -rf conftest.dir
+
+  if ${am_cv_prog_tar_ustar+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  am_cv_prog_tar_ustar=$_am_tool
+fi
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $am_cv_prog_tar_ustar" >&5
+$as_echo "$am_cv_prog_tar_ustar" >&6; }
 
 
 
@@ -2396,6 +2526,8 @@ $as_echo "no, using $LN_S" >&6; }
 fi
 
 
+
+
 # Extract the first word of "awk", so it can be a program name with args.
 set dummy awk; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -2438,6 +2570,50 @@ fi
 
 if test -z "$AWK_PROG"; then
     as_fn_error $? "awk not found" "$LINENO" 5
+fi
+
+# Extract the first word of "basename", so it can be a program name with args.
+set dummy basename; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_BASENAME_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $BASENAME_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_BASENAME_PROG="$BASENAME_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_BASENAME_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+BASENAME_PROG=$ac_cv_path_BASENAME_PROG
+if test -n "$BASENAME_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $BASENAME_PROG" >&5
+$as_echo "$BASENAME_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$BASENAME_PROG"; then
+    as_fn_error $? "basename not found" "$LINENO" 5
 fi
 
 ## We need bash >= 4.x (associative arrays were added in bash-4.0)
@@ -2541,6 +2717,385 @@ if test -z "$BC_PROG"; then
     as_fn_error $? "bc not found" "$LINENO" 5
 fi
 
+
+# Cargo is the package management and build orchestration tool for the Rust
+# programming language. If you've got 'rustc', then you probably have this
+# already. On Debian systems (and its derivatives), it is provided by the
+# 'cargo' package.
+#
+#     https://github.com/rust-lang/cargo/
+#     https://doc.rust-lang.org/cargo/
+#
+# The minimum version required is 1.42.0 (released 2020-03-12); that version
+# introduced the '--versioned-dirs' option, which (combined with other project
+# configuration) causes the build to use our "vendored" sources under:
+#
+#     src/third-party/cargo-vendored/
+#
+# This macro provides these shell variables (along with their AC_SUBST'd
+# counterparts):
+#
+#     $CARGO_PROG
+#     $CARGO_PROG_VERSION
+#
+# Require cargo version 1.42.0 or newer.
+#
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for a sed that does not truncate output" >&5
+$as_echo_n "checking for a sed that does not truncate output... " >&6; }
+if ${ac_cv_path_SED+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+            ac_script=s/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/
+     for ac_i in 1 2 3 4 5 6 7; do
+       ac_script="$ac_script$as_nl$ac_script"
+     done
+     echo "$ac_script" 2>/dev/null | sed 99q >conftest.sed
+     { ac_script=; unset ac_script;}
+     if test -z "$SED"; then
+  ac_path_SED_found=false
+  # Loop through the user's path and test for each of PROGNAME-LIST
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_prog in sed gsed; do
+    for ac_exec_ext in '' $ac_executable_extensions; do
+      ac_path_SED="$as_dir/$ac_prog$ac_exec_ext"
+      as_fn_executable_p "$ac_path_SED" || continue
+# Check for GNU ac_path_SED and select it if it is found.
+  # Check for GNU $ac_path_SED
+case `"$ac_path_SED" --version 2>&1` in
+*GNU*)
+  ac_cv_path_SED="$ac_path_SED" ac_path_SED_found=:;;
+*)
+  ac_count=0
+  $as_echo_n 0123456789 >"conftest.in"
+  while :
+  do
+    cat "conftest.in" "conftest.in" >"conftest.tmp"
+    mv "conftest.tmp" "conftest.in"
+    cp "conftest.in" "conftest.nl"
+    $as_echo '' >> "conftest.nl"
+    "$ac_path_SED" -f conftest.sed < "conftest.nl" >"conftest.out" 2>/dev/null || break
+    diff "conftest.out" "conftest.nl" >/dev/null 2>&1 || break
+    as_fn_arith $ac_count + 1 && ac_count=$as_val
+    if test $ac_count -gt ${ac_path_SED_max-0}; then
+      # Best one so far, save it but keep looking for a better one
+      ac_cv_path_SED="$ac_path_SED"
+      ac_path_SED_max=$ac_count
+    fi
+    # 10*(2^10) chars as input seems more than enough
+    test $ac_count -gt 10 && break
+  done
+  rm -f conftest.in conftest.tmp conftest.nl conftest.out;;
+esac
+
+      $ac_path_SED_found && break 3
+    done
+  done
+  done
+IFS=$as_save_IFS
+  if test -z "$ac_cv_path_SED"; then
+    as_fn_error $? "no acceptable sed could be found in \$PATH" "$LINENO" 5
+  fi
+else
+  ac_cv_path_SED=$SED
+fi
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_path_SED" >&5
+$as_echo "$ac_cv_path_SED" >&6; }
+ SED="$ac_cv_path_SED"
+  rm -f conftest.sed
+
+
+
+# start: [[ads_PROG_CARGO]]
+
+
+#set -x
+    _ads_req_cargo_version="1.42.0"
+    if test -z "${_ads_req_cargo_version}"; then
+        _ads_req_cargo_version='1.0.0'
+    fi
+    # Extract the first word of "cargo", so it can be a program name with args.
+set dummy cargo; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_CARGO_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $CARGO_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_CARGO_PROG="$CARGO_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_CARGO_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+CARGO_PROG=$ac_cv_path_CARGO_PROG
+if test -n "$CARGO_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CARGO_PROG" >&5
+$as_echo "$CARGO_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+    if test -z "${CARGO_PROG}"; then
+        as_fn_error $? "cargo not found" "$LINENO" 5
+    fi
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking cargo version (need ${_ads_req_cargo_version} or newer)" >&5
+$as_echo_n "checking cargo version (need ${_ads_req_cargo_version} or newer)... " >&6; }
+
+# bracket is m4 quote bait start: do not remove
+
+    # For legit semver version number strings, emits the five component
+    # fields (major, minor, patch, pre-release, and buildinfo) on stdout
+    # and then returns 0 (success).
+    #
+    # For non-legit semver version number strings, emits the value '_'
+    # (underscore) for all five components and then returns 1 (error).
+    #
+    # In the success case, the major, minor, and patch fields will
+    # always be non-empty, but either one (or both) of the pre-release
+    # and buildinfo fields may be empty). Any empty fields are emitted
+    # as '_'.
+    #
+    _ads_f_prog_cargo_extract_vfields() {
+        _ads_local_val_to_check=$1
+
+        if test -z "${_ads_local_val_to_check}"; then
+            printf '%s  %s  %s  %s  %s\n' '_' '_' '_' '_' '_'
+            return 1  # error
+        fi
+
+        # When extracting the M, m, and p values we use not only two
+        # separate sed expressions, but two separate invocations.
+        #
+        # The first sed expression (in the first invocation) plucks out
+        # the relevant number from the M.m.p triplet ("the M part", "the
+        # m part", or "the p part"). This part only emits a non-empty
+        # value if it recognized the data.
+        #
+        # The second sed expression (in the second invocation) slices
+        # off any leading zeros, but leaves stand-alone zeros alone. If
+        # the first expression did not emit anything, then this cleanup
+        # step is effectively a NOOP. Note that the Semantic Versioning
+        # 2.0.0 ("SemVer") spec requires this no-leading-zeros behavior:
+        #
+        #     "A normal version number MUST take the form X.Y.Z where X,
+        #      Y, and Z are non-negative integers, and MUST NOT contain
+        #      leading zeroes."
+        #
+        # See also:
+        #     https://semver.org/
+
+        # XXX: We use alteration in our sed regexen, which is reportedly
+        #      not universally portable. See the Autoconf manual,
+        #      section "11.15 Limitations of Usual Tools ================================". If you run
+        #      into a problem with this on your platform, please open a
+        #      bug to let us know so we can prioritize a fix.
+
+#set -x
+        _ads_local_tval_M=$(printf '%s\n' "${_ads_local_val_to_check}" \
+                   | "${SED}" -n -e 's/^\([[:digit:]]\{1,\}\)[.].*/\1/p' \
+                   | "${SED}"    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+        _ads_local_tval_m=$(printf '%s\n' "${_ads_local_val_to_check}" \
+                   | "${SED}" -n -e 's/^[[:digit:]]\{1,\}[.]\([[:digit:]]\{1,\}\)[.].*/\1/p' \
+                   | "${SED}"    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+        _ads_local_tval_p=$(printf '%s\n' "${_ads_local_val_to_check}" \
+                   | "${SED}" -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.]\([[:digit:]]\{1,\}\)\([-+].*\|$\)/\1/p' \
+                   | "${SED}"    -e 's/^0*\([1-9][[:digit:]]*\)/\1/')
+
+        _ads_local_tval_prerel=$(printf '%s\n' "${_ads_local_val_to_check}" \
+                        | "${SED}" -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.][[:digit:]]\{1,\}-\([0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\([+].*\|$\)/\1/p')
+
+        _ads_local_tval_buildinfo=$(printf '%s\n' "${_ads_local_val_to_check}" \
+                          | "${SED}" -n -e 's/^[[:digit:]]\{1,\}[.][[:digit:]]\{1,\}[.][[:digit:]]\{1,\}\(-[0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\{0,1\}[+]\([0-9A-Za-z-]\{1,\}\([.][0-9A-Za-z-]\{1,\}\)*\)\{0,1\}$/\3/p' )
+#set +x
+
+        _ads_local_tval_recombined="${_ads_local_tval_M}.${_ads_local_tval_m}.${_ads_local_tval_p}"
+        if test -n "${_ads_local_tval_prerel}"; then
+            _ads_local_tval_recombined="${_ads_local_tval_recombined}-${_ads_local_tval_prerel}"
+        fi
+        if test -n "${_ads_local_tval_buildinfo}"; then
+            _ads_local_tval_recombined="${_ads_local_tval_recombined}+${_ads_local_tval_buildinfo}"
+        fi
+
+        # If our recombined fields do not exactly match the input value
+        # that was provided, then it was not a legit semver field.
+        if test "${_ads_local_tval_recombined}" = "${_ads_local_val_to_check}"; then :; else
+            printf '%s  %s  %s  %s  %s\n' '_' '_' '_' '_' '_'
+            return 1  # error
+        fi
+
+        printf '%s  %s  %s  %s  %s\n' \
+            "${_ads_local_tval_M}"    \
+            "${_ads_local_tval_m}"    \
+            "${_ads_local_tval_p}"    \
+            "${_ads_local_tval_prerel:-_}"   \
+            "${_ads_local_tval_buildinfo:-_}"
+        return 0;  # success
+    }
+
+# bracket is m4 quote bait end: do not remove
+
+    # Sanity check the required ("given") cargo version
+
+    read -r givmaj givmin givpat givrel givbld <<EOF
+$(_ads_f_prog_cargo_extract_vfields "${_ads_req_cargo_version}")
+EOF
+
+    if test "${givmaj}" = '_' \
+    || test "${givmin}" = '_' \
+    || test "${givpat}" = '_'; then
+        # The cargo version number provided ("given") in configure.ac is
+        # invalid
+        as_fn_error $? "ads_PROG_CARGO: (bug): invalid cargo version specified: ${_ads_req_cargo_version}" "$LINENO" 5
+    fi
+
+## bracket is m4 quote bait start: do not remove
+    _ads_t_found_cargo_version=$("${CARGO_PROG}" --version | "${SED}" -e 's/^[[:space:]]*cargo[[:space:]]*//')
+## bracket is m4 quote bait end: do not remove
+    if test $? -ne 0; then
+        # unable to determine version of the found cargo program
+        as_fn_error $? "was unable to determine cargo version" "$LINENO" 5
+    fi
+
+    if test -z "${_ads_t_found_cargo_version}"; then
+        as_fn_error $? "found cargo version string is empty" "$LINENO" 5
+    fi
+
+    read -r fndmaj fndmin fndpat fndrel fndbld <<EOF
+$(_ads_f_prog_cargo_extract_vfields "${_ads_t_found_cargo_version}")
+EOF
+
+    if test "${fndmaj}" = '_' \
+    || test "${fndmin}" = '_' \
+    || test "${fndpat}" = '_'; then
+        as_fn_error $? "ads_PROG_CARGO: (bug?): invalid cargo version found: ${_ads_t_found_cargo_version}" "$LINENO" 5
+    fi
+
+    if test "${fndmaj}" -lt "${givmaj}"; then
+        # found cargo version is not recent enough (major too low)
+        as_fn_error $? "found: ${_ads_t_found_cargo_version}" "$LINENO" 5
+    fi
+    if test "${fndmaj}" -eq "${givmaj}" \
+    && test "${fndmin}" -lt "${givmin}"; then
+        # found cargo version is not recent enough (minor too low)
+        as_fn_error $? "found: ${_ads_t_found_cargo_version}" "$LINENO" 5
+    fi
+    if test "${fndmaj}" -eq "${givmaj}" \
+    && test "${fndmin}" -eq "${givmin}" \
+    && test "${fndpat}" -lt "${givpat}"; then
+        # found cargo version is not recent enough (patch too low)
+        as_fn_error $? "found: ${_ads_t_found_cargo_version}" "$LINENO" 5
+    fi
+
+    if test "${fndmaj}" -gt "${givmaj}"; then
+        # found cargo version's major is higher than the required, so
+        # that's good enough.
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes: ${_ads_t_found_cargo_version}" >&5
+$as_echo "yes: ${_ads_t_found_cargo_version}" >&6; }
+
+    elif test "${fndmaj}" -eq "${givmaj}" \
+      && test "${fndmin}" -gt "${givmin}"; then
+        # found cargo version's major is the same as the required
+        # version, but the minor version is higher than the required;
+        # that's good enough.
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes: ${_ads_t_found_cargo_version}" >&5
+$as_echo "yes: ${_ads_t_found_cargo_version}" >&6; }
+
+    elif test "${fndmaj}" -eq "${givmaj}" \
+      && test "${fndmin}" -eq "${givmin}" \
+      && test "${fndpat}" -gt "${givpat}"; then
+        # found cargo version's major and minor are the same as the
+        # required version, but the patch version is higher than the
+        # required; that's good enough.
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes: ${_ads_t_found_cargo_version}" >&5
+$as_echo "yes: ${_ads_t_found_cargo_version}" >&6; }
+    else
+
+        # If we are falling through here, then the found M.m.p is
+        # identical to the required M.m.p.
+        #
+        # The only thing left to distinguish the values is the
+        # "pre-release" field.
+
+        if test "${givrel}" = "${fndrel}"; then
+            # Either both are '_' (not present), or both have the same
+            # value. Either way, the found value satisfies the search.
+            { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes: ${_ads_t_found_cargo_version}" >&5
+$as_echo "yes: ${_ads_t_found_cargo_version}" >&6; }
+
+        else
+            # From the SemVer 2.0 spec: "Pre-release versions have a
+            # lower precedence than the associated normal version."
+
+            if test "${givrel}" = '_'; then
+                # Our given pre-release field is empty...
+
+                if test "${fndrel}" = '_'; then :; else
+                    # ...but our found pre-release field is not. Our
+                    # found version is "lower" than our given version.
+
+                    # Found cargo version is not recent enough
+                    as_fn_error $? "found: ${_ads_t_found_cargo_version}" "$LINENO" 5
+                fi
+
+            elif test "${fndrel}" = '_'; then
+                # Our found pre-release field is empty...
+
+                if test "${givrel}" = '_'; then :; else
+                    # ...but our given pre-release field is not. Our
+                    # given version is "lower" than our found version.
+                    { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes: ${_ads_t_found_cargo_version}" >&5
+$as_echo "yes: ${_ads_t_found_cargo_version}" >&6; }
+                fi
+            else
+
+                # XXX: There are rules for comparing pre-release field
+                #      strings, but that functionality is not
+                #      implemented here. It seems like a corner case
+                #      that is unlikely to affect people in the real
+                #      world. Please file a bug to tell us otherwise if
+                #      it affects your workflow. For now, we just
+                #      punt...
+
+                as_fn_error $? "ads_PROG_CARGO: (bug):comparison of unequal \"pre-release\" fields not currently supported. Required: ${_ads_req_cargo_version}; got: ${_ads_t_found_cargo_version}" "$LINENO" 5
+            fi
+        fi
+    fi
+
+    CARGO_PROG_VERSION=${_ads_t_found_cargo_version}
+
+
+#set +x
+# end: [[ads_PROG_CARGO]]
+
+
+
 # Extract the first word of "cat", so it can be a program name with args.
 set dummy cat; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -2629,6 +3184,50 @@ if test -z "$CHGRP"; then
     as_fn_error $? "chgrp not found" "$LINENO" 5
 fi
 
+# Extract the first word of "chmod", so it can be a program name with args.
+set dummy chmod; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_CHMOD_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $CHMOD_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_CHMOD_PROG="$CHMOD_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_CHMOD_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+CHMOD_PROG=$ac_cv_path_CHMOD_PROG
+if test -n "$CHMOD_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CHMOD_PROG" >&5
+$as_echo "$CHMOD_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$CHMOD_PROG"; then
+    as_fn_error $? "chmod not found" "$LINENO" 5
+fi
+
 # Extract the first word of "chown", so it can be a program name with args.
 set dummy chown; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -2671,6 +3270,50 @@ fi
 
 if test -z "$CHOWN"; then
     as_fn_error $? "chown not found" "$LINENO" 5
+fi
+
+# Extract the first word of "cp", so it can be a program name with args.
+set dummy cp; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_CP_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $CP_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_CP_PROG="$CP_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_CP_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+CP_PROG=$ac_cv_path_CP_PROG
+if test -n "$CP_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CP_PROG" >&5
+$as_echo "$CP_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$CP_PROG"; then
+    as_fn_error $? "cp not found" "$LINENO" 5
 fi
 
 # See: https://en.wikipedia.org/wiki/CURL
@@ -2763,6 +3406,50 @@ fi
 
 if test -z "$DATE_PROG"; then
     as_fn_error $? "date not found" "$LINENO" 5
+fi
+
+# Extract the first word of "dirname", so it can be a program name with args.
+set dummy dirname; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_DIRNAME_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $DIRNAME_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_DIRNAME_PROG="$DIRNAME_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_DIRNAME_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+DIRNAME_PROG=$ac_cv_path_DIRNAME_PROG
+if test -n "$DIRNAME_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $DIRNAME_PROG" >&5
+$as_echo "$DIRNAME_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$DIRNAME_PROG"; then
+    as_fn_error $? "dirname not found" "$LINENO" 5
 fi
 
 # Extract the first word of "echo", so it can be a program name with args.
@@ -3174,6 +3861,50 @@ if test -z "$JQ_PROG"; then
     as_fn_error $? "jq program not found" "$LINENO" 5
 fi
 
+# Extract the first word of "mkdir", so it can be a program name with args.
+set dummy mkdir; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_MKDIR_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $MKDIR_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_MKDIR_PROG="$MKDIR_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_MKDIR_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+MKDIR_PROG=$ac_cv_path_MKDIR_PROG
+if test -n "$MKDIR_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $MKDIR_PROG" >&5
+$as_echo "$MKDIR_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$MKDIR_PROG"; then
+    as_fn_error $? "mkdir program not found" "$LINENO" 5
+fi
+
 # Extract the first word of "mktemp", so it can be a program name with args.
 set dummy mktemp; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -3218,6 +3949,50 @@ if test -z "$MKTEMP_PROG"; then
     as_fn_error $? "mktemp program not found" "$LINENO" 5
 fi
 
+# Extract the first word of "mv", so it can be a program name with args.
+set dummy mv; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_MV_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $MV_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_MV_PROG="$MV_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_MV_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+MV_PROG=$ac_cv_path_MV_PROG
+if test -n "$MV_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $MV_PROG" >&5
+$as_echo "$MV_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$MV_PROG"; then
+    as_fn_error $? "mv program not found" "$LINENO" 5
+fi
+
 # Extract the first word of "sed", so it can be a program name with args.
 set dummy sed; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -3260,6 +4035,51 @@ fi
 
 if test -z "$SED"; then
     as_fn_error $? "sed not found" "$LINENO" 5
+fi
+
+# readlink(1) from the GNU coreutils
+# Extract the first word of "readlink", so it can be a program name with args.
+set dummy readlink; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_READLINK_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $READLINK_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_READLINK_PROG="$READLINK_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_READLINK_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+READLINK_PROG=$ac_cv_path_READLINK_PROG
+if test -n "$READLINK_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $READLINK_PROG" >&5
+$as_echo "$READLINK_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$READLINK_PROG"; then
+    as_fn_error $? "readlink not found" "$LINENO" 5
 fi
 
 # Extract the first word of "rm", so it can be a program name with args.
@@ -3350,6 +4170,103 @@ if test -z "$RMDIR"; then
     as_fn_error $? "rmdir not found" "$LINENO" 5
 fi
 
+# 'rustc' is the compiler for the Rust programming language. If you have
+# 'cargo' (checked-for above), then you probably have 'rustc', too. On Debian
+# systems (and its derivatives), it is provided by the 'rust' package.
+#
+#     https://www.rust-lang.org/
+#     https://www.rust-lang.org/tools/install
+#     https://doc.rust-lang.org/rustc/index.html
+#     https://github.com/rust-lang/rust
+#
+# Extract the first word of "rustc", so it can be a program name with args.
+set dummy rustc; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_RUSTC_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $RUSTC_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_RUSTC_PROG="$RUSTC_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_RUSTC_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+RUSTC_PROG=$ac_cv_path_RUSTC_PROG
+if test -n "$RUSTC_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $RUSTC_PROG" >&5
+$as_echo "$RUSTC_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$RUSTC_PROG"; then
+    as_fn_error $? "rustc not found" "$LINENO" 5
+fi
+
+# sha256sum(1), from GNU 'coreutils'
+# Extract the first word of "sha256sum", so it can be a program name with args.
+set dummy sha256sum; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_SHA256SUM_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $SHA256SUM_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_SHA256SUM_PROG="$SHA256SUM_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_SHA256SUM_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+SHA256SUM_PROG=$ac_cv_path_SHA256SUM_PROG
+if test -n "$SHA256SUM_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $SHA256SUM_PROG" >&5
+$as_echo "$SHA256SUM_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$SHA256SUM_PROG"; then
+    as_fn_error $? "sha256sum not found" "$LINENO" 5
+fi
 
 # See: https://metacpan.org/release/Digest-SHA3
 #      https://packages.debian.org/jessie/libdigest-sha3-perl
@@ -3703,6 +4620,55 @@ fi
 
 if test -z "$XARGS_PROG"; then
     as_fn_error $? "xargs not found" "$LINENO" 5
+fi
+
+
+# The zstd(1) compression tool
+#
+#     https://github.com/facebook/zstd
+#
+# Extract the first word of "zstd", so it can be a program name with args.
+set dummy zstd; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_ZSTD_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $ZSTD_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_ZSTD_PROG="$ZSTD_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_ZSTD_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+ZSTD_PROG=$ac_cv_path_ZSTD_PROG
+if test -n "$ZSTD_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ZSTD_PROG" >&5
+$as_echo "$ZSTD_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -z "$ZSTD_PROG"; then
+    as_fn_error $? "zstd not found" "$LINENO" 5
 fi
 
 
@@ -4345,6 +5311,25 @@ perl5_pkgvdatadir="\${datadir}/${PACKAGE}-${VERSION}/perl5"
 perl5_pkgvlibdir="\${libdir}/${PACKAGE}-${VERSION}/perl5"
 
 
+# The Cargo build orchestration tool for Rust can "vendor" our third-party
+# rust library dependencies ("crates") by obtaining them from crates.io (or
+# whever else we configure it to look) and storing local copies in an
+# arbitrary subdirectory within our build tree.
+#
+# We take advantage of that capability so that end-users will have within our
+# release tarballs everything they need to compile our Rust-based artifacts
+# (assuming they have the rustc compiler and cargo itself already
+# installed).
+#
+# This approach allows us to have reproducible builds and protects us against
+# artifacts disappearing from the Internet. It also allows us to provide users
+# with a build system that does not require access to network resources or
+# otherwise have familiarity and/or comfort with the tooling of the Rust
+# ecosystem.
+#
+cargo_vendored_root='$(top_srcdir)/src/third-party/cargo-vendored'
+
+
 
 ## The 'do_subst' Makefile var is the conventional name for manual
 ## filtering process that needs to be done at build time.
@@ -4408,12 +5393,20 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]ads_perl5_extra_includes[@],$(ads_perl5_extra_includes),g'"'"' \
   -e '"'"'s,[@]perl5_pkgvdatadir[@],$(perl5_pkgvdatadir),g'"'"' \
   \
+  -e '"'"'s,[@]cargo_vendored_root[@],$(cargo_vendored_root),g'"'"' \
+  \
   -e '"'"'s,[@]AWK_PROG[@],$(AWK_PROG),g'"'"' \
+  -e '"'"'s,[@]BASENAME_PROG[@],$(BASENAME_PROG),g'"'"' \
   -e '"'"'s,[@]BASH_SH[@],$(BASH_SH),g'"'"' \
   -e '"'"'s,[@]BC_PROG[@],$(BC_PROG),g'"'"' \
+  -e '"'"'s,[@]CARGO_PROG[@],$(CARGO_PROG),g'"'"' \
+  -e '"'"'s,[@]CARGO_PROG_VERSION[@],$(CARGO_PROG_VERSION),g'"'"' \
   -e '"'"'s,[@]CAT[@],$(CAT),g'"'"' \
   -e '"'"'s,[@]CHGRP[@],$(CHGRP),g'"'"' \
+  -e '"'"'s,[@]CHMOD_PROG[@],$(CHMOD_PROG),g'"'"' \
   -e '"'"'s,[@]CHOWN[@],$(CHOWN),g'"'"' \
+  -e '"'"'s,[@]CP_PROG[@],$(CP_PROG),g'"'"' \
+  -e '"'"'s,[@]DIRNAME_PROG[@],$(DIRNAME_PROG),g'"'"' \
   -e '"'"'s,[@]CURL_PROG[@],$(CURL_PROG),g'"'"' \
   -e '"'"'s,[@]DATE_PROG[@],$(DATE_PROG),g'"'"' \
   -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
@@ -4426,10 +5419,15 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
+  -e '"'"'s,[@]MKDIR_PROG[@],$(MKDIR_PROG),g'"'"' \
   -e '"'"'s,[@]MKTEMP_PROG[@],$(MKTEMP_PROG),g'"'"' \
+  -e '"'"'s,[@]MV_PROG[@],$(MV_PROG),g'"'"' \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
+  -e '"'"'s,[@]READLINK_PROG[@],$(READLINK_PROG),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
   -e '"'"'s,[@]RMDIR[@],$(RMDIR),g'"'"' \
+  -e '"'"'s,[@]RUSTC_PROG[@],$(RUSTC_PROG),g'"'"' \
+  -e '"'"'s,[@]SHA256SUM_PROG[@],$(SHA256SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
@@ -4437,6 +5435,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
   -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
+  -e '"'"'s,[@]ZSTD_PROG[@],$(ZSTD_PROG),g'"'"' \
 '
 
 
@@ -4472,7 +5471,20 @@ adsgithubtools_perl5_inc_begin_block_snippet_filepath="\$(top_builddir)/src/main
 
 
 
-ac_config_files="$ac_config_files Makefile bin/Makefile src/Makefile src/main/Makefile src/main/bash/Makefile src/main/bash/bin/Makefile src/main/perl/Makefile src/main/perl/bin/Makefile src/main/resources/Makefile"
+# We generate some of our Rust (.rs) source code files, so they end up in the
+# build tree when doing a VPATH build. Because Cargo expects to find all of
+# the files involved with building a Rust "package" (source code files for the
+# crates, the Cargo.lock file, etc) together in the same directory tree, we
+# need to arrange for the files that aren't generated to appear to be local to
+# the build tree. Enter AC_CONFIG_LINKS.
+#
+# Note that we generate 'Cargo.toml' in the build tree, but link its
+# corresponding 'Cargo.lock' file from the source tree.
+#
+ac_config_links="$ac_config_links src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml"
+
+
+ac_config_files="$ac_config_files .cargo/config.toml src/main/rust/bin/parse-netrc/.cargo/config.toml Makefile bin/Makefile src/Makefile src/main/Makefile src/main/bash/Makefile src/main/bash/bin/Makefile src/main/perl/Makefile src/main/perl/bin/Makefile src/main/resources/Makefile src/main/rust/Makefile src/main/rust/bin/Makefile src/main/rust/bin/parse-netrc/Makefile"
 
 
 cat >confcache <<\_ACEOF
@@ -5053,6 +6065,7 @@ esac
 cat >>$CONFIG_STATUS <<_ACEOF || ac_write_fail=1
 # Files that config.status was made for.
 config_files="$ac_config_files"
+config_links="$ac_config_links"
 
 _ACEOF
 
@@ -5076,6 +6089,9 @@ Usage: $0 [OPTION]... [TAG]...
 
 Configuration files:
 $config_files
+
+Configuration links:
+$config_links
 
 Report bugs to <Alan D. Salewski <ads@salewski.email>>.
 ADS GitHub Tools home page: <https://github.com/salewski/ads-github-tools>."
@@ -5197,6 +6213,10 @@ cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
 for ac_config_target in $ac_config_targets
 do
   case $ac_config_target in
+    "src/main/rust/bin/parse-netrc/Cargo.lock") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock" ;;
+    "src/main/rust/bin/parse-netrc/Cargo.toml") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml" ;;
+    ".cargo/config.toml") CONFIG_FILES="$CONFIG_FILES .cargo/config.toml" ;;
+    "src/main/rust/bin/parse-netrc/.cargo/config.toml") CONFIG_FILES="$CONFIG_FILES src/main/rust/bin/parse-netrc/.cargo/config.toml" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "bin/Makefile") CONFIG_FILES="$CONFIG_FILES bin/Makefile" ;;
     "src/Makefile") CONFIG_FILES="$CONFIG_FILES src/Makefile" ;;
@@ -5206,6 +6226,9 @@ do
     "src/main/perl/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/perl/Makefile" ;;
     "src/main/perl/bin/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/perl/bin/Makefile" ;;
     "src/main/resources/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/resources/Makefile" ;;
+    "src/main/rust/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/rust/Makefile" ;;
+    "src/main/rust/bin/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/rust/bin/Makefile" ;;
+    "src/main/rust/bin/parse-netrc/Makefile") CONFIG_FILES="$CONFIG_FILES src/main/rust/bin/parse-netrc/Makefile" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
@@ -5218,6 +6241,7 @@ done
 # bizarre bug on SunOS 4.1.3.
 if $ac_need_defaults; then
   test "${CONFIG_FILES+set}" = set || CONFIG_FILES=$config_files
+  test "${CONFIG_LINKS+set}" = set || CONFIG_LINKS=$config_links
 fi
 
 # Have a temporary directory for convenience.  Make it in the build tree
@@ -5406,7 +6430,7 @@ cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
 fi # test -n "$CONFIG_FILES"
 
 
-eval set X "  :F $CONFIG_FILES      "
+eval set X "  :F $CONFIG_FILES    :L $CONFIG_LINKS  "
 shift
 for ac_tag
 do
@@ -5626,7 +6650,38 @@ which seems to be undefined.  Please make sure it is defined" >&2;}
   || as_fn_error $? "could not create $ac_file" "$LINENO" 5
  ;;
 
+  :L)
+  #
+  # CONFIG_LINK
+  #
 
+  if test "$ac_source" = "$ac_file" && test "$srcdir" = '.'; then
+    :
+  else
+    # Prefer the file from the source tree if names are identical.
+    if test "$ac_source" = "$ac_file" || test ! -r "$ac_source"; then
+      ac_source=$srcdir/$ac_source
+    fi
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: linking $ac_source to $ac_file" >&5
+$as_echo "$as_me: linking $ac_source to $ac_file" >&6;}
+
+    if test ! -r "$ac_source"; then
+      as_fn_error $? "$ac_source: file not found" "$LINENO" 5
+    fi
+    rm -f "$ac_file"
+
+    # Try a relative symlink, then a hard link, then a copy.
+    case $ac_source in
+    [\\/$]* | ?:[\\/]* ) ac_rel_source=$ac_source ;;
+	*) ac_rel_source=$ac_top_build_prefix$ac_source ;;
+    esac
+    ln -s "$ac_rel_source" "$ac_file" 2>/dev/null ||
+      ln "$ac_source" "$ac_file" 2>/dev/null ||
+      cp -p "$ac_source" "$ac_file" ||
+      as_fn_error $? "cannot link or copy $ac_source to $ac_file" "$LINENO" 5
+  fi
+ ;;
 
   esac
 
@@ -5720,6 +6775,10 @@ printf "                  Manual pages: %s\n" "`__poor_mans_expand_file_name man
 printf "\n"
 printf "                          bash: %s\n" "`__poor_mans_expand_file_name BASH_SH`"
 printf "                          perl: %s\n" "`__poor_mans_expand_file_name PERL`"
+printf "                         rustc: %s\n" "`__poor_mans_expand_file_name RUSTC_PROG`"
+printf "                         cargo: %s (%s)\n" \
+  "`__poor_mans_expand_file_name CARGO_PROG`"      \
+  "`__poor_mans_expand_file_name CARGO_PROG_VERSION`"
 printf "\n"
 
 

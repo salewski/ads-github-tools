@@ -14,6 +14,10 @@
 
 @SET_MAKE@
 
+#SUBDIRS = src \
+#          .
+
+
 VPATH = @srcdir@
 am__is_gnu_make = { \
   if test -z '$(MAKELEVEL)'; then \
@@ -86,7 +90,7 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
-subdir = src/main/resources
+subdir = src/main/rust/bin/parse-netrc
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -95,7 +99,36 @@ DIST_COMMON = $(srcdir)/Makefile.am $(dist_noinst_DATA) \
 	$(am__DIST_COMMON)
 mkinstalldirs = $(install_sh) -d
 CONFIG_CLEAN_FILES =
-CONFIG_CLEAN_VPATH_FILES =
+CONFIG_CLEAN_VPATH_FILES = Cargo.lock Cargo.toml
+am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
+am__vpath_adj = case $$p in \
+    $(srcdir)/*) f=`echo "$$p" | sed "s|^$$srcdirstrip/||"`;; \
+    *) f=$$p;; \
+  esac;
+am__strip_dir = f=`echo $$p | sed -e 's|^.*/||'`;
+am__install_max = 40
+am__nobase_strip_setup = \
+  srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*|]/\\\\&/g'`
+am__nobase_strip = \
+  for p in $$list; do echo "$$p"; done | sed -e "s|$$srcdirstrip/||"
+am__nobase_list = $(am__nobase_strip_setup); \
+  for p in $$list; do echo "$$p $$p"; done | \
+  sed "s| $$srcdirstrip/| |;"' / .*\//!s/ .*/ ./; s,\( .*\)/[^/]*$$,\1,' | \
+  $(AWK) 'BEGIN { files["."] = "" } { files[$$2] = files[$$2] " " $$1; \
+    if (++n[$$2] == $(am__install_max)) \
+      { print $$2, files[$$2]; n[$$2] = 0; files[$$2] = "" } } \
+    END { for (dir in files) print dir, files[dir] }'
+am__base_list = \
+  sed '$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;s/\n/ /g' | \
+  sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
+am__uninstall_files_from_dir = { \
+  test -z "$$files" \
+    || { test ! -d "$$dir" && test ! -f "$$dir" && test ! -r "$$dir"; } \
+    || { echo " ( cd '$$dir' && rm -f" $$files ")"; \
+         $(am__cd) "$$dir" && rm -f $$files; }; \
+  }
+am__installdirs = "$(DESTDIR)$(bindir)"
+SCRIPTS = $(bin_SCRIPTS)
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -115,9 +148,10 @@ am__can_run_installinfo = \
     n|no|NO) false;; \
     *) (install-info --version) >/dev/null 2>&1;; \
   esac
-DATA = $(dist_noinst_DATA) $(noinst_DATA)
+DATA = $(dist_noinst_DATA)
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
-am__DIST_COMMON = $(srcdir)/Makefile.in
+am__DIST_COMMON = $(srcdir)/Cargo.lock $(srcdir)/Cargo.toml \
+	$(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
@@ -246,9 +280,74 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-noinst_DATA = adsgithubtools-perl5-inc-begin-block.snippet
-dist_noinst_DATA = adsgithubtools-perl5-inc-begin-block.snippet.in
-CLEANFILES = adsgithubtools-perl5-inc-begin-block.snippet
+EXTRA_DIST = \
+    Cargo.lock \
+    Cargo.toml \
+    .cargo/config.toml
+
+
+# We reference the Cargo.toml file in the builddir because some of our *.rs
+# source files are generated. Cargo want all files for a package build to be
+# in the same directory subtree, so we use the builddir for that, and
+# symlink-in anything static that is needed from the source tree. (See
+# AM_CONFIG_LINKS in our 'configure.ac' file.).
+#
+CARGO_MANIFEST_PATH = $(builddir)/Cargo.toml
+CARGO_OPTS_COMMON = \
+    --manifest-path "$(CARGO_MANIFEST_PATH)" \
+    --verbose --offline --locked --frozen
+
+INPUT_TEMPLATES = \
+    src/main.rs.in
+
+dist_noinst_DATA = $(INPUT_TEMPLATES)
+
+# "static" sources
+SSOURCES = 
+# "generated" sources (filtered here by do_subst)
+#GSOURCES = $(INPUT_TEMPLATES:.in=-$(VERSION))
+GSOURCES = $(INPUT_TEMPLATES:.in=)
+
+# "static" scripts
+SSCRIPTS = 
+
+# "generated" scripts
+#
+# (Our Rust "binary crates" are listed here as "scripts" to allow us to build
+# them under our local control (generating the sources first, if necessary),
+# but then leverage the Autotools machinery for install/uninstall. See
+# bin_SCRIPTS note below).
+#
+GSCRIPTS = \
+    $(builddir)/target/release/parse-netrc$(EXEEXT)
+
+
+# CAREFUL: 'cargo clean' (invoked indirectly by our 'clean-local' target) will
+#          fail if we yank the generated *.rs file(s) out from under
+#          it. Better to remove via a clean-time target that depends on our
+#          'cargo-clean' target to make sure 'cargo clean' gets run before we
+#          try to delete the generated source file(s).
+#
+#CLEANFILES = $(GSOURCES) $(G1MANPAGES)
+#CLEANFILES = $(GSOURCES)
+
+# In the GNU Autotools, the SCRIPTS primary is used for any executable thing
+# for which the Autotools were not directly involved with the compiling or
+# linking (such as our Rust-based program(s) built by Cargo). We still rely on
+# Automake to install/uninstall this for us, which allows us to avoid doing it
+# manually.
+#
+# Note from the Automake manual (in the section "An Alternative Approach to
+# Subdirectories"):
+#
+#     "By default an installable file specified in a subdirectory will have
+#      its directory name stripped before installation."
+#
+# We are relying on that behavior. It is important here because we want our
+# bin_SCRIPTS installed directly in '$(bindir)', not in '$(bindir)/some/subdir/path/'
+#
+#bin_SCRIPTS = $(SSCRIPTS) $(GSCRIPTS)
+bin_SCRIPTS = $(GSCRIPTS)
 all: all-am
 
 .SUFFIXES:
@@ -261,9 +360,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am  $(am__configure_deps)
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/main/resources/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign src/main/rust/bin/parse-netrc/Makefile'; \
 	$(am__cd) $(top_srcdir) && \
-	  $(AUTOMAKE) --foreign src/main/resources/Makefile
+	  $(AUTOMAKE) --foreign src/main/rust/bin/parse-netrc/Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
 	  *config.status*) \
@@ -281,6 +380,41 @@ $(top_srcdir)/configure:  $(am__configure_deps)
 $(ACLOCAL_M4):  $(am__aclocal_m4_deps)
 	cd $(top_builddir) && $(MAKE) $(AM_MAKEFLAGS) am--refresh
 $(am__aclocal_m4_deps):
+install-binSCRIPTS: $(bin_SCRIPTS)
+	@$(NORMAL_INSTALL)
+	@list='$(bin_SCRIPTS)'; test -n "$(bindir)" || list=; \
+	if test -n "$$list"; then \
+	  echo " $(MKDIR_P) '$(DESTDIR)$(bindir)'"; \
+	  $(MKDIR_P) "$(DESTDIR)$(bindir)" || exit 1; \
+	fi; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  if test -f "$$d$$p"; then echo "$$d$$p"; echo "$$p"; else :; fi; \
+	done | \
+	sed -e 'p;s,.*/,,;n' \
+	    -e 'h;s|.*|.|' \
+	    -e 'p;x;s,.*/,,;$(transform)' | sed 'N;N;N;s,\n, ,g' | \
+	$(AWK) 'BEGIN { files["."] = ""; dirs["."] = 1; } \
+	  { d=$$3; if (dirs[d] != 1) { print "d", d; dirs[d] = 1 } \
+	    if ($$2 == $$4) { files[d] = files[d] " " $$1; \
+	      if (++n[d] == $(am__install_max)) { \
+		print "f", d, files[d]; n[d] = 0; files[d] = "" } } \
+	    else { print "f", d "/" $$4, $$1 } } \
+	  END { for (d in files) print "f", d, files[d] }' | \
+	while read type dir files; do \
+	     if test "$$dir" = .; then dir=; else dir=/$$dir; fi; \
+	     test -z "$$files" || { \
+	       echo " $(INSTALL_SCRIPT) $$files '$(DESTDIR)$(bindir)$$dir'"; \
+	       $(INSTALL_SCRIPT) $$files "$(DESTDIR)$(bindir)$$dir" || exit $$?; \
+	     } \
+	; done
+
+uninstall-binSCRIPTS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(bin_SCRIPTS)'; test -n "$(bindir)" || exit 0; \
+	files=`for p in $$list; do echo "$$p"; done | \
+	       sed -e 's,.*/,,;$(transform)'`; \
+	dir='$(DESTDIR)$(bindir)'; $(am__uninstall_files_from_dir)
 tags TAGS:
 
 ctags CTAGS:
@@ -322,9 +456,13 @@ distdir-am: $(DISTFILES)
 	  fi; \
 	done
 check-am: all-am
+	$(MAKE) $(AM_MAKEFLAGS) check-local
 check: check-am
-all-am: Makefile $(DATA)
+all-am: Makefile $(SCRIPTS) $(DATA) all-local
 installdirs:
+	for dir in "$(DESTDIR)$(bindir)"; do \
+	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
+	done
 install: install-am
 install-exec: install-exec-am
 install-data: install-data-am
@@ -347,7 +485,6 @@ install-strip:
 mostlyclean-generic:
 
 clean-generic:
-	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
 
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
@@ -358,7 +495,7 @@ maintainer-clean-generic:
 	@echo "it deletes files that may require special tools to rebuild."
 clean: clean-am
 
-clean-am: clean-generic mostlyclean-am
+clean-am: clean-generic clean-local mostlyclean-am
 
 distclean: distclean-am
 	-rm -f Makefile
@@ -382,7 +519,7 @@ install-dvi: install-dvi-am
 
 install-dvi-am:
 
-install-exec-am:
+install-exec-am: install-binSCRIPTS
 
 install-html: install-html-am
 
@@ -420,37 +557,122 @@ ps: ps-am
 
 ps-am:
 
-uninstall-am:
+uninstall-am: uninstall-binSCRIPTS
 
-.MAKE: install-am install-strip
+.MAKE: check-am install-am install-strip
 
-.PHONY: all all-am check check-am clean clean-generic cscopelist-am \
-	ctags-am distclean distclean-generic distdir dvi dvi-am html \
-	html-am info info-am install install-am install-data \
+.PHONY: all all-am all-local check check-am check-local clean \
+	clean-generic clean-local cscopelist-am ctags-am distclean \
+	distclean-generic distdir dvi dvi-am html html-am info info-am \
+	install install-am install-binSCRIPTS install-data \
 	install-data-am install-dvi install-dvi-am install-exec \
 	install-exec-am install-html install-html-am install-info \
 	install-info-am install-man install-pdf install-pdf-am \
 	install-ps install-ps-am install-strip installcheck \
 	installcheck-am installdirs maintainer-clean \
 	maintainer-clean-generic mostlyclean mostlyclean-generic pdf \
-	pdf-am ps ps-am tags-am uninstall uninstall-am
+	pdf-am ps ps-am tags-am uninstall uninstall-am \
+	uninstall-binSCRIPTS
 
 .PRECIOUS: Makefile
 
 
 @do_subst_command@
 
-adsgithubtools-perl5-inc-begin-block.snippet: adsgithubtools-perl5-inc-begin-block.snippet.in
-
-# This file depends on Makefile so it will be rebuilt if $(VERSION) or other
-# do_subst'ituted variables change. Use chmod a-w to prevent people from
-# editing the wrong file by accident.
+# Command for sed sanitizing the value of a var for use on the left side of a
+# sed 's' (substitution) command.
 #
-adsgithubtools-perl5-inc-begin-block.snippet: Makefile
-	rm -f $@ $@.tmp
-	$(do_subst) "$(srcdir)/$@.in" > "$@.tmp"
-	chmod a-w "$@.tmp"
-	mv -f "$@.tmp" "$@"
+@sed_slsanitize_command@
+
+# Generated sources depend on Makefile so they will be rebuilt if $(VERSION)
+# or other do_subst'ituted variables change.
+#
+$(GSOURCES): Makefile
+
+$(GSCRIPTS): cargo-build
+
+# Auto-make *-local targets
+.PHONY: all-local check-local clean-local
+all-local: cargo-build
+
+check-local: cargo-test
+
+clean-local: cargo-clean
+	for fpath in $(GSOURCES); do \
+	    "$(RM)" -f "$${fpath}" || exit 1 ;\
+	done
+
+# FIXME: '-Z' opts are "Unstable (nightly-only) flags"
+#        Here's the relevant blurb from 'cargo -Z help':
+#
+#            "-Z config-profile   -- Read profiles from .cargo/config files"
+#
+#        This is required for cargo 1.42.1, but revisit this at some point to
+#        see if we can get rid of the '-Z' opt.
+#
+.PHONY: cargo-build
+cargo-build: $(SSOURCES) $(GSOURCES)
+	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON) \
+	    -Z config-profile \
+	    --release
+
+# By default, cargo uses 'dev' profile for 'bin' crates. Currently (2020-10)
+# there is no way to explicitly indicate the 'dev' profile, AFAIK, but just
+# omitting the profile-related opts has the intended effect.
+#
+# Note that our *-devbuild artifacts are intended for use in-tree only, so DO
+# NOT get added to bin_SCRIPTS or similar list that would cause them to get
+# installed.
+.PHONY: cargo-devbuild
+cargo-devbuild: $(SSOURCES) $(GSOURCES)
+	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON)
+
+.PHONY: cargo-test
+cargo-test:
+	"$(CARGO_PROG)" test $(CARGO_OPTS_COMMON)
+
+# cargo-clean(1) complains when source files are missing, and there is no
+# apparent way to tell it to chill. Since we are generating (at least some of)
+# the source files, that introduces both temporal and sequencing aspects into
+# the build. For example, a 'make distcheck' followed by a 'make distclean'
+# would fail because the distcheck target would have caused the generated
+# source files to be deleted. It would be silly to re-generate the source
+# files just to keep cargo-clean(1) from complaining, so we instead make its
+# invocation conditional on the presence of /all/ of the generated source
+# files.
+#
+cargo-clean:
+	one_or_more_missing=false ;\
+	for fpath in $(GSOURCES); do \
+	    test -e "$${fpath}" && continue ;\
+	    : cargo-clean: skipping cargo-build b/c one or more generated source files is not present ;\
+	    exit 0  ;\
+	done ;\
+	"$(CARGO_PROG)" clean $(CARGO_OPTS_COMMON)
+
+# Rule to build generated sources from corresponding input templates.
+#
+# Uses chmod a-w to prevent people from editing the wrong file by accident.
+#
+# Note that the script depends on the naming convention:
+#
+# Target:
+#
+#     path/to/<SOURCE_FILE_BASE>
+#
+# is generated from:
+#
+#     path/to/<SOURCE_FILE_BASE>.in
+#
+$(GSOURCES): %: %.in
+	set -ex ;\
+	rm -f "$@" "$@.tmp" ;\
+	_t_base="$@"        ;\
+	$(MKDIR_P) "$$("$(DIRNAME_PROG)" "$@.tmp")" ;\
+	$(do_subst) "$(srcdir)/$${_t_base}.in" > "$@.tmp" ;\
+	mv "$@.tmp" "$@"    ;\
+	chmod a-w "$@"      ;\
+	chmod a+r "$@"
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.
 # Otherwise a system limit (for SysV at least) may be exceeded.
