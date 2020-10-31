@@ -1645,8 +1645,15 @@ if test '201' = "${t_http_code}"; then
                "${NEW_REPO_NAME}" 1>&2
     fi
 else
-    printf "${PROG} (error): HTTP response code was: \"%s\"; expected 201 (\"Created\"); bailing out\n" \
-           "${t_http_code}" 1>&2
+    if test -s "${MY_TMP_CURL_OUT_FPATH}"; then
+        printf "${PROG} (error): HTTP response code was: \"%s\"; expected 201 (\"Created\"); bailing out\n"\
+'    Further details may be available in the HTTP response body:\n        %s\n' \
+               "${t_http_code}" \
+               "$("${CAT_PROG}" "${MY_TMP_CURL_OUT_FPATH}")" 1>&2
+    else
+        printf "${PROG} (error): HTTP response code was: \"%s\"; expected 201 (\"Created\"); bailing out\n" \
+               "${t_http_code}" 1>&2
+    fi
     exit 1
 fi
 

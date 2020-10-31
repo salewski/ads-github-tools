@@ -29,7 +29,20 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (None)
+*** issue 63: "ads-github-repo-create: failure message when HTTP 400 is too opaque"
+
+    https://github.com/salewski/ads-github-tools/issues/63
+
+    When attempting to create a new GitHub repo, the service may reject the
+    API call for any number of reasons. The previous version of the command
+    simply exited with an error message indicating the HTTP response code, but
+    in isolation that information is not enough for the user to understand and
+    address the problem (especially in the case of 400 errors).
+
+    The program has been improved to provide more information to the user when
+    the repo creation operation fails. It will now dump the HTTP response
+    content to the screen beneath the error messages, which is usually a small
+    JSON document that provides more hints about what the problem was.
 
 
 * ads-github-tools 0.3.2 (2020-10-29)
