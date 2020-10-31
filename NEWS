@@ -24,7 +24,20 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (None)
+*** issue 64: "ads-github-repo-create: JSON string values not properly escaped"
+
+    https://github.com/salewski/ads-github-tools/issues/64
+
+    The 'ads-github-repo-create' tool shipped with ads-github-tools-0.3.2 (and
+    earlier) did not properly escape JSON strings during new repo
+    creation. When users supplied command line parameters that contained
+    string values that would need such escaping in a JSON document, the
+    program submitted JSON to the GitHub API that was not well-formed. That
+    resulted in an HTTP 400 response, with the response body:
+
+    :    {"message":"Problems parsing JSON","documentation_url":"https://docs.github.com/rest/reference/repos#create-a-repository-for-the-authenticated-user"}
+
+    The program has been fixed to properly escape those string values.
 
 
 ** improvements

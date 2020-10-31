@@ -551,6 +551,77 @@ function f_set_opt_new_repo_name_or_die () {
 }
 
 
+# JSON-escape SOME_VALUE to make it safe to embed as a string (or as a
+# substring of a larger value) in a JSON document. Write the
+# JSON-string-escpaed value to (global) output variable named by OUT_VAR_NAME.
+#
+# Uses jq(1) to perform the JSON-string-encoding.
+#
+#
+# @param SOME_VALUE -- (required) The value to JSON-string-escape
+#
+# @param OUT_VAR_NAME -- (required) the name of the global variable to which
+#                        the JSON-string-escaped output value should be
+#                        written.
+#
+# @return 0 always, if it returns at all. All internal errors are fatal.
+#
+function f_json_string_escape () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    local __required_count=2
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local __t_input_value=$1
+    local __t_out_var_name=$2
+
+    local __t_tmp
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): using jq(1) to JSON-string-escape value: \"%s\"\n" "${__t_input_value}" 1>&2
+    fi
+
+    local -a __t_jq_opts=()
+
+    __t_jq_opts+=( '--raw-input'    )  # -R
+    __t_jq_opts+=( '--slurp'        )  # -s  (the entire input is passed to the jq
+                                       #      filter as a single long string)
+
+    __t_jq_opts+=( '--ascii-output' )  # -a  (anything non-ASCII gets '\u' escaped
+                                       #      (even non-ASCII UTF-8, but that's okay))
+
+    # No matter what we pass to jq(1) here, the ASCII-ified output is always
+    # emitted surrounded with double quotes. Note that we strip those off.
+
+    __t_tmp=$("${JQ_PROG}" "${__t_jq_opts[@]}" '.' <<< "${__t_input_value}" \
+              | "${SED_PROG}" -e 's/^"//' -e 's/"$//')
+
+    if test $? -ne 0; then
+        printf "${PROG} (error): was unable to JSON-string-escape value: \"%s\"; bailing out\n" \
+               "${__t_input_value}" 1>&2
+        exit 1
+    fi
+
+    if $DEBUGGING; then
+        printf "${PROG} (debug): JSON-string-escaped value is: \"%s\"\n" "${__t_tmp}" 1>&2
+    fi
+
+    printf -v "${__t_out_var_name}" '%s' "${__t_tmp}"
+    if test $? -ne 0; then
+        printf "${PROG} (error): ${FUNCNAME}(): was unable to write value to global var \"%s\"; bailing out\n" \
+               "${__t_out_var_name}" 1>&2
+        exit 1
+    fi
+
+    return 0  # success
+}
+
+
 # URL-encode SOME_VALUE. Write the URL-encoded value to (global) output
 # variable named by OUT_VAR_NAME.
 #
@@ -568,6 +639,9 @@ function f_set_opt_new_repo_name_or_die () {
 # @return 0 always, if it returns at all. All internal errors are fatal.
 #
 function f_url_encode () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
     local __required_count=2
     if test $# -ne ${__required_count}; then
         printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
@@ -648,6 +722,9 @@ function f_url_encode () {
 # @return 0 if value for key was wrtten to OUT_VAR_NAME; otherwise returns 1.
 #
 function f_get_git_config_opt_ignoring_local_repo () {
+
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
     local __required_count=2
     if test $# -ne ${__required_count}; then
         printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
@@ -1292,10 +1369,12 @@ declare -r NEW_REPO_NAME_URLENC
 #        - Would require using the 'nebula-preview' header:
 #          Access: application/vnd.github.nebula-preview+json
 #
+declare tscratch
+f_json_string_escape "${NEW_REPO_NAME}" 'tscratch'
 json_create=$("${CAT_PROG}" - <<EOF
 {
     "auto_init": "false",
-    "name":      "${NEW_REPO_NAME}"
+    "name":      "${tscratch}"
 EOF
 )
 
@@ -1339,17 +1418,20 @@ else
 fi
 
 if $HAVE_NEW_REPO_DESC; then
-    json_create="${json_create}, \"description\": \"${NEW_REPO_DESC}\""
+    f_json_string_escape "${NEW_REPO_DESC}" 'tscratch'
+    json_create="${json_create}, \"description\": \"${tscratch}\""
 fi
 
 if $HAVE_NEW_REPO_URL_HOMEPAGE; then
-    json_create="${json_create}, \"homepage\": \"${NEW_REPO_URL_HOMEPAGE}\""
+    f_json_string_escape "${NEW_REPO_URL_HOMEPAGE}" 'tscratch'
+    json_create="${json_create}, \"homepage\": \"${tscratch}\""
 fi
 
 # Writing in 2020-10, this one is not (yet?) honored by the repo creation API
 # endpoint (but we have a workaround; see below).
 if $HAVE_NEW_REPO_DFLT_BRANCH_NAME; then
-    json_create="${json_create}, \"default_branch\": \"${NEW_REPO_DFLT_BRANCH_NAME}\""
+    f_json_string_escape "${NEW_REPO_DFLT_BRANCH_NAME}" 'tscratch'
+    json_create="${json_create}, \"default_branch\": \"${tscratch}\""
 fi
 
 json_create="${json_create}"' }'  # close JSON object
