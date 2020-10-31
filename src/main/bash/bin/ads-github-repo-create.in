@@ -598,7 +598,19 @@ function f_json_string_escape () {
     # No matter what we pass to jq(1) here, the ASCII-ified output is always
     # emitted surrounded with double quotes. Note that we strip those off.
 
-    __t_tmp=$("${JQ_PROG}" "${__t_jq_opts[@]}" '.' <<< "${__t_input_value}" \
+    # XXX: Avoid bash's "here string" syntax -- it introduces a newline
+    #      character that gets properly encoded as "\n", but then causes the
+    #      JSON document as a whole to be rejected by the GitHub API with the
+    #      error:
+    #
+    #          "description control characters are not allowed"
+    #
+    #      See:
+    #          https://github.com/salewski/ads-github-tools/issues/64#issuecomment-719878158
+    #          https://github.com/github/VisualStudio/issues/1777#issuecomment-411380895
+    #
+#    __t_tmp=$("${JQ_PROG}" "${__t_jq_opts[@]}" '.' <<< "${__t_input_value}" \
+    __t_tmp=$("${JQ_PROG}" "${__t_jq_opts[@]}" '.' < <(printf '%s' "${__t_input_value}") \
               | "${SED_PROG}" -e 's/^"//' -e 's/"$//')
 
     if test $? -ne 0; then
