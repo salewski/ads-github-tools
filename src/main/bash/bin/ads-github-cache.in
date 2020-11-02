@@ -157,6 +157,16 @@ declare -r gl_const_github_api_base_url='https://'"${gl_const_github_api_hostnam
 #
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
 
+# The basename for \"paged collection" metadata files
+declare -r gl_const_fname_colm='HEAD-meta'
+declare -r gl_const_fname_colm_zst="${gl_const_fname_colm}.zst"
+
+declare -r gl_const_fname_hdrs='rsp-headers'
+declare -r gl_const_fname_hdrs_zst="${gl_const_fname_hdrs}.zst"
+
+declare -r gl_const_fname_body='rsp-body.json'
+declare -r gl_const_fname_body_zst="${gl_const_fname_body}.zst"
+
 
 # Per-page item count to fetch or otherwise expect in a "paged collection".
 #
@@ -1682,14 +1692,15 @@ __f_validate_and_parse_gh_url () {
     printf -v "${__out_url_fragment}" '%s' "${__uri_fragment}"
 
 
-    local __t_obj_rsp_fpath_colm="${__t_obj_dir_base}/HEAD-meta"
-    local __t_obj_rsp_fpath_colm_zst="${__t_obj_dir_base}/HEAD-meta.zst"
+    # HEAD-meta{,.zst}
+    local __t_obj_rsp_fpath_colm="${__t_obj_dir_base}/${gl_const_fname_colm}"
+    local __t_obj_rsp_fpath_colm_zst="${__t_obj_dir_base}/${gl_const_fname_colm_zst}"
 
-    local __t_obj_rsp_fpath_body="${__t_obj_dir_base}/rsp-body.json"
-    local __t_obj_rsp_fpath_hdrs="${__t_obj_dir_base}/rsp-headers"
+    local __t_obj_rsp_fpath_body="${__t_obj_dir_base}/${gl_const_fname_body}"
+    local __t_obj_rsp_fpath_hdrs="${__t_obj_dir_base}/${gl_const_fname_hdrs}"
 
-    local __t_obj_rsp_fpath_body_zst="${__t_obj_dir_base}/rsp-body.json.zst"
-    local __t_obj_rsp_fpath_hdrs_zst="${__t_obj_dir_base}/rsp-headers.zst"
+    local __t_obj_rsp_fpath_body_zst="${__t_obj_dir_base}/${gl_const_fname_body_zst}"
+    local __t_obj_rsp_fpath_hdrs_zst="${__t_obj_dir_base}/${gl_const_fname_hdrs_zst}"
 
     printf -v "${__out_vn_pqf}" '%s' "${__t_pqf}"
 
@@ -2586,8 +2597,6 @@ f_get_one_collection_or_die () {
         exit 1
     fi
 
-
-    local __t_obj_fpath_head_meta="${__t_obj_fpath_root_child}/HEAD-meta"
 
     # Call f_get_one_validated_colmeta_or_die() for the side-effect of
     # ensuring a copy of the HEAD response for our "paged collection" exists
