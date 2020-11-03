@@ -58,6 +58,15 @@ which they were fixed will be noted here, as well.
     JSON document that provides more hints about what the problem was.
 
 
+*** issue 67: "bash *.in templates not using bash found at configure time"
+
+    https://github.com/salewski/ads-github-tools/issues/67
+
+    Would have expected this issue to have cropped up earlier, but it just
+    happened to be noticed. It would not have been an issue anywhere Bash was
+    available as '/bin/bash', which is common.
+
+
 * ads-github-tools 0.3.2 (2020-10-29)
 
 ** fixes

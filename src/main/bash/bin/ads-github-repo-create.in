@@ -1,4 +1,6 @@
-#!/bin/bash -
+#! @BASH_SH@ -
+# @configure_input@
+
 # SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
@@ -3289,3 +3291,9 @@ them as described in the C<BUGS> file.
 Copyright 2020 Alan D. Salewski
 
 =cut
+
+
+# Local Variables:
+#     mode: sh
+#     eval: (sh-set-shell "bash" t nil)
+# End:
