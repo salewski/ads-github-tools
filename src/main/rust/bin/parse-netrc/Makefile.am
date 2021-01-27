@@ -54,8 +54,7 @@ CARGO_OPTS_COMMON = \
     --offline --locked --frozen
 
 INPUT_TEMPLATES = \
-    src/configure-time.rs.in \
-    src/main.rs.in
+    src/configure-time.rs.in
 
 dist_noinst_DATA = $(INPUT_TEMPLATES)
 
