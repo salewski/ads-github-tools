@@ -49,6 +49,25 @@ dnl AC_SUBST([DFLT_MAINTAINER_EMAIL])
 dnl AC_SUBST([DFLT_MAINTAINER_FULL])
 
 
+dnl We have the Automake "Silent Rules" feature enabled by default, which
+dnl allows us to control the verbosity of output messages at build time.
+dnl
+dnl Users can override this at configure time by specifying '--disable-silent-rules'.
+dnl
+dnl Users can control the verbosity at build time by specifying either:
+dnl     make V=1 ...
+dnl or
+dnl     make V=0 ...
+dnl
+dnl Rationale: For historical reasons, the Automake default is to have this
+dnl feature disabled, which results in detailed output being emitted at build
+dnl time (every command invoked, plus its output). That behavior is
+dnl theoretically useful for debugging failures, but for this project actually
+dnl makes the build less easy to follow because of the sheer volume of it.
+dnl
+AM_SILENT_RULES([yes])
+
+
 dnl +------------------------+
 dnl |  Checks for programs.  |
 dnl +------------------------+
