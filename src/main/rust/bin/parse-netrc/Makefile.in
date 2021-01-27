@@ -293,9 +293,37 @@ EXTRA_DIST = \
 # AM_CONFIG_LINKS in our 'configure.ac' file.).
 #
 CARGO_MANIFEST_PATH = $(builddir)/Cargo.toml
+
+# Integrate Cargo verbosity with the Automake silencing rules.
+#
+# The user can control the default value that will be used for "this"
+# configured build tree by specifying either '--enable-silent-rules' or
+# '--disable-silent-rules' at configure time. See 'configure --help'
+#
+# This recipe is a variation of one presented in the "Automake Silent Rules"
+# section of the Autoconf manual (q.v.)
+#
+# Recall that AM_V (the "shadow variable" for V, as in 'make V=0' or 'make
+# V=1') expands to whatever value the user has specified for 'V' on the make
+# command line. If the user has not specified 'V=0' or 'V=1' explicitly, then
+# AM_V will be empty, and we use the configure-time default.
+#
+# Recall, too, that AM_DEFAULT_V is always either 0 (for non-verbose mode) or
+# 1 (for verbose mode, which is the Automake default). The value observed here
+# also depends (possibly) on the package definition (if AM_SILENT_RULES is
+# used), and whether '--enable-silent-rules' or '--disable-silent-rules' was
+# used at configure time, as noted above.
+#
+# Note that we avoid defining my_cargo_maybe_verbose_0, which will cause any
+# reference for that variable to expand to an empty value.
+#
+my_cargo_maybe_verbose = $(my_cargo_maybe_verbose_@AM_V@)
+my_cargo_maybe_verbose_ = $(my_cargo_maybe_verbose_@AM_DEFAULT_V@)
+my_cargo_maybe_verbose_1 = --verbose
 CARGO_OPTS_COMMON = \
     --manifest-path "$(CARGO_MANIFEST_PATH)" \
-    --verbose --offline --locked --frozen
+    $(my_cargo_maybe_verbose) \
+    --offline --locked --frozen
 
 INPUT_TEMPLATES = \
     src/main.rs.in
