@@ -2814,6 +2814,7 @@ $as_echo "$ac_cv_path_SED" >&6; }
 # start: [[ads_PROG_CARGO]]
 
 
+
 #set -x
     _ads_req_cargo_version="1.42.0"
     if test -z "${_ads_req_cargo_version}"; then
@@ -2976,7 +2977,11 @@ EOF
     fi
 
 ## bracket is m4 quote bait start: do not remove
-    _ads_t_found_cargo_version=$("${CARGO_PROG}" --version | "${SED}" -e 's/^[[:space:]]*cargo[[:space:]]*//')
+    # Example output from cargo --version from a few different versions of
+    # cargo, to give an idea of what we are expecting:
+    #     cargo 1.42.1
+    #     cargo 1.47.0 (f3c7e066a 2020-08-28)
+    _ads_t_found_cargo_version=$("${CARGO_PROG}" --version | "${SED}" -e 's/^[[:space:]]*cargo[[:space:]]*//' | "${AWK}" '{ print $1 }' )
 ## bracket is m4 quote bait end: do not remove
     if test $? -ne 0; then
         # unable to determine version of the found cargo program
