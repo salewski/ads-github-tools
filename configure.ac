@@ -97,11 +97,20 @@ fi
 #     https://github.com/rust-lang/cargo/
 #     https://doc.rust-lang.org/cargo/
 #
-# The minimum version required is 1.42.0 (released 2020-03-12); that version
-# introduced the '--versioned-dirs' option, which (combined with other project
-# configuration) causes the build to use our "vendored" sources under:
+# Our minimum required version is 1.43.0 (released 2020-04-23).
 #
-#     src/third-party/cargo-vendored/
+# Recent features on which we depend, and the Rust/Cargo 'stable' release in
+# which they first appeared (newest first):
+#
+#     * 'config-profile'. First appeared in 1.43.0 (2020-04-23). Allows
+#       overriding profile keys for certain dependencies, as well as providing
+#       a way to set profiles in .cargo/config
+#
+#     * '--versioned-dirs' option. First appeared in 1.42.0 (released
+#       2020-03-12). When combined with our other project configuration, this
+#       option causes the build to use our "vendored" sources under:
+#
+#           src/third-party/cargo-vendored/
 #
 # This macro provides these shell variables (along with their AC_SUBST'd
 # counterparts):
@@ -109,9 +118,9 @@ fi
 #     $CARGO_PROG
 #     $CARGO_PROG_VERSION
 #
-# Require cargo version 1.42.0 or newer.
+# Require cargo version 1.43.0 or newer.
 # 
-ads_PROG_CARGO([1.42.0])
+ads_PROG_CARGO([1.43.0])
 
 
 AC_PATH_PROG([CAT], [cat])

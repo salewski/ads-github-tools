@@ -109,18 +109,16 @@ clean-local: cargo-clean
 	done
 
 
-# FIXME: '-Z' opts are "Unstable (nightly-only) flags"
-#        Here's the relevant blurb from 'cargo -Z help':
+# Note: We are relying on the 'config-profile' feature to honor our
+#       .cargo/config.toml file(s). The 'config-profile' feature was
+#       stabilized in Rust 1.43.0 (released 2020-04-23):
 #
-#            "-Z config-profile   -- Read profiles from .cargo/config files"
-#
-#        This is required for cargo 1.42.1, but revisit this at some point to
-#        see if we can get rid of the '-Z' opt.
+#           https://github.com/rust-lang/rust/blob/master/RELEASES.md#version-1430-2020-04-23
+#           https://github.com/rust-lang/cargo/pull/7823
 #
 .PHONY: cargo-build
 cargo-build: $(SSOURCES) $(GSOURCES)
 	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON) \
-	    -Z config-profile \
 	    --release
 
 # By default, cargo uses 'dev' profile for 'bin' crates. Currently (2020-10)
