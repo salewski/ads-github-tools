@@ -5525,6 +5525,17 @@ adsgithubtools_perl5_inc_begin_block_snippet_filepath="\$(top_builddir)/src/main
 
 
 
+# Have Automake generate these recursive targets for us automatically. We can
+# then invoke these from anywhere in the source tree and have the right thing
+# happen beneath that location.
+#
+# In order to hang behavior off of these in any given subdir, a corresponding
+# *-local target can be provided. Otherwise the default *-local target will be
+# used for that subdir (which is effectively a NOOP).
+#
+
+
+
 
 # We generate some of our Rust (.rs) source code files, so they end up in the
 # build tree when doing a VPATH build. Because Cargo expects to find all of

@@ -152,6 +152,10 @@ man1dir = $(mandir)/man1
 NROFF = nroff
 MANS = $(man1_MANS)
 DATA = $(dist_noinst_DATA)
+am__extra_recursive_targets = cargo-build-recursive \
+	cargo-devbuild-recursive cargo-check-recursive \
+	cargo-test-recursive cargo-test-doc-recursive \
+	cargo-clean-recursive
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 am__DIST_COMMON = $(srcdir)/Makefile.in
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -438,6 +442,12 @@ uninstall-man1:
 	} | sed -e 's,.*/,,;h;s,.*\.,,;s,^[^1][0-9a-z]*$$,1,;x' \
 	      -e 's,\.[0-9a-z]*$$,,;$(transform);G;s,\n,.,'`; \
 	dir='$(DESTDIR)$(man1dir)'; $(am__uninstall_files_from_dir)
+cargo-build-local: 
+cargo-devbuild-local: 
+cargo-check-local: 
+cargo-test-local: 
+cargo-test-doc-local: 
+cargo-clean-local: 
 tags TAGS:
 
 ctags CTAGS:
@@ -516,6 +526,30 @@ distclean-generic:
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
 	@echo "it deletes files that may require special tools to rebuild."
+cargo-build: cargo-build-am
+
+cargo-build-am: cargo-build-local
+
+cargo-check: cargo-check-am
+
+cargo-check-am: cargo-check-local
+
+cargo-clean: cargo-clean-am
+
+cargo-clean-am: cargo-clean-local
+
+cargo-devbuild: cargo-devbuild-am
+
+cargo-devbuild-am: cargo-devbuild-local
+
+cargo-test: cargo-test-am
+
+cargo-test-am: cargo-test-local
+
+cargo-test-doc: cargo-test-doc-am
+
+cargo-test-doc-am: cargo-test-doc-local
+
 clean: clean-am
 
 clean-am: clean-generic mostlyclean-am
@@ -586,17 +620,21 @@ uninstall-man: uninstall-man1
 
 .MAKE: install-am install-strip
 
-.PHONY: all all-am check check-am clean clean-generic cscopelist-am \
-	ctags-am distclean distclean-generic distdir dvi dvi-am html \
-	html-am info info-am install install-am install-binSCRIPTS \
-	install-data install-data-am install-dvi install-dvi-am \
-	install-exec install-exec-am install-html install-html-am \
-	install-info install-info-am install-man install-man1 \
-	install-pdf install-pdf-am install-ps install-ps-am \
-	install-strip installcheck installcheck-am installdirs \
-	maintainer-clean maintainer-clean-generic mostlyclean \
-	mostlyclean-generic pdf pdf-am ps ps-am tags-am uninstall \
-	uninstall-am uninstall-binSCRIPTS uninstall-man uninstall-man1
+.PHONY: all all-am cargo-build-am cargo-build-local cargo-check-am \
+	cargo-check-local cargo-clean-am cargo-clean-local \
+	cargo-devbuild-am cargo-devbuild-local cargo-test-am \
+	cargo-test-doc-am cargo-test-doc-local cargo-test-local check \
+	check-am clean clean-generic cscopelist-am ctags-am distclean \
+	distclean-generic distdir dvi dvi-am html html-am info info-am \
+	install install-am install-binSCRIPTS install-data \
+	install-data-am install-dvi install-dvi-am install-exec \
+	install-exec-am install-html install-html-am install-info \
+	install-info-am install-man install-man1 install-pdf \
+	install-pdf-am install-ps install-ps-am install-strip \
+	installcheck installcheck-am installdirs maintainer-clean \
+	maintainer-clean-generic mostlyclean mostlyclean-generic pdf \
+	pdf-am ps ps-am tags-am uninstall uninstall-am \
+	uninstall-binSCRIPTS uninstall-man uninstall-man1
 
 .PRECIOUS: Makefile
 
