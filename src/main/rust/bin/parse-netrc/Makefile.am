@@ -144,10 +144,20 @@ clean-local: cargo-clean
 #           https://github.com/rust-lang/rust/blob/master/RELEASES.md#version-1430-2020-04-23
 #           https://github.com/rust-lang/cargo/pull/7823
 #
-.PHONY: cargo-build
-cargo-build: $(SSOURCES) $(GSOURCES)
+.PHONY: cargo-build-local
+cargo-build-local: $(SSOURCES) $(GSOURCES)
 	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON) \
 	    --release
+
+
+# CAREFUL: This is "*-check" in the sense of 'cargo check', not in the sense
+#          of the Autotools 'check' target. We would avoid the overloading of
+#          the term, but using a different target name here would just make it
+#          more difficult to use.
+.PHONY: cargo-check-local
+cargo-check-local: $(SSOURCES) $(GSOURCES)
+	"$(CARGO_PROG)" check $(CARGO_OPTS_COMMON)
+
 
 # By default, cargo uses 'dev' profile for 'bin' crates. Currently (2020-10)
 # there is no way to explicitly indicate the 'dev' profile, AFAIK, but just
@@ -156,14 +166,21 @@ cargo-build: $(SSOURCES) $(GSOURCES)
 # Note that our *-devbuild artifacts are intended for use in-tree only, so DO
 # NOT get added to bin_SCRIPTS or similar list that would cause them to get
 # installed.
-.PHONY: cargo-devbuild
-cargo-devbuild: $(SSOURCES) $(GSOURCES)
+.PHONY: cargo-devbuild-local
+cargo-devbuild-local: $(SSOURCES) $(GSOURCES)
 	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON)
 
 
-.PHONY: cargo-test
-cargo-test:
+# Recall that 'cargo test' runs documentation tests by default.
+.PHONY: cargo-test-local
+cargo-test-local:
 	"$(CARGO_PROG)" test $(CARGO_OPTS_COMMON)
+
+
+# Causes Cargo to run only the documentation tests.
+.PHONY: cargo-test-doc-local
+cargo-test-doc-local:
+	"$(CARGO_PROG)" test --doc $(CARGO_OPTS_COMMON)
 
 
 # cargo-clean(1) complains when source files are missing, and there is no
@@ -176,11 +193,12 @@ cargo-test:
 # invocation conditional on the presence of /all/ of the generated source
 # files.
 #
-cargo-clean:
+.PHONY: cargo-clean-local
+cargo-clean-local:
 	one_or_more_missing=false ;\
 	for fpath in $(GSOURCES); do \
 	    test -e "$${fpath}" && continue ;\
-	    : cargo-clean: skipping cargo-build b/c one or more generated source files is not present ;\
+	    : cargo-clean-local: skipping cargo-build b/c one or more generated source files is not present ;\
 	    exit 0  ;\
 	done ;\
 	"$(CARGO_PROG)" clean $(CARGO_OPTS_COMMON)

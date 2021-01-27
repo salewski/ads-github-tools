@@ -572,6 +572,36 @@ adsgithubtools_perl5_inc_begin_block_snippet_filepath="\$(top_builddir)/src/main
 AC_SUBST([adsgithubtools_perl5_inc_begin_block_snippet_filepath])
 
 
+# Have Automake generate these recursive targets for us automatically. We can
+# then invoke these from anywhere in the source tree and have the right thing
+# happen beneath that location.
+#
+# In order to hang behavior off of these in any given subdir, a corresponding
+# *-local target can be provided. Otherwise the default *-local target will be
+# used for that subdir (which is effectively a NOOP).
+#
+AM_EXTRA_RECURSIVE_TARGETS(
+    [cargo-build]     dnl build with 'release' profile
+    [cargo-devbuild]  dnl build with 'dev' profile
+
+    [cargo-check]     dnl think 'cargo check', not 'make check'
+
+    dnl This one is like 'make check', but only affects Cargo-based bits.
+    dnl
+    dnl It is also implied by 'make check', so this target is probably only
+    dnl useful when you want to do test runs of only the Cargo-based bits.
+    [cargo-test]
+
+    dnl This one allows 'cargo test --doc' to be run for the Cargo-based
+    dnl projects to test /only/ the examples in their documentation (which are
+    dnl compiled and run by 'rustdoc').
+    [cargo-test-doc]
+
+    dnl This one is like 'make clean', but only affects Cargo-based bits.
+    [cargo-clean]
+)
+
+
 dnl AC_CONFIG_FILES requires a list of file paths, but we do not want
 dnl to have to maintain the list by hand.
 dnl
