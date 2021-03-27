@@ -6,7 +6,7 @@
 #SUBDIRS = src \
 #          .
 
-## Ensure that these files make it into the distribution tarball
+## Ensure that these files make it into the distribution source tarball
 ##
 EXTRA_DIST =   \
     Cargo.lock \
@@ -21,12 +21,40 @@ EXTRA_DIST =   \
 #
 CARGO_MANIFEST_PATH = $(builddir)/Cargo.toml
 
+# Integrate Cargo verbosity with the Automake silencing rules.
+#
+# The user can control the default value that will be used for "this"
+# configured build tree by specifying either '--enable-silent-rules' or
+# '--disable-silent-rules' at configure time. See 'configure --help'
+#
+# This recipe is a variation of one presented in the "Automake Silent Rules"
+# section of the Autoconf manual (q.v.)
+#
+# Recall that AM_V (the "shadow variable" for V, as in 'make V=0' or 'make
+# V=1') expands to whatever value the user has specified for 'V' on the make
+# command line. If the user has not specified 'V=0' or 'V=1' explicitly, then
+# AM_V will be empty, and we use the configure-time default.
+#
+# Recall, too, that AM_DEFAULT_V is always either 0 (for non-verbose mode) or
+# 1 (for verbose mode, which is the Automake default). The value observed here
+# also depends (possibly) on the package definition (if AM_SILENT_RULES is
+# used), and whether '--enable-silent-rules' or '--disable-silent-rules' was
+# used at configure time, as noted above.
+#
+# Note that we avoid defining my_cargo_maybe_verbose_0, which will cause any
+# reference for that variable to expand to an empty value.
+#
+my_cargo_maybe_verbose   = $(my_cargo_maybe_verbose_@AM_V@)
+my_cargo_maybe_verbose_  = $(my_cargo_maybe_verbose_@AM_DEFAULT_V@)
+my_cargo_maybe_verbose_1 = --verbose
+
 CARGO_OPTS_COMMON = \
     --manifest-path "$(CARGO_MANIFEST_PATH)" \
-    --verbose --offline --locked --frozen
+    $(my_cargo_maybe_verbose) \
+    --offline --locked --frozen
 
 INPUT_TEMPLATES = \
-    src/main.rs.in
+    src/configure-time.rs.in
 
 dist_noinst_DATA = $(INPUT_TEMPLATES)
 
@@ -109,19 +137,27 @@ clean-local: cargo-clean
 	done
 
 
-# FIXME: '-Z' opts are "Unstable (nightly-only) flags"
-#        Here's the relevant blurb from 'cargo -Z help':
+# Note: We are relying on the 'config-profile' feature to honor our
+#       .cargo/config.toml file(s). The 'config-profile' feature was
+#       stabilized in Rust 1.43.0 (released 2020-04-23):
 #
-#            "-Z config-profile   -- Read profiles from .cargo/config files"
+#           https://github.com/rust-lang/rust/blob/master/RELEASES.md#version-1430-2020-04-23
+#           https://github.com/rust-lang/cargo/pull/7823
 #
-#        This is required for cargo 1.42.1, but revisit this at some point to
-#        see if we can get rid of the '-Z' opt.
-#
-.PHONY: cargo-build
-cargo-build: $(SSOURCES) $(GSOURCES)
+.PHONY: cargo-build-local
+cargo-build-local: $(SSOURCES) $(GSOURCES)
 	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON) \
-	    -Z config-profile \
 	    --release
+
+
+# CAREFUL: This is "*-check" in the sense of 'cargo check', not in the sense
+#          of the Autotools 'check' target. We would avoid the overloading of
+#          the term, but using a different target name here would just make it
+#          more difficult to use.
+.PHONY: cargo-check-local
+cargo-check-local: $(SSOURCES) $(GSOURCES)
+	"$(CARGO_PROG)" check $(CARGO_OPTS_COMMON)
+
 
 # By default, cargo uses 'dev' profile for 'bin' crates. Currently (2020-10)
 # there is no way to explicitly indicate the 'dev' profile, AFAIK, but just
@@ -130,14 +166,21 @@ cargo-build: $(SSOURCES) $(GSOURCES)
 # Note that our *-devbuild artifacts are intended for use in-tree only, so DO
 # NOT get added to bin_SCRIPTS or similar list that would cause them to get
 # installed.
-.PHONY: cargo-devbuild
-cargo-devbuild: $(SSOURCES) $(GSOURCES)
+.PHONY: cargo-devbuild-local
+cargo-devbuild-local: $(SSOURCES) $(GSOURCES)
 	"$(CARGO_PROG)" build $(CARGO_OPTS_COMMON)
 
 
-.PHONY: cargo-test
-cargo-test:
+# Recall that 'cargo test' runs documentation tests by default.
+.PHONY: cargo-test-local
+cargo-test-local:
 	"$(CARGO_PROG)" test $(CARGO_OPTS_COMMON)
+
+
+# Causes Cargo to run only the documentation tests.
+.PHONY: cargo-test-doc-local
+cargo-test-doc-local:
+	"$(CARGO_PROG)" test --doc $(CARGO_OPTS_COMMON)
 
 
 # cargo-clean(1) complains when source files are missing, and there is no
@@ -150,11 +193,12 @@ cargo-test:
 # invocation conditional on the presence of /all/ of the generated source
 # files.
 #
-cargo-clean:
+.PHONY: cargo-clean-local
+cargo-clean-local:
 	one_or_more_missing=false ;\
 	for fpath in $(GSOURCES); do \
 	    test -e "$${fpath}" && continue ;\
-	    : cargo-clean: skipping cargo-build b/c one or more generated source files is not present ;\
+	    : cargo-clean-local: skipping cargo-build b/c one or more generated source files is not present ;\
 	    exit 0  ;\
 	done ;\
 	"$(CARGO_PROG)" clean $(CARGO_OPTS_COMMON)

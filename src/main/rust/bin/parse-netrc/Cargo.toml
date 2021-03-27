@@ -1,7 +1,7 @@
 # -*- conf-toml -*-
 ## Process this file with automake to produce Cargo.toml
 
-## SPDX-FileCopyrightText: <text> © 2016, 2020 Alan D. Salewski <ads@salewski.email> </text>
+## SPDX-FileCopyrightText: <text> © 2016, 2020, 2021 Alan D. Salewski <ads@salewski.email> </text>
 ## SPDX-License-Identifier: GPL-2.0-or-later
 
 # See: https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,7 +17,96 @@ authors = ["Alan D. Salewski <ads@salewski.email>"]
 #     https://doc.rust-lang.org/edition-guide/rust-2018/index.html
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "The 'parse-netrc' command line application"
+
+keywords = ['netrc', 'parse', 'cli']
+
+# Each category should match one of the strings available at:
+#     https://crates.io/category_slugs
+#
+# For best compatibility, specify five or fewer categories.
+#
+categories = [
+    'command-line-utilities',
+
+    # The .netrc file is used for (partial) configuration by different
+    # applications (though the format was originally designed for use by
+    # ftp(1) on BSD, AFAICT).
+    #
+    'config',
+
+    # The .netrc file is involved (at least) with FTP, HTTP (via curl, wget,
+    # or similar), and Git.
+    #
+    'network-programming',
+
+    # The 'parse-netrc' program does not implement a .netrc parser per se, but
+    # provides a thin interface over one for use from the command line.
+    #
+    'parser-implementations'
+]
+
+# Help prevent the package from being accidentally published to a package
+# registry (such as 'crates.io') by mistake. Tooling such as 'cargo publish'
+# will honor this setting. See cargo-publish(1).
+#
+publish = false
+
+# autobins     = false
+# autoexamples = false
+# autotests    = false
+# autobenches  = false
+
+# This package does not use a "build script" to generate code (that would then
+# gets compiled along with the rest of our library). The name "build.rs" is
+# the Cargo default, but we list it here to be explicit about it and to draw
+# attention to it.
+#
+# See also:
+#     https://doc.rust-lang.org/cargo/reference/build-scripts.html#case-study-code-generation
+#     https://doc.rust-lang.org/cargo/reference/build-script-examples.html
+#     https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
+#     https://doc.rust-lang.org/cargo/reference/manifest.html#package-build
+#
+build = false  # disable automatic detection of a "build.rs" file
+#build = "build.rs"
+
+
+[lib]
+name = 'parse_netrc'
+path = 'src/lib.rs'
+# path = 'src/configure-time.rs'
+
+# By default, 'cargo test' will attempt to compile and not only your normal
+# tests, but also the code that appears in your documentation ("doc
+# tests"). Usually, that behavior is what we want, because it keeps us
+# honest.
+#
+# Every once in a while, however, it is convenient to turn it off so we can
+# focus on just the code tests. This is the knob to do that. Please be careful
+# NOT to commit updates to this file that have the doctests disabled.
+#
+# HINT: You can usually achieve the same effect more easily by invoking cargo
+#       in one of these ways:
+#
+#           $ cargo test --lib
+#           $ cargo test --bins
+#           $ cargo test --lib --bins
+#
+#       Which in practice would really look like this (probably):
+#
+#           $ cargo test --manifest-path './Cargo.toml'  --offline --locked --frozen --lib
+#           $ cargo test --manifest-path './Cargo.toml'  --offline --locked --frozen --bins
+#           $ cargo test --manifest-path './Cargo.toml'  --offline --locked --frozen --lib --bins
+#
+#doctest = false
+
+
+# Though we are following the Cargo file path conventions, we explicitly
+# specify the name of the binary here to make it more easily grepable.
+[[bin]]
+name = 'parse-netrc'
+path = 'src/bin/main.rs'
 
 
 [dependencies]

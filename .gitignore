@@ -1,0 +1,9 @@
+# -*- conf-unix -*-
+
+# We generate these at configure time (from 'config.toml.in' template files),
+# but somebody seeing them show up as untracked files in the output of 'git
+# status' might reasonably think they should be commited. This helps prevent
+# that mistake (at the expense of hiding the fact that such files were
+# generated, too).
+#
+**/.cargo/config.toml

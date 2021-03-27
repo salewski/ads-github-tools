@@ -141,6 +141,23 @@ AC_CONFIG_COMMANDS_PRE(
 Usually this means the macro was only invoked conditionally.]])
 fi])])
 
+# AM_EXTRA_RECURSIVE_TARGETS                                -*- Autoconf -*-
+
+# Copyright (C) 2012-2018 Free Software Foundation, Inc.
+#
+# This file is free software; the Free Software Foundation
+# gives unlimited permission to copy and/or distribute it,
+# with or without modifications, as long as this notice is preserved.
+
+# AM_EXTRA_RECURSIVE_TARGETS
+# --------------------------
+# Define the list of user recursive targets.  This macro exists only to
+# be traced by Automake, which will ensure that a proper definition of
+# user-defined recursive targets (and associated rules) is propagated
+# into all the generated Makefiles.
+# TODO: We should really reject non-literal arguments here...
+AC_DEFUN([AM_EXTRA_RECURSIVE_TARGETS], [])
+
 # Do all the work for Automake.                             -*- Autoconf -*-
 
 # Copyright (C) 1996-2018 Free Software Foundation, Inc.
@@ -1358,9 +1375,10 @@ dnl
 dnl
 dnl Dependencies
 dnl ============
-dnl This macro contains an automatic dependency on the 'AC_PROG_SED'
-dnl autoconf macro to set the $SED shell variable to the path of the
-dnl configured 'sed' program used within the test.
+dnl This macro contains an automatic dependency on the 'AC_PROG_AWK' and
+dnl 'AC_PROG_SED' autoconf macros to set the $AWK and $SED shell variables,
+dnl respecitvely, to the corresponding path of the configured 'awk' or 'sed'
+dnl program used within the test.
 dnl
 dnl
 dnl AUTHOR
@@ -1370,6 +1388,7 @@ dnl     * This macro was written by Alan D. Salewksi <ads AT salewski.email>
 AC_DEFUN_ONCE([ads_PROG_CARGO], [
 
 # start: [[ads_PROG_CARGO]]
+    AC_REQUIRE([AC_PROG_AWK])
     AC_REQUIRE([AC_PROG_SED])
 
 #set -x
@@ -1494,7 +1513,11 @@ EOF
     fi
 
 [## bracket is m4 quote bait start: do not remove
-    _ads_t_found_cargo_version=$("${CARGO_PROG}" --version | "${SED}" -e 's/^[[:space:]]*cargo[[:space:]]*//')
+    # Example output from cargo --version from a few different versions of
+    # cargo, to give an idea of what we are expecting:
+    #     cargo 1.42.1
+    #     cargo 1.47.0 (f3c7e066a 2020-08-28)
+    _ads_t_found_cargo_version=$("${CARGO_PROG}" --version | "${SED}" -e 's/^[[:space:]]*cargo[[:space:]]*//' | "${AWK}" '{ print $][1 }' )
 ]## bracket is m4 quote bait end: do not remove
     if test $? -ne 0; then
         # unable to determine version of the found cargo program

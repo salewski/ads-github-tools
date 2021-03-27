@@ -67,6 +67,29 @@ which they were fixed will be noted here, as well.
     JSON document that provides more hints about what the problem was.
 
 
+*** issue 69: "parse-netrc build: remove '-z config-profile' from 'cargo build' flags (no longer needed)"
+
+    https://github.com/salewski/ads-github-tools/issues/69
+
+    In earlier releases of the 'ads-github-tools', the 'cargo-build' make
+    target used to build the 'parse-netrc' program specified the '-Z
+    config-profile' option. Prior to Rust 1.43.0 (released 2020-04-23), that
+    flag was needed to cause profiles to be read from .cargo/config files.
+
+    However, the config-profile feature was stabilized as of 1.43.0, and now
+    that Rust (and Cargo) versions newer than 1.42.x are widely deployed, the
+    'config-profile' feature is enabled by default. There is no longer a need
+    to explicitly enable it, and in fact our doing so caused the build to
+    break when using current versions of Cargo.
+
+    The '-Z config-profile' option is no longer hard-coded into the build
+    target.
+
+    There are a lot of other configure- and build-time improvements in this
+    release made to the Rust-based machinery that produces the 'parse-netrc'
+    program. See the Git log for details.
+
+
 * ads-github-tools 0.3.2 (2020-10-29)
 
 ** fixes

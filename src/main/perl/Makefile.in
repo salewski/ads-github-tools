@@ -129,6 +129,10 @@ am__recursive_targets = \
   $(am__extra_recursive_targets)
 AM_RECURSIVE_TARGETS = $(am__recursive_targets:-recursive=) TAGS CTAGS \
 	distdir distdir-am
+am__extra_recursive_targets = cargo-build-recursive \
+	cargo-devbuild-recursive cargo-check-recursive \
+	cargo-test-recursive cargo-test-doc-recursive \
+	cargo-clean-recursive
 am__tagged_files = $(HEADERS) $(SOURCES) $(TAGS_FILES) $(LISP)
 # Read a list of newline-separated strings from the standard input,
 # and print each of them once, without duplicates.  Input order is
@@ -372,6 +376,12 @@ $(am__recursive_targets):
 	if test "$$dot_seen" = "no"; then \
 	  $(MAKE) $(AM_MAKEFLAGS) "$$target-am" || exit 1; \
 	fi; test -z "$$fail"
+cargo-build-local: 
+cargo-devbuild-local: 
+cargo-check-local: 
+cargo-test-local: 
+cargo-test-doc-local: 
+cargo-clean-local: 
 
 ID: $(am__tagged_files)
 	$(am__define_uniq_tagged_files); mkid -fID $$unique
@@ -531,6 +541,30 @@ distclean-generic:
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
 	@echo "it deletes files that may require special tools to rebuild."
+cargo-build: cargo-build-recursive
+
+cargo-build-am: cargo-build-local
+
+cargo-check: cargo-check-recursive
+
+cargo-check-am: cargo-check-local
+
+cargo-clean: cargo-clean-recursive
+
+cargo-clean-am: cargo-clean-local
+
+cargo-devbuild: cargo-devbuild-recursive
+
+cargo-devbuild-am: cargo-devbuild-local
+
+cargo-test: cargo-test-recursive
+
+cargo-test-am: cargo-test-local
+
+cargo-test-doc: cargo-test-doc-recursive
+
+cargo-test-doc-am: cargo-test-doc-local
+
 clean: clean-recursive
 
 clean-am: clean-generic mostlyclean-am
@@ -599,7 +633,11 @@ uninstall-am:
 
 .MAKE: $(am__recursive_targets) install-am install-strip
 
-.PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am check \
+.PHONY: $(am__recursive_targets) CTAGS GTAGS TAGS all all-am \
+	cargo-build-am cargo-build-local cargo-check-am \
+	cargo-check-local cargo-clean-am cargo-clean-local \
+	cargo-devbuild-am cargo-devbuild-local cargo-test-am \
+	cargo-test-doc-am cargo-test-doc-local cargo-test-local check \
 	check-am clean clean-generic cscopelist-am ctags ctags-am \
 	distclean distclean-generic distclean-tags distdir dvi dvi-am \
 	html html-am info info-am install install-am install-data \

@@ -1,0 +1,128 @@
+// -*- rust -*-
+// @configure_input@
+
+// SPDX-FileCopyrightText: <text> © 2021 Alan D. Salewski <ads@salewski.email> </text>
+// SPDX-License-Identifier: GPL-2.0-or-later
+//
+//     This program is free software; you can redistribute it and/or modify
+//     it under the terms of the GNU General Public License as published by
+//     the Free Software Foundation; either version 2 of the License, or
+//     (at your option) any later version.
+//
+//     This program is distributed in the hope that it will be useful,
+//     but WITHOUT ANY WARRANTY; without even the implied warranty of
+//     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//     GNU General Public License for more details.
+//
+//     You should have received a copy of the GNU General Public License
+//     along with this program; if not, write to the Free Software Foundation,
+//     Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301,, USA.
+
+//! Contains symbols based on information found or generated at configure time.
+//!
+//! These symbols are placed in a dedicated source code template file to help
+//! isolate them from the source files that use them, which presumably will be
+//! edited more frequently than the template file. This approach is intended
+//! to play well with other development tools which might be perfectly happy
+//! editing a `'*.rs'` source code file, but would not work on the `'*.rs.in'`
+//! source file template.
+//!
+//! Hence, we can leverage the benefits of configure time processing, but
+//! avoid having *all* of our Rust source files be templates. Only the one
+//! small file need be a template, and it is infrequently edited.
+
+// In the comments within this file, we use the phrases "configure time" and
+// "build time" rather loosely.
+//
+// In general, we are using the values obtained at configure time, even though
+// our *.rs file is not generated until (the first) build time. The one
+// exception to this rule is our BUILD_DATE, for which a new value is produced
+// every time make(1) determines that it needs to regenerate our corresponding
+// *.rs file. See notes below for more on that.
+
+
+// Values in the form "@foobar@" are filtered-in at build time by our GNU
+// Autotools-based machinery.
+//
+// Note, however, that the filtering is only performed when the relevant
+// source files change (typically after a fresh configure invocation, when the
+// Makefile changes for any reason, or when doing a fresh build (after a 'make
+// clean'). This is what we want for development purposes, but it means that
+// our BUILD_DATE value does not necessarily get "refreshed" upon every
+// build.
+//
+// In practice we do not expect this to be a problem. When performing real
+// release builds the date will reflect the single build use to produce the
+// release artifact. Such builds are only ever performed after a configuration
+// invocation against a clean source tree.
+//
+// Also, the alternative would be to cause make(1) to regenerate our
+// corresponding *.rs source file on every build, which would require
+// relinking (which can be slow) on every build. Definitely not what we want
+// for development purposes, and there would be no real benefit to it.
+
+
+/// The `bld_date!` macro expands to a string constant that contains the value
+/// of [`BUILD_DATE`], the build date filtered-in at build time. The string
+/// will have the form:
+///
+/// ```text
+///     YYYY-mm-dd HH:MM:SS
+/// ```
+///
+/// Example:
+///
+/// ```text
+///     2020-10-29 19:50:10
+/// ```
+///
+/// **XXX:** Note that the timestamp is represented in the sytem local
+///          time. This may change in the future to use UTC and/or also show
+///          the UTC offset.
+///
+/// This macro exists for use with the `std::concat` macro, which requires its
+/// arguments to be string constants.
+///
+/// [`BUILD_DATE`]: #BUILD_DATE
+///
+#[macro_export]
+macro_rules! bld_date { () => { "@BUILD_DATE@" } }
+
+/// A constant that contains the `BUILD_DATE` value filtered-in at build time.
+///
+#[allow(dead_code)]
+pub const BUILD_DATE: &str = bld_date!();
+
+
+/// `MAINTAINER` value filtered-in at build time.
+///
+pub const MAINTAINER: &str = "@PACKAGE_BUGREPORT@";
+
+
+/// The `bld_version!` macro expands to a string constant that contains the
+/// same value as [`VERSION`], filtered-in at configure time. The string will
+/// have the form of the project's [SemVer][semver] version number:
+///
+/// ```text
+///     M.m.r
+/// ```
+///
+/// Example:
+///
+/// ```text
+///     0.1.0
+/// ```
+///
+/// This macro exists for use with the `std::concat` macro, which requires its
+/// arguments to be string constants.
+///
+/// [semver]: https://semver.org/
+/// [`VERSION`]: #VERSION
+///
+#[macro_export]
+macro_rules! bld_version { () => { "@VERSION@" } }
+
+/// `VERSION` value filtered-in at build time.
+///
+#[allow(dead_code)]
+pub const VERSION: &str = bld_version!();

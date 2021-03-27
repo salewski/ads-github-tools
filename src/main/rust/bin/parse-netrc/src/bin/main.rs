@@ -1,6 +1,6 @@
 // -*- rust -*-
 
-// SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+// SPDX-FileCopyrightText: <text> © 2020, 2021 Alan D. Salewski <ads@salewski.email> </text>
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 //     This program is free software; you can redistribute it and/or modify
@@ -55,17 +55,19 @@ use home;
 // https://github.com/Yuhta/netrc-rs
 use netrc::Netrc;
 
+// Our internal app-specific 'parse_netrc' library.
+//
+// XXX: Consider moving more of the application logic to the library to allow
+//      for easier unit- and integration testing.
+use parse_netrc::{
+    bld_date,     // bld_date!() macro
+    bld_version,  // bld_version!() macro
+    configure_time::MAINTAINER,
+};
+
 const PROG: &str = "parse-netrc";
 
-const COPYRIGHT_DATES: &str = "2020";
-
-const MAINTAINER: &str = "@PACKAGE_BUGREPORT@";        // value filtered-in at build time
-
-macro_rules! bld_version { () => { "@VERSION@" } }     // value filtered-in at build time
-macro_rules! bld_date    { () => { "@BUILD_DATE@" } }  // value filtered-in at build time
-
-// const VERSION:    &str = bld_version!();  // value filtered-in at build time
-// const BUILD_DATE: &str = bld_date!();     // value filtered-in at build time
+const COPYRIGHT_DATES: &str = "2020, 2021";
 
 static RELEASE: &str = concat!(bld_version!(), "  (built: ", bld_date!(), ")");
 

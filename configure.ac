@@ -49,6 +49,25 @@ dnl AC_SUBST([DFLT_MAINTAINER_EMAIL])
 dnl AC_SUBST([DFLT_MAINTAINER_FULL])
 
 
+dnl We have the Automake "Silent Rules" feature enabled by default, which
+dnl allows us to control the verbosity of output messages at build time.
+dnl
+dnl Users can override this at configure time by specifying '--disable-silent-rules'.
+dnl
+dnl Users can control the verbosity at build time by specifying either:
+dnl     make V=1 ...
+dnl or
+dnl     make V=0 ...
+dnl
+dnl Rationale: For historical reasons, the Automake default is to have this
+dnl feature disabled, which results in detailed output being emitted at build
+dnl time (every command invoked, plus its output). That behavior is
+dnl theoretically useful for debugging failures, but for this project actually
+dnl makes the build less easy to follow because of the sheer volume of it.
+dnl
+AM_SILENT_RULES([yes])
+
+
 dnl +------------------------+
 dnl |  Checks for programs.  |
 dnl +------------------------+
@@ -97,11 +116,20 @@ fi
 #     https://github.com/rust-lang/cargo/
 #     https://doc.rust-lang.org/cargo/
 #
-# The minimum version required is 1.42.0 (released 2020-03-12); that version
-# introduced the '--versioned-dirs' option, which (combined with other project
-# configuration) causes the build to use our "vendored" sources under:
+# Our minimum required version is 1.43.0 (released 2020-04-23).
 #
-#     src/third-party/cargo-vendored/
+# Recent features on which we depend, and the Rust/Cargo 'stable' release in
+# which they first appeared (newest first):
+#
+#     * 'config-profile'. First appeared in 1.43.0 (2020-04-23). Allows
+#       overriding profile keys for certain dependencies, as well as providing
+#       a way to set profiles in .cargo/config
+#
+#     * '--versioned-dirs' option. First appeared in 1.42.0 (released
+#       2020-03-12). When combined with our other project configuration, this
+#       option causes the build to use our "vendored" sources under:
+#
+#           src/third-party/cargo-vendored/
 #
 # This macro provides these shell variables (along with their AC_SUBST'd
 # counterparts):
@@ -109,9 +137,9 @@ fi
 #     $CARGO_PROG
 #     $CARGO_PROG_VERSION
 #
-# Require cargo version 1.42.0 or newer.
+# Require cargo version 1.43.0 or newer.
 # 
-ads_PROG_CARGO([1.42.0])
+ads_PROG_CARGO([1.43.0])
 
 
 AC_PATH_PROG([CAT], [cat])
@@ -542,6 +570,36 @@ AC_SUBST([sed_srsanitize_command])
 
 adsgithubtools_perl5_inc_begin_block_snippet_filepath="\$(top_builddir)/src/main/resources/adsgithubtools-perl5-inc-begin-block.snippet"
 AC_SUBST([adsgithubtools_perl5_inc_begin_block_snippet_filepath])
+
+
+# Have Automake generate these recursive targets for us automatically. We can
+# then invoke these from anywhere in the source tree and have the right thing
+# happen beneath that location.
+#
+# In order to hang behavior off of these in any given subdir, a corresponding
+# *-local target can be provided. Otherwise the default *-local target will be
+# used for that subdir (which is effectively a NOOP).
+#
+AM_EXTRA_RECURSIVE_TARGETS(
+    [cargo-build]     dnl build with 'release' profile
+    [cargo-devbuild]  dnl build with 'dev' profile
+
+    [cargo-check]     dnl think 'cargo check', not 'make check'
+
+    dnl This one is like 'make check', but only affects Cargo-based bits.
+    dnl
+    dnl It is also implied by 'make check', so this target is probably only
+    dnl useful when you want to do test runs of only the Cargo-based bits.
+    [cargo-test]
+
+    dnl This one allows 'cargo test --doc' to be run for the Cargo-based
+    dnl projects to test /only/ the examples in their documentation (which are
+    dnl compiled and run by 'rustdoc').
+    [cargo-test-doc]
+
+    dnl This one is like 'make clean', but only affects Cargo-based bits.
+    [cargo-clean]
+)
 
 
 dnl AC_CONFIG_FILES requires a list of file paths, but we do not want
