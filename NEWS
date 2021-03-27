@@ -49,6 +49,23 @@ which they were fixed will be noted here, as well.
     available as '/bin/bash', which is common.
 
 
+*** issue 68: "ads-github-cache: ignore letter case of http response headers"
+
+    https://github.com/salewski/ads-github-tools/issues/68
+
+    Earlier versions of the 'ads-github-cache' program compared the 'Link:'
+    HTTP response header in a case-sensitive fashion: it recognized 'Link:'
+    but not 'link:'. Sometime in January 2021, GitHub's API responses relevant
+    to the program started using all lowercase letters for the HTTP header
+    names in at least some responses, which caused the program to error out.
+
+    The use of lowercase headers is consistent with RFC 7230 section 3.2
+    ("Header Fields"), so the bug was in the program (not upstream).
+
+    The 'ads-github-cache' program has been modified to treat HTTP headers in
+    a case-insensitive fashion.
+
+
 ** improvements
 
 *** issue 63: "ads-github-repo-create: failure message when HTTP 400 is too opaque"

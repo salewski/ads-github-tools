@@ -1,7 +1,9 @@
 #! @BASH_SH@ -
 # @configure_input@
 
-# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-FileCopyrightText: <text>
+#     © 2020, 2021 Alan D. Salewski <ads@salewski.email>
+# </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 #     This program is free software; you can redistribute it and/or modify
@@ -116,7 +118,7 @@ declare -r PROG='ads-github-cache'
 
 set -o pipefail
 
-declare -r COPYRIGHT_DATES='2020'
+declare -r COPYRIGHT_DATES='2020, 2021'
 
 # declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
 declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
@@ -159,7 +161,7 @@ declare -r gl_const_github_api_base_url='https://'"${gl_const_github_api_hostnam
 #
 declare -r gl_const_http_accept_github_version='Accept: application/vnd.github.v3+json'
 
-# The basename for \"paged collection" metadata files
+# The basename for "paged collection" metadata files
 declare -r gl_const_fname_colm='HEAD-meta'
 declare -r gl_const_fname_colm_zst="${gl_const_fname_colm}.zst"
 
@@ -218,7 +220,7 @@ declare -r gl_const_fname_body_zst="${gl_const_fname_body}.zst"
 #
 #     * How many pages are in that cached collection?
 #
-#       $ sed -n -e 's/^Link:.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]][^"]\{1,\}"last".*/\1/p' < <(zstd -dqcf ~/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/user--repos/af/5aebf8765867b59e7b689b251e0e779ccea8e89af5cef5c98bfdaa43cc196f/HEAD-meta.zst)
+#       $ sed -n -e 's/^[Ll][Ii][Nn][Kk]:.*[?&]page=\([[:digit:]]\{1,\}\)[^[:digit:]][^"]\{1,\}"last".*/\1/p' < <(zstd -dqcf ~/.ads-github-tools.d/cache/gh-user-salewski/c-v1/gh-api-v3/user--repos/af/5aebf8765867b59e7b689b251e0e779ccea8e89af5cef5c98bfdaa43cc196f/HEAD-meta.zst)
 #       18
 #
 #       Explanation: The GitHub v3 API communicates per-API-path paging
@@ -2010,7 +2012,7 @@ f_get_one_validated_or_die () {
         # We extract the etag from the stored response headers of the cached
         # object, preserving the double-quote chars.
         #
-        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
+        __t_etag=$("${SED_PROG}" -n -e 's/^[Ee][Tt][Aa][Gg]:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
                    < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_hdrs_zst}"))
         if test $? -ne 0; then
             printf "${PROG} (error): was error while extracting ETag header from (compressed) cached obj headers: %s; bailing out\n" \
@@ -2026,7 +2028,7 @@ f_get_one_validated_or_die () {
         # We extract the etag from the stored response headers of the cached
         # object, preserving the double-quote chars.
         #
-        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_hdrs}")
+        __t_etag=$("${SED_PROG}" -n -e 's/^[Ee][Tt][Aa][Gg]:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_hdrs}")
         if test $? -ne 0; then
             printf "${PROG} (error): was error while extracting ETag header from cached obj headers: %s; bailing out\n" \
                    "${__t_obj_rsp_fpath_hdrs}" 1>&2
@@ -2378,10 +2380,10 @@ f_get_one_validated_colmeta_or_die () {
         #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
         #
         # We extract the etag from the (zstd-compressed) stored HEAD response
-        # headers of the \"paged collection\" metadata in the cache,
+        # headers of the "paged collection" metadata in the cache,
         # preserving the double-quote chars.
         #
-        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
+        __t_etag=$("${SED_PROG}" -n -e 's/^[Ee][Tt][Aa][Gg]:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' \
                    < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_colm_zst}"))
         if test $? -ne 0; then
             printf "${PROG} (error): was error while extracting ETag header from (compressed) \"paged collection\" metadata file: %s; bailing out\n" \
@@ -2394,10 +2396,10 @@ f_get_one_validated_colmeta_or_die () {
         #     ETag: "a9a4b1cbbc2c6cbe7a54c2f8d939bdd27fbb05e967200f9fed17035364a009ff"
         #
         # We extract the etag from the (not compressed) stored HEAD response
-        # headers of the \"paged collection\" metadata in the cache,
+        # headers of the "paged collection" metadata in the cache,
         # preserving the double-quote chars.
         #
-        __t_etag=$("${SED_PROG}" -n -e 's/^ETag:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_colm}")
+        __t_etag=$("${SED_PROG}" -n -e 's/^[Ee][Tt][Aa][Gg]:[[:space:]]\{1,\}\("[^"]\{1,\}"\).*/\1/p' < "${__t_obj_rsp_fpath_colm}")
         if test $? -ne 0; then
             printf "${PROG} (error): was error while extracting ETag header from \"paged collection\" metadata file: %s; bailing out\n" \
                    "${__t_obj_rsp_fpath_colm}" 1>&2
@@ -2645,10 +2647,12 @@ f_get_one_collection_or_die () {
     # user (me) might find it be useful to leave a file uncompressed for
     # whatever reason).
     #
+    # Note that we match the 'Link:' HTTP header name case-insensitively
+    # (consistent with RFC 7230, section 3.2):
     local t_http_head_link
     if test -s "${__t_obj_rsp_fpath_colm_zst}"; then
 
-        t_http_head_link=$("${GREP_PROG}" '^Link:[[:space:]]' \
+        t_http_head_link=$("${GREP_PROG}" -i '^Link:[[:space:]]' \
                              < <("${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_colm_zst}" \
                                    | "${TR_PROG}" -d '\r' ))
         if test $? -ne 0; then
@@ -2658,7 +2662,7 @@ f_get_one_collection_or_die () {
         fi
     elif test -s "${__t_obj_rsp_fpath_colm}"; then
 
-        t_http_head_link=$("${GREP_PROG}" '^Link:[[:space:]]' < <("${TR_PROG}" -d '\r' < "${__t_obj_rsp_fpath_colm}"))
+        t_http_head_link=$("${GREP_PROG}" -i '^Link:[[:space:]]' < <("${TR_PROG}" -d '\r' < "${__t_obj_rsp_fpath_colm}"))
         if test $? -ne 0; then
             printf "${PROG} (error): was error while extracting Link: header from \"paged collection\" metadata file: %s; bailing out\n" \
                    "${__t_obj_rsp_fpath_colm}" 1>&2
@@ -4386,7 +4390,12 @@ them as described in the C<BUGS> file.
 
 =head1 COPYRIGHT
 
-Copyright 2020 Alan D. Salewski
+Copyright 2020, 2021 Alan D. Salewski
+
+License GPLv2+: GNU GPL version 2 or later <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
+
+This is free software: you are free to change and redistribute it. There is NO
+WARRANTY, to the extent permitted by law.
 
 =cut
 
