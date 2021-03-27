@@ -2105,7 +2105,7 @@ else
     f_get_git_config_opt_ignoring_local_repo \
         "${GIT_CFG_KEY_HUB_TRIANGULAR}"      \
         't_global_output_var'                \
-        'false'
+        "${DFLT_DO_CLONE_TRIANGULAR}"
 
     if test -n "${t_global_output_var}"; then
 

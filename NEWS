@@ -24,6 +24,23 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
+*** issue 39: "ads-github-fetch-all-upstreams: default to triangular workflow, but allow override" (reopened)
+
+    https://github.com/salewski/ads-github-tools/issues/39
+
+    This issue was originally noted as fixed in ads-github-tools 0.3.1, but a
+    bug was found with the implementation. The '--triangular' and
+    '--no-triangular' options worked as advertized, but the default behavior
+    of the app was inconsistent with what was documented. The documentation
+    indicated that the default behavior was that the tool would use a
+    triangular configuration when cloning a repo if the user did not otherwise
+    specify a preference, and that was indeed the intention.
+
+    The program's behavior has been corrected to be consistent with the
+    documentation in this regard; by default a triangular configuration will
+    be used.
+
+
 *** issue 64: "ads-github-repo-create: JSON string values not properly escaped"
 
     https://github.com/salewski/ads-github-tools/issues/64
