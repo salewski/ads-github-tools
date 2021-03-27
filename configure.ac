@@ -1,6 +1,8 @@
 dnl Process this file with autoconf to produce a configure script. -*-Autoconf-*-
 
-dnl SPDX-FileCopyrightText: <text> © 2016, 2017, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-FileCopyrightText: <text>
+dnl     © 2016, 2017, 2020, 2021 Alan D. Salewski <ads@salewski.email>
+dnl </text>
 dnl SPDX-License-Identifier: GPL-2.0-or-later
 
 dnl +-------------------------+
@@ -21,7 +23,7 @@ dnl     [AC_]PACKAGE_BUGREPORT
 dnl     [AC_]PACKAGE_URL
 dnl
 AC_INIT([[ADS GitHub Tools]],
-        [[0.3.3-snapshot]],
+        [[0.3.3]],
         [[Alan D. Salewski <ads@salewski.email>]],
         [[ads-github-tools]],
         [[https://github.com/salewski/ads-github-tools]])
