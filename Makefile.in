@@ -97,7 +97,8 @@ am__CONFIG_DISTCLEAN_FILES = config.status config.cache config.log \
 mkinstalldirs = $(install_sh) -d
 CONFIG_CLEAN_FILES = .cargo/config.toml \
 	src/main/rust/bin/parse-netrc/.cargo/config.toml
-CONFIG_CLEAN_VPATH_FILES =
+CONFIG_CLEAN_VPATH_FILES = src/main/rust/bin/parse-netrc/src/lib.rs \
+	src/main/rust/bin/parse-netrc/src/bin/main.rs
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -163,8 +164,9 @@ am__DIST_COMMON = $(srcdir)/Makefile.in \
 	$(top_srcdir)/build-aux/install-sh \
 	$(top_srcdir)/build-aux/missing \
 	$(top_srcdir)/src/main/rust/bin/parse-netrc/.cargo/config.toml.in \
-	AUTHORS COPYING INSTALL NEWS build-aux/install-sh \
-	build-aux/missing
+	$(top_srcdir)/src/main/rust/bin/parse-netrc/src/bin/main.rs \
+	$(top_srcdir)/src/main/rust/bin/parse-netrc/src/lib.rs AUTHORS \
+	COPYING INSTALL NEWS build-aux/install-sh build-aux/missing
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)

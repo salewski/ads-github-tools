@@ -1,6 +1,8 @@
 dnl Process this file with autoconf to produce a configure script. -*-Autoconf-*-
 
-dnl SPDX-FileCopyrightText: <text> © 2016, 2017, 2020 Alan D. Salewski <ads@salewski.email> </text>
+dnl SPDX-FileCopyrightText: <text>
+dnl     © 2016, 2017, 2020, 2021 Alan D. Salewski <ads@salewski.email>
+dnl </text>
 dnl SPDX-License-Identifier: GPL-2.0-or-later
 
 dnl +-------------------------+
@@ -21,7 +23,7 @@ dnl     [AC_]PACKAGE_BUGREPORT
 dnl     [AC_]PACKAGE_URL
 dnl
 AC_INIT([[ADS GitHub Tools]],
-        [[0.3.3-snapshot]],
+        [[0.3.3]],
         [[Alan D. Salewski <ads@salewski.email>]],
         [[ads-github-tools]],
         [[https://github.com/salewski/ads-github-tools]])
@@ -636,18 +638,22 @@ dnl      strings. Region is already set up because we set the mark above.
 # need to arrange for the files that aren't generated to appear to be local to
 # the build tree. Enter AC_CONFIG_LINKS.
 #
-# Note that we generate 'Cargo.toml' in the build tree, but link its
-# corresponding 'Cargo.lock' file from the source tree.
+# Note that the source files named here (all static files) will be included in
+# the source tarball distribution.
 #
 AC_CONFIG_LINKS(
     [src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock]
     [src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml]
+
+    [src/main/rust/bin/parse-netrc/src/lib.rs:src/main/rust/bin/parse-netrc/src/lib.rs]
+    [src/main/rust/bin/parse-netrc/src/bin/main.rs:src/main/rust/bin/parse-netrc/src/bin/main.rs]
 )
 
 dnl Declare our output Makefiles (and others)
 AC_CONFIG_FILES(
     [.cargo/config.toml]
     [src/main/rust/bin/parse-netrc/.cargo/config.toml]
+
     [Makefile]
     [bin/Makefile]
     [src/Makefile]

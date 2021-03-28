@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.3.2` (released 2020-10-29), and can
+The latest version of the project is `0.3.3` (released 2021-03-27), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.2.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
@@ -90,7 +90,7 @@ repos (assuming only a minority of them are "missing", which is the common
 case). Note that the `'-m'` (`--missing-only`) option was introduced in the
 version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
 
-At the moment (2020-10-29) there are nine tools:
+At the moment (2021-03-27) there are nine tools:
 
 * `ads-github-cache` - Manipulate the `ads-github-tools` cache. Mainly used to
   keep relevant GitHub data at-the-ready for use by the other utilities, but
@@ -346,7 +346,7 @@ GPL version 2, or (at your option) any later version.
 
 See the [COPYING] file for the full license.
 
-Copyright (C) 2016, 2017, 2019, 2020 Alan D. Salewski <ads@salewski.email>
+Copyright (C) 2016, 2017, 2019, 2020, 2021 Alan D. Salewski <ads@salewski.email>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
