@@ -5544,10 +5544,10 @@ adsgithubtools_perl5_inc_begin_block_snippet_filepath="\$(top_builddir)/src/main
 # need to arrange for the files that aren't generated to appear to be local to
 # the build tree. Enter AC_CONFIG_LINKS.
 #
-# Note that we generate 'Cargo.toml' in the build tree, but link its
-# corresponding 'Cargo.lock' file from the source tree.
+# Note that the source files named here (all static files) will be included in
+# the source tarball distribution.
 #
-ac_config_links="$ac_config_links src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml"
+ac_config_links="$ac_config_links src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml src/main/rust/bin/parse-netrc/src/lib.rs:src/main/rust/bin/parse-netrc/src/lib.rs src/main/rust/bin/parse-netrc/src/bin/main.rs:src/main/rust/bin/parse-netrc/src/bin/main.rs"
 
 
 ac_config_files="$ac_config_files .cargo/config.toml src/main/rust/bin/parse-netrc/.cargo/config.toml Makefile bin/Makefile src/Makefile src/main/Makefile src/main/bash/Makefile src/main/bash/bin/Makefile src/main/perl/Makefile src/main/perl/bin/Makefile src/main/resources/Makefile src/main/rust/Makefile src/main/rust/bin/Makefile src/main/rust/bin/parse-netrc/Makefile"
@@ -6281,6 +6281,8 @@ do
   case $ac_config_target in
     "src/main/rust/bin/parse-netrc/Cargo.lock") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/Cargo.lock:src/main/rust/bin/parse-netrc/Cargo.lock" ;;
     "src/main/rust/bin/parse-netrc/Cargo.toml") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/Cargo.toml:src/main/rust/bin/parse-netrc/Cargo.toml" ;;
+    "src/main/rust/bin/parse-netrc/src/lib.rs") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/src/lib.rs:src/main/rust/bin/parse-netrc/src/lib.rs" ;;
+    "src/main/rust/bin/parse-netrc/src/bin/main.rs") CONFIG_LINKS="$CONFIG_LINKS src/main/rust/bin/parse-netrc/src/bin/main.rs:src/main/rust/bin/parse-netrc/src/bin/main.rs" ;;
     ".cargo/config.toml") CONFIG_FILES="$CONFIG_FILES .cargo/config.toml" ;;
     "src/main/rust/bin/parse-netrc/.cargo/config.toml") CONFIG_FILES="$CONFIG_FILES src/main/rust/bin/parse-netrc/.cargo/config.toml" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
