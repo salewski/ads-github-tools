@@ -60,6 +60,18 @@ dist_noinst_DATA = $(INPUT_TEMPLATES)
 
 
 # "static" sources
+#
+# Note that no static Rust (.rs) source files need be explicitly listed here
+# for either compilation or inclusion in our GNU Autotools-generated release
+# source tarball:
+#
+#     * The compile time dependencies are handled by the 'cargo' build tool,
+#       so the Autotools are not directly involved.
+#
+#     * Our static Rust (.rs) source files get included in the source release
+#       tarball because they are listed in 'AC_CONFIG_LINKS' in our top-level
+#       'configure.ac' file.
+#
 SSOURCES =
 # "generated" sources (filtered here by do_subst)
 #GSOURCES = $(INPUT_TEMPLATES:.in=-$(VERSION))
@@ -198,7 +210,7 @@ cargo-clean-local:
 	one_or_more_missing=false ;\
 	for fpath in $(GSOURCES); do \
 	    test -e "$${fpath}" && continue ;\
-	    : cargo-clean-local: skipping cargo-build b/c one or more generated source files is not present ;\
+	    : cargo-clean-local: skipping cargo-clean b/c one or more generated source files is not present ;\
 	    exit 0  ;\
 	done ;\
 	"$(CARGO_PROG)" clean $(CARGO_OPTS_COMMON)
