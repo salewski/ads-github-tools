@@ -2,7 +2,7 @@
 # @configure_input@
 
 # SPDX-FileCopyrightText: <text>
-#     © 2020, 2021 Alan D. Salewski <ads@salewski.email>
+#     © 2020, 2021, 2022 Alan D. Salewski <ads@salewski.email>
 # </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
@@ -118,7 +118,7 @@ declare -r PROG='ads-github-cache'
 
 set -o pipefail
 
-declare -r COPYRIGHT_DATES='2020, 2021'
+declare -r COPYRIGHT_DATES='2020, 2021, 2022'
 
 # declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
 declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
@@ -4119,7 +4119,7 @@ when operating without the network:
 
 It is also important when reconstituting the entire collection from the
 cache. Using a higher page size means there are fewer individual files to be
-manipulated, which is faster than accessing man small files (and also makes
+manipulated, which is faster than accessing many small files (and also makes
 better use of the allocated disk blocks).
 
 
@@ -4153,7 +4153,7 @@ explicit C<--clear-all> command line option.
 Now that we have a working cache implementation, the C<ads-github-tools>
 project is (slowly) moving in the direction of having the tools assume an
 up-to-date cache, to the extent that that makes sense. That means cache data
-access pattern using the C<--get-cached> option wherever possible. Exceptions
+access patterns using the C<--get-cached> option wherever possible. Exceptions
 will be made for specific use cases where that model does not work, but no
 analysis has yet been done to categorize the particulars.
 
@@ -4390,7 +4390,7 @@ them as described in the C<BUGS> file.
 
 =head1 COPYRIGHT
 
-Copyright 2020, 2021 Alan D. Salewski
+Copyright 2020, 2021, 2022 Alan D. Salewski
 
 License GPLv2+: GNU GPL version 2 or later <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
 
