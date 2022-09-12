@@ -151,8 +151,11 @@
     an artificial limitation I'll be interested in having it fixed.
 
 
-* TODO [#2] implement proper autotools-based build for ads-github-tools project ([[https://github.com/salewski/ads-github-tools/issues/5][issue #5]]) :build:
+* DONE [#2] implement proper autotools-based build for ads-github-tools project ([[https://github.com/salewski/ads-github-tools/issues/5][issue #5]]) :build:
+  CLOSED: [2022-09-12 Mon 18:41]
   :LOGBOOK:
+  - State "DONE"       from "TODO"       [2022-09-12 Mon 18:41] \\
+    This was completed back in 2016, with commit 35cf3ce7e087cb20c8b1d84efa824f18751cf2c5.
   - CREATED [2016-05-15 Sun 12:16]
   :END:
   :PROPERTIES:
