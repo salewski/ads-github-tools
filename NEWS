@@ -24,7 +24,14 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (None)
+*** issue 70: "repo-create: allow creation of a repo in a GitHub Organization"
+
+    https://github.com/salewski/ads-github-tools/issues/70
+
+    The 'ads-github-repo-create' tool now has an '--organization=NAME' option
+    that can be used to create the repository in the specified (existing)
+    GitHub Organization (as opposed to in the account of the authenticated
+    GitHub user).
 
 
 ** improvements
