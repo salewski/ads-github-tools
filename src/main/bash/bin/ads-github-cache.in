@@ -68,7 +68,7 @@
 #
 #     https://api.github.com/
 #
-# All URI path must begin with a slash ('/') character, and will be
+# All URI path values must begin with a slash ('/') character, and will be
 # interpretted as meaning the resource for the specified path at the above
 # GitHub v3 API URL. All other URLs and/or path values will be rejected.
 #
