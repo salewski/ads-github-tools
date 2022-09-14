@@ -3905,6 +3905,14 @@ as a side-effect when the caller's real intention is to obtain the data
 (preferably inexpensively). By contrast, an C<--update> refreshes the cache as
 its primary intent.
 
+Note that some cached objects may become stale even if you have not directly
+interacted with GitHub to change things in any of your personal
+repositories. This is the case, for example, with C</user/repos>, because the
+repos to which the authenticated GitHub user has access (including those from
+the GitHub Organizations of which the user is a member) can change. The point
+being that updating the cache may pull in such changed objects, which may be
+surprising if you are not expecting it.
+
 
 =item -V, --version
 
@@ -4066,6 +4074,15 @@ following:
 =item * /user/repos
 
 See also: L<https://developer.github.com/v3/repos/#list-repositories-for-the-authenticated-user>
+
+Note that C</user/repos> represents all repositories that the authenticated
+GitHub user has explicit permission (C<:read>, C<:write>, or C<:admin>) to
+access. The cached representation of such objects, therefore, can change if
+the authenticated user is a member of any GitHub Organizations -- even without
+the user having performed any activitity with GitHub. For example, a new
+repository could might be added to an Organization to which the user is
+associated, so the user would then have access to the new repo; a cache update
+would be needed to have that new repo reflected in the local cache, however.
 
 =back
 

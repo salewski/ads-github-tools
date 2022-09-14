@@ -36,7 +36,28 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-*** doc: ads-github-cache(1): noted use for ad hoc scripting
+*** doc: ads-github-cache(1)
+
+**** minor typo fixes (and similar)
+
+**** note use for ad hoc scripting
+
+**** note impact of non-user GitHub object changes on the cache
+
+     It may be surprising to users that cached objects can need updating even
+     if the user has not performed any activity with GitHub, so we now point
+     out the fact in ads-github-cache(1).
+
+     The example given is the GitHub '/user/repos' endpoint, which represents
+     all repositories that the authenticated GitHub user has explicit
+     permission (':read', ':write', or ':admin') to access. The cached
+     representation of such objects, therefore, can change if the
+     authenticated user is a member of any GitHub Organizations -- even
+     without the user having performed any activitity with GitHub. For
+     example, a new repository could might be added to an Organization to
+     which the user is associated, so the user would then have access to the
+     new repo; a cache update would be needed to have that new repo reflected
+     in the local cache, however.
 
 
 * ads-github-tools 0.3.3 (2021-03-27)
