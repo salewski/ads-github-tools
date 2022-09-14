@@ -3841,6 +3841,10 @@ The C<ads-github-cache> program allows one to manipulate the user-specific
 cache of GitHub objects that are used by the utilities in the
 C<ads-github-tools> project.
 
+Note that such manipulation is useful for activities beyond maintenance of the
+cache itself and programmatic access to its data. Items in the cache can also
+be queried for ad hoc scripting needs.
+
 
 =head1 OPTIONS
 
