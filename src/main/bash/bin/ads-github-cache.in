@@ -638,9 +638,9 @@ fi
 #
 # Example:
 #
-# (Note that '/usr/repos' is two directory components, which together comprise
-# the '${API_PATH}' portion). Also, '01' is '${HASH_2}', and 'ba47...' is
-# '${HASH_REST}':
+# (Note that '/user/repos' is two directory components, which together
+# comprise the '${API_PATH}' portion). Also, '01' is '${HASH_2}', and
+# 'ba47...' is '${HASH_REST}':
 #
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers
