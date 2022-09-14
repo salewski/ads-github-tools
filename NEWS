@@ -42,6 +42,12 @@ which they were fixed will be noted here, as well.
 
 **** note use for ad hoc scripting
 
+     Also includes a new example of such ad hoc scripting by feeding data from
+     the cache to the jq(1) command for extracting specific pieces of data
+     from the JSON structure, and feeding them into a downstream Unix text
+     processing tools in a shell pipeline to accomlish a task.
+
+
 **** note impact of non-user GitHub object changes on the cache
 
      It may be surprising to users that cached objects can need updating even

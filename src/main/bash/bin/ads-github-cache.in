@@ -4299,6 +4299,18 @@ is made. This is, by far, the fastest way to retrieve the data:
     $ ads-github-cache --get-cached '/user/repos'
 
 
+=head2 Example 7: Use data I<from> the cache (offline) for ad hoc scripting
+
+Builds upon the previous example, passing the JSON data of C</user/repos>
+through a L<jq(1)> filter to show the counts of repositories in each GitHub
+Organization or account to which the authenticated user has access:
+
+    $ ads-github-cache --get-cached /user/repos | jq -r '.[]|.owner|.login' | sort | uniq -c
+          7 some-gh-org
+         62 some-other-gh-org
+       1921 salewski
+
+
 =head1 FAQ
 
 Frequently Asked Questions (with answers!)
@@ -4358,6 +4370,29 @@ OTOH, users should not be burdened with such persnickety details, so as long
 as something reasonable is provided, the program can put it into the
 particular form that it needs. The L<ads-github-normalize-url(1)> tool
 provides that service to this program.
+
+
+=item * L<jq(1)>
+
+A command line tool for processing JSON data, used in the examples above. The
+blurb on the C<jq> project's homepage (URL below) describes it thus: "jq is
+like sed for JSON data - you can use it to slice and filter and map and
+transform structured data with the same ease that sed, awk, grep and friends
+let you play with text."
+
+Since the GitHub data maintained in the cache for C<ads-github-tools> is all
+JSON, C<jq(1)> pairs well with it to extract data from the cache and feed it
+into other programs in shell pipelines.
+
+For more info, see:
+
+=over 4
+
+=item * L<https://stedolan.github.io/jq/>
+
+=item * L<https://github.com/stedolan/jq>
+
+=back
 
 
 =item * L<parse-netrc(1)>
