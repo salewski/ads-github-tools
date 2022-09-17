@@ -1,7 +1,9 @@
 #! @BASH_SH@ -
 # @configure_input@
 
-# SPDX-FileCopyrightText: <text> © 2020 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-FileCopyrightText: <text>
+#     © 2020 Alan D. Salewski <ads@salewski.email>
+# </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 #     This program is free software; you can redistribute it and/or modify
