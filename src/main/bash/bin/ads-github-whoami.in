@@ -1546,8 +1546,8 @@ The program obtains its direct information via the GitHub v3 API call:
     GET /user
 
 Default output is plain text for interactive command line use, but we also
-provide a knob to have the raw JSON response emitted, as instead (similar to
-how L<ads-github-show-rate-limits(1)> works).
+provide a knob to have the raw JSON response emitted, instead (similar to how
+L<ads-github-show-rate-limits(1)> works).
 
 
 =head1 IMPLEMENTATION NOTES
