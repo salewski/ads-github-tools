@@ -34,6 +34,14 @@ which they were fixed will be noted here, as well.
     GitHub user).
 
 
+*** issue 77: "configure: no need for 'groupadd', 'useradd', or 'usermod'"
+
+    https://github.com/salewski/ads-github-tools/issues/77
+
+    The configure-time checks for unused tools 'groupadd', 'useradd', and
+    'usermod' have been removed.
+
+
 ** improvements
 
 *** doc: ads-github-cache(1)

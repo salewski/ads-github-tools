@@ -322,19 +322,6 @@ if test -z "$TR_PROG"; then
     AC_MSG_ERROR([tr not found])
 fi
 
-AC_PATH_PROG([GROUPADD], [groupadd])
-if test -z "$GROUPADD"; then
-    AC_MSG_ERROR([groupadd program not found])
-fi
-AC_PATH_PROG([USERADD], [useradd])
-if test -z "$USERADD"; then
-    AC_MSG_ERROR([useradd program not found])
-fi
-AC_PATH_PROG([USERMOD], [usermod])
-if test -z "$USERMOD"; then
-    AC_MSG_ERROR([usermod program not found])
-fi
-
 AC_PATH_PROG([WC_PROG], [wc])
 if test -z "$WC_PROG"; then
     AC_MSG_ERROR([wc not found])
@@ -519,7 +506,6 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
   -e '"'"'s,[@]GIT_HUB_PROG[@],$(GIT_HUB_PROG),g'"'"' \
   -e '"'"'s,[@]GREP[@],$(GREP),g'"'"' \
-  -e '"'"'s,[@]GROUPADD[@],$(GROUPADD),g'"'"' \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
@@ -535,8 +521,6 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
-  -e '"'"'s,[@]USERADD[@],$(USERADD),g'"'"' \
-  -e '"'"'s,[@]USERMOD[@],$(USERMOD),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
   -e '"'"'s,[@]XARGS_PROG[@],$(XARGS_PROG),g'"'"' \
   -e '"'"'s,[@]ZSTD_PROG[@],$(ZSTD_PROG),g'"'"' \
