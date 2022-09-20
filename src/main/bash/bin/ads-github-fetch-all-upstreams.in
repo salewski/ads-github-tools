@@ -355,17 +355,21 @@ MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 
 # DIRNAME_PROG="${DIRNAME:-@DIRNAME_PROG@}"
 
-# FIXME: How to make this selectable? Would need to influence git's search
-#        path to find the specified version of the tool, but how to do that
-#        without changing PATH?
+# git-hub - command line GitHub API tool. When working interactively in the
+#           shell, one would invoke the 'git-hub' tool as a Git subcommand:
 #
-# git-hub - command line GitHub API tool; works as 'git' subcommand if found
-#           on PATH
+#               $ git hub ...
+#
+#           In the current program, however, we invoke it directly by the name
+#           'git-hub' to ensure that the program that gets invoked is the same
+#           one that was found at configure time (unless this program is being
+#           invoked with the $GIT_HUB environment variable set, which would be
+#           an explicit override of our default behavior).
+#
 #           see: https://github.com/sociomantic-tsunami/git-hub
 #                https://www.kernel.org/pub/software/scm/git/docs/howto/new-command.html
 #
-# GIT_HUB_PROG="${GIT_HUB:-@GIT_HUB_PROG@}"
-GIT_HUB_PROG='git-hub'
+GIT_HUB_PROG="${GIT_HUB:-@GIT_HUB_PROG@}"
 
 # BASENAME_PROG="${BASENAME:-@BASENAME_PROG@}"
 # READLINK_PROG="${READLINK:-@READLINK_PROG@}"
@@ -408,7 +412,6 @@ for ext_tool in "${NEEDED_EXTERNAL_PROGS[@]}"; do
         printf "${PROG} (debug): path to external tool \"%s\": %s\n" "${ext_tool}" "${t_path}" 1>&2
     fi
 done
-
 
 # For needed internal progs, we will just expect them to be installed "next
 # to" the current program.
@@ -2379,7 +2382,9 @@ while IFS=':' read -r repo_name repo_full_name default_branch is_fork; do
                 t_v_clone_opts+=( '--no-triangular' );
             fi
 
-            "${GIT_PROG}" hub "${t_v_opts[@]}" clone "${t_v_clone_opts[@]}" "${repo_name}"
+            # Like 'git hub ...', but invoked directly as 'git-hub ...'
+            # See issue #78: https://github.com/salewski/ads-github-tools/issues/78
+            "${GIT_HUB_PROG}" "${t_v_opts[@]}" clone "${t_v_clone_opts[@]}" "${repo_name}"
 
             if test $? -ne 0; then
                 printf "${PROG} (error): was error while attempting to clone repo \"%s\" from GitHub; bailing out\n" "${repo_name}" 1>&2

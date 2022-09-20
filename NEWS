@@ -42,6 +42,28 @@ which they were fixed will be noted here, as well.
     'usermod' have been removed.
 
 
+*** issue 78: "'git-hub' tool found at configure time is not necessarily the one used at runtime"
+
+    https://github.com/salewski/ads-github-tools/issues/78
+
+    In earlier versions of the 'ads-github-tools' project, the 'configure'
+    script did look for a program named 'git-hub' on $PATH at configure time,
+    but at runtime the invocation used was that for Git subcommands:
+
+    :    git hub ...
+
+    That meant the location of the 'git-hub' program found at runtime was
+    dependent upon the user's current $PATH (and whatever other rules 'git'
+    uses internally) rather than the $PATH as it was set at configure time.
+
+    This behavior has been changed so that the program is invoked directly
+    with the name 'git-hub' rather than as a 'git' subcommand.
+
+    The only program affected by this change is
+    'ads-github-fetch-all-upstreams'. The change does not result in any change
+    to user-visible behavior.
+
+
 ** improvements
 
 *** doc: ads-github-cache(1)
