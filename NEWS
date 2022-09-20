@@ -66,6 +66,11 @@ which they were fixed will be noted here, as well.
      in the local cache, however.
 
 
+*** doc: ads-github-whoami(1)
+
+**** minor typo fixes (and similar)
+
+
 * ads-github-tools 0.3.3 (2021-03-27)
 
 ** fixes

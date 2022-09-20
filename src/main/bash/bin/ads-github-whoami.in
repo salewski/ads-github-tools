@@ -2,7 +2,7 @@
 # @configure_input@
 
 # SPDX-FileCopyrightText: <text>
-#     © 2020 Alan D. Salewski <ads@salewski.email>
+#     © 2020, 2022 Alan D. Salewski <ads@salewski.email>
 # </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
@@ -151,7 +151,7 @@
 
 declare -r PROG='ads-github-whoami'
 
-declare -r COPYRIGHT_DATES='2020'
+declare -r COPYRIGHT_DATES='2020, 2022'
 
 set -o pipefail
 
@@ -1964,7 +1964,7 @@ If you find any, please report them as described in the C<BUGS> file.
 
 =head1 COPYRIGHT
 
-Copyright 2020 Alan D. Salewski
+Copyright 2020, 2022 Alan D. Salewski
 
 =cut
 
