@@ -2624,7 +2624,7 @@ fi
 #      ago, support for the visibility field was a GitHub "opt-in only"
 #      experimental feature, and the field would either be omitted or null in
 #      the response when not opting in. Fast-forward to the present, and the
-#      seems to be present always.
+#      field seems to be present in the response always.
 t_expected='public'
 if ${FLG_NEW_REPO_IS_PUBLIC}; then :; else
     # FIXME: There is also an experimental 'internal' value that we do not yet
