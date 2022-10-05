@@ -34,6 +34,32 @@ which they were fixed will be noted here, as well.
     GitHub user).
 
 
+*** issue 74: "repo-create: verification choking on 'visibility' field when 'private' rather than '-'"
+
+    https://github.com/salewski/ads-github-tools/issues/74
+
+    The API response emitted by the upstream GitHub v3 API for the endpoint:
+
+    :   /repos/:owner/:repo
+
+    changed regarding the 'visiblity' field, which broke the verification code
+    in the 'ads-github-repo-create' tool that was performing its checks based
+    on the old behavior.
+
+    The impact of the breakage for users was that full automated verification
+    of the newly created repo was not possible without the fix provided with
+    the current release of the 'ads-github-tools'. The repo got created as
+    intended (assuming there were no other problems); it was only the
+    automated verification checking that choked.
+
+    Specifically, when the 'ads-github-repo-create' program was originally
+    implemented a few years ago, support for the 'visibility' field was a
+    GitHub "opt-in only" experimental feature, and the field would either be
+    omitted or null in the response when not opting in. Fast-forward to the
+    present, and the field seems to be present in the response always. The
+    program's verification code has therefore been updated accordingly.
+
+
 *** issue 77: "configure: no need for 'groupadd', 'useradd', or 'usermod'"
 
     https://github.com/salewski/ads-github-tools/issues/77
