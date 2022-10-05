@@ -1869,11 +1869,11 @@ fi
 # 'user/repos' is correct (it IS NOT supposed to be the name of the
 # authenticated user; that is implied by the credentials)
 #
-# Regardless of the specific endpoing (repo created for authenticated user or
+# Regardless of the specific endpoint (repo created for authenticated user or
 # for org) we are expecting an HTTP 201 if the new repository was successfully
 # created. We'll treat any other response code as an error.
 #
-# Regardless of the specific endpoing (repo created for authenticated user or
+# Regardless of the specific endpoint (repo created for authenticated user or
 # for org), if the repository already exists (and possibly other scenarios),
 # the HTTP response code will be 422 ("Unprocessable Entity") [RFC 4918].
 #
