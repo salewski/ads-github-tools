@@ -794,9 +794,12 @@ EOF
 }
 
 
+# Variation 1:
+# ------------
 # Common global options for use in (nearly) every 'curl' invocation. Specific
 # invocations will require additional options, but such usages should not
-# modify the MY_CURL_DEFAULT_OPTS array.
+# modify the MY_CURL_DEFAULT_OPTS array or the MY_CURL_DEFAULT_OPTS_NO_OUTPUT
+# array.
 #
 # The MY_CURL_OPTS array is provided to be reused per invocation:
 #
@@ -816,23 +819,54 @@ EOF
 #          have to worry about the data you need getting overwritten by other
 #          sections of the code making API requests with curl(1) as configured
 #          here.
+#          OR...
+#          ...just use the $MY_CURL_DEFAULT_OPTS_NO_OUTPUT array as described
+#          below, and provide your own '--output FPATH' option to your curl
+#          invocation.
 #
-declare -a MY_CURL_DEFAULT_OPTS=()
-declare -a MY_CURL_OPTS=()
+#
+# Variation 2:
+# ------------
+# The above described invocation is simple enough to use, but such invocation
+# is not suitable for use in functions that may be run concurrently (that is,
+# in subshells in background processes) because it only allows for the use of
+# a single output file (that defined in $MY_TMP_CURL_OUT_FPATH). The various
+# processes attempting to write to that single file would interfere with one
+# another.
+#
+# As a slightly more cumbersome workaround to that, we provide the
+# MY_CURL_OPTS_NO_OUTPUT array for use in those situations in which you wish
+# to use all of our default curl opts except for '--ouput FPATH'. It works
+# similarly to how the MY_CURL_OPTS array is used above, but callers must
+# provide their own '--output FPATH' option. Unless you are doing something
+# out of the ordinary, the value provided for your FPATH should almost
+# certainly be a unique file name beneath the ${MY_TMP_DIR} directory; for
+# best results, use mktemp(1) with options to cause it to create a unique file
+# beneath that location.
+#
+# The MY_CURL_OPTS_NO_OUTPUT array is provided to be reused per invocation:
+#
+#     MY_CURL_OPTS=()  # (re)set
+#     MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+#     MY_CURL_OPTS+=( '--ouput' YOUR_FPATH )
+#     MY_CURL_OPTS+=( YOUR_OTHER_STUFF )
+#
+# HTTP response status code gets written to stderr.
+#
+# The HTTP response payload (if any) is written to the file path named in
+# whatever you provided in YOUR_FPATH.
 
-f_initialize_curl_default_opts () {
+declare -a -x MY_CURL_DEFAULT_OPTS_NO_OUTPUT=()
+declare -a -x MY_CURL_DEFAULT_OPTS=()
+declare -a -x MY_CURL_OPTS=()
+
+f_initialize_curl_default_opts_no_output () {
     : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
 
-    # sanity check
-    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
-        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
-        exit 1
-    fi
-
     # This disables output of curl's progress meter /and/ output of error messages...
-    MY_CURL_DEFAULT_OPTS+=( '--silent' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--silent' )
     # ...but this re-enables output of the error messages.
-    MY_CURL_DEFAULT_OPTS+=( '--show-error' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--show-error' )
 
 
     # Force use of TLS 1.2 (or later). Writing in 2020, all previous versions
@@ -841,13 +875,13 @@ f_initialize_curl_default_opts () {
     #
     # This is absolutely essential since we're using HTTP Basic Auth (see below).
     #
-    MY_CURL_DEFAULT_OPTS+=( '--tlsv1.2' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--tlsv1.2' )
 
     # Allow ONLY https, for both the initial request and for redirects
-    MY_CURL_DEFAULT_OPTS+=( '--proto')
-    MY_CURL_DEFAULT_OPTS+=( 'https')
-    MY_CURL_DEFAULT_OPTS+=( '--proto-redir')
-    MY_CURL_DEFAULT_OPTS+=( 'https')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--proto')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( 'https')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--proto-redir')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( 'https')
 
 
     # Tell curl to use HTTP Basic Authentication. This is the curl default, but
@@ -856,20 +890,20 @@ f_initialize_curl_default_opts () {
     #
     # See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
     #
-    MY_CURL_DEFAULT_OPTS+=( '--basic' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--basic' )
 
 
     # User's authentication credentials will be obtained from the user's ~/.netrc
     # file. See curl(1) and netrc(5)
     #
-    MY_CURL_DEFAULT_OPTS+=( '--netrc'  )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--netrc'  )
 
-    MY_CURL_DEFAULT_OPTS+=( '--user-agent' )
-    MY_CURL_DEFAULT_OPTS+=( "$PROG"        )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--user-agent' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( "$PROG"        )
 
 
     # Even when we're just making HEAD requests, have curl fail
-    # MY_CURL_DEFAULT_OPTS+=( '--fail' )
+    # MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--fail' )
 
 
     # Tell the GitHub service that we're trying to speak v3 of the API. Writing in
@@ -877,21 +911,72 @@ f_initialize_curl_default_opts () {
     # we do not use here. Some newer version may become the default in the future,
     # so we are explicit about which version we are using.
     #
-    MY_CURL_DEFAULT_OPTS+=( '--header' )
-    MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--header' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( "${gl_const_http_accept_github_version}" )
 
+    # Callers are responsible for arranging for the (JSON) output to be
+    # written to a file (preferably beneath our ${MY_TMP_DIR} temporary
+    # directory) by providing their own '--ouput FPATH' option...
+    #
+    # ...and we write the HTTP response status to stdout. This allows for
+    # robust error handling. Also, we cannot really know how to interpret the
+    # output returned from the remote server until we have examined (at least)
+    # the HTTP response code.
+    #
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--write-out'  )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '%{http_code}' )
+
+    return 0
+}
+
+
+f_initialize_curl_default_opts_or_die () {
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # sanity check
+    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # Ensure MY_CURL_DEFAULT_OPTS_NO_OUTPUT has been initialized. If it has
+    # been, we expect that the number of elements in the array will always be
+    # non-zero -- otherwise there would not be any use of inheriting from it
+    # here as we do. However, we will first try to initialize it ourselves if
+    # we find that it has zero members. The intention here is to avoid relying
+    # on the caller to get too many setup details correct.
+    #
+    if test "${#MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" -eq 0; then
+        : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: MY_CURL_DEFAULT_OPTS_NO_OUTPUT is empty. Will initialize.
+        f_initialize_curl_default_opts_no_output
+
+        if test "${#MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" -eq 0; then
+            # The array is still empty after our attempt to initialize it, so
+            # something is wrong. Is the relevant code commented out?
+            printf "${PROG} (BUG): ${FUNCNAME}(): MY_CURL_DEFAULT_OPTS_NO_OUTPUT is empty after initialization; bailing out\n" 1>&2
+            exit 1
+        fi
+    fi
+
+    MY_CURL_DEFAULT_OPTS=()  # ensure we are starting from a clean slate (just being defensive)
+
+    # Inherit most of our default opts...
+    MY_CURL_DEFAULT_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+
+    # ...and add the '--ouptut FPATH' option for ease of use in non-concurrent
+    # paths.
+    #
     # We always write the (JSON) output to a file in our temporary directory...
     #
     MY_CURL_DEFAULT_OPTS+=( '--output' )
     MY_CURL_DEFAULT_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
 
-    # ...and write the HTTP response status to stdout. This allows for robust
+    # ...and write the HTTP response status to stdout (behavior provided by
+    # the '--write-out' option that we inherited from the
+    # MY_CURL_DEFAULT_OPTS_NO_OUTPUT array, q.v.). This allows for robust
     # error handling. Also, we cannot really know how to interpret the output
-    # returned from the remote server until we have examined (at least) the HTTP
-    # response code.
-    #
-    MY_CURL_DEFAULT_OPTS+=( '--write-out'  )
-    MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
+    # returned from the remote server until we have examined (at least) the
+    # HTTP response code.
 
     # Before we actually use the output file, lets create an empty version of
     # it with restricted perms
@@ -3580,7 +3665,8 @@ F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
 
 declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
 
-f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
+f_initialize_curl_default_opts_no_output   # initializes the $MY_CURL_DEFAULT_OPTS_NO_OUTPUT array
+f_initialize_curl_default_opts_or_die      # initializes the $MY_CURL_DEFAULT_OPTS array
 
 
 # Validate and normalize all user-provided URL_OR_PATH parameters.
