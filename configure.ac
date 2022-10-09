@@ -312,6 +312,19 @@ if test -z "$SHA3SUM_PROG"; then
     AC_MSG_ERROR([sha3sum not found])
 fi
 
+# We need a sleep(1) command that accepts non-integer times (to allow sleeping
+# for durations less than one second). BSD and GNU/Linux implementations
+# support this, so portability is not much of a concern here. Please open a
+# bug report if your system is different.
+#
+dnl FIXME: Implement test that finds a sleep command known to accept
+dnl        non-integer values. Here we are currently just assuming it for
+dnl        whichever sleep command was found first on PATH.
+AC_PATH_PROG([SLEEP_PROG], [sleep])
+if test -z "$SLEEP_PROG"; then
+    AC_MSG_ERROR([sleep not found])  # I know the feeling!
+fi
+
 AC_PATH_PROG([TAIL_PROG], [tail])
 if test -z "$TAIL_PROG"; then
     AC_MSG_ERROR([tail not found])
@@ -519,6 +532,7 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]RUSTC_PROG[@],$(RUSTC_PROG),g'"'"' \
   -e '"'"'s,[@]SHA256SUM_PROG[@],$(SHA256SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
+  -e '"'"'s,[@]SLEEP_PROG[@],$(SLEEP_PROG),g'"'"' \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \

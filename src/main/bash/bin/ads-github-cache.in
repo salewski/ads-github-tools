@@ -114,7 +114,7 @@
 #       data produced by __f_validate_and_parse_gh_url() and passing it
 #       around.
 #
-declare -r PROG='ads-github-cache'
+declare -r -x PROG='ads-github-cache'
 
 set -o pipefail
 
@@ -139,6 +139,11 @@ declare -r gl_const_release="${VERSION}  (built: ${gl_const_build_date})"
 # of those behaviors would be much more cumbersome to achieve if we just
 # checked for 'x' in $- at runtime.
 #
+# Note that we need these three variables to be available for functions
+# invoked in subshells (mainly to allow for concurrency), but we avoid
+# exporting them because we do not want them set for every
+# subprocess. Instead, we'll pass these three in explicitly when invoking a
+# function in the background.
 BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
 DEBUGGING=false    # enable with two '-v' (--verbose) opts
 TRACING=false      # enable with three or more '-v' (--verbose) opts
@@ -243,14 +248,14 @@ declare -r gl_const_fname_body_zst="${gl_const_fname_body}.zst"
 #                    cache, of have otherwise done something to render the
 #                    above info incomplete.
 #
-declare -r gl_const_per_page_size='100'
+declare -r -x gl_const_per_page_size='100'
 # declare -r gl_const_per_page_size='2'
 
 
-declare -r RE_BLANK='^[[:space:]]*$'
-declare -r RE_EMPTY='^$'
+declare -r -x RE_BLANK='^[[:space:]]*$'
+declare -r -x RE_EMPTY='^$'
 
-declare -r RE_STARTS_WITH_SLASH='^[/]'
+declare -r -x RE_STARTS_WITH_SLASH='^[/]'
 
 # The following regex and ASCII art doc taken or adapted from this
 # stackoverflow.com answer by Patryk Obara:
@@ -262,26 +267,26 @@ declare -r RE_STARTS_WITH_SLASH='^[/]'
 # "Following regex is based on https://tools.ietf.org/html/rfc3986#appendix-B with
 # additional sub-expressions to split authority into userinfo, host and port"
 #
-declare -r RE_URI='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
-#                   ↑↑            ↑  ↑↑↑            ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
-#                   |2 scheme     |  ||6 userinfo   7 host    | 9 port       | 11 rpath |  13 query | 15 fragment
-#                   1 scheme:     |  |5 userinfo@             8 :…           10 path    12 ?…       14 #…
-#                                 |  4 authority
-#                                 3 //…
+declare -r -x RE_URI='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
+#                      ↑↑            ↑  ↑↑↑            ↑         ↑ ↑            ↑ ↑        ↑  ↑        ↑ ↑
+#                      |2 scheme     |  ||6 userinfo   7 host    | 9 port       | 11 rpath |  13 query | 15 fragment
+#                      1 scheme:     |  |5 userinfo@             8 :…           10 path    12 ?…       14 #…
+#                                    |  4 authority
+#                                    3 //…
 #
 # Variation of the above that only matches GitHub 'https' URIs:
-declare -r RE_GH_URI='^((https):)?(//((([^:/?#]+)@)?(api[.]github[.]com)(:(443))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
-#                      ↑↑         ↑  ↑↑↑            ↑                   ↑ ↑         ↑ ↑        ↑  ↑        ↑ ↑
-#                      |2 scheme  |  ||6 userinfo   7 host              | 9 port    | 11 rpath |  13 query | 15 fragment
-#                      1 scheme:  |  |5 userinfo@                       8 :…        10 path    12 ?…       14 #…
-#                                 |  4 authority
-#                                 3 //…
+declare -r -x RE_GH_URI='^((https):)?(//((([^:/?#]+)@)?(api[.]github[.]com)(:(443))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
+#                         ↑↑         ↑  ↑↑↑            ↑                   ↑ ↑         ↑ ↑        ↑  ↑        ↑ ↑
+#                         |2 scheme  |  ||6 userinfo   7 host              | 9 port    | 11 rpath |  13 query | 15 fragment
+#                         1 scheme:  |  |5 userinfo@                       8 :…        10 path    12 ?…       14 #…
+#                                    |  4 authority
+#                                    3 //…
 
 # If the value being compared does not end at the ".com" (or ".com:443"), then
 # we ensure the next char is a slash.
-declare -r RE_STARTS_WITH_GITHUB_V3_API_URL_BASE='^'"${gl_const_github_api_base_url}"'(:443)?([/]|$)'
+declare -r -x RE_STARTS_WITH_GITHUB_V3_API_URL_BASE='^'"${gl_const_github_api_base_url}"'(:443)?([/]|$)'
 
-RE_ALL_DIGITS='^[[:digit:]]+$'
+declare -r -x RE_ALL_DIGITS='^[[:digit:]]+$'
 
 
 # Only one "command mode" can be in-effect during any invocation.
@@ -302,7 +307,7 @@ DO_GET_CACHED_ONE=false  # set via '--get-cached'
 # updated, if needed) or strictly "from the existing cache" (meaning only
 # objects that are already in the cache can be obtained).
 #
-FETCH_ONLY_FROM_CACHE=false
+export FETCH_ONLY_FROM_CACHE=false
 
 # When validating and parsing a GitHub URL, the code by default anticipates
 # the need to create files in the object-specific cache directory, so creates
@@ -313,7 +318,7 @@ FETCH_ONLY_FROM_CACHE=false
 # then be immediately removed. This knob exists to allow that kind of thing to
 # be avoided.
 #
-AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS=false
+export AVOID_AUTO_CREATION_OF_OBJECT_SPECIFIC_CACHE_DIRS=false
 
 
 # Each user-provided URL or URI path value will be added to this list.
@@ -342,34 +347,39 @@ fi
 # are filtered-in here at build time). But we allow the user to override any
 # particular tool by setting an environment variable named after the tool
 # (with hyphen chars changed to underscores).
+#
+# Note that we export all of the program-holding variables so they are
+# available in functions invoked in subshell environments (mainly when we
+# invoke them in the background to allow for concurrency).
 
-CP_PROG="${CP:-@CP_PROG@}"
-MV_PROG="${MV:-@MV_PROG@}"
-RM_PROG="${RM:-@RM@}"
-TR_PROG="${TR:-@TR_PROG@}"
+export CP_PROG="${CP:-@CP_PROG@}"
+export MV_PROG="${MV:-@MV_PROG@}"
+export RM_PROG="${RM:-@RM@}"
+export TR_PROG="${TR:-@TR_PROG@}"
 
-AWK_PROG="${AWK:-@AWK_PROG@}"
-CAT_PROG="${CAT:-@CAT@}"
-SED_PROG="${SED:-@SED@}"
+export AWK_PROG="${AWK:-@AWK_PROG@}"
+export CAT_PROG="${CAT:-@CAT@}"
+export SED_PROG="${SED:-@SED@}"
 
-CURL_PROG="${CURL:-@CURL_PROG@}"
-FIND_PROG="${FIND:-@FIND@}"
-GREP_PROG="${GREP:-@GREP@}"
-ZSTD_PROG="${ZSTD:-@ZSTD_PROG@}"
+export CURL_PROG="${CURL:-@CURL_PROG@}"
+export FIND_PROG="${FIND:-@FIND@}"
+export GREP_PROG="${GREP:-@GREP@}"
+export ZSTD_PROG="${ZSTD:-@ZSTD_PROG@}"
 
-CHMOD_PROG="${CHMOD:-@CHMOD_PROG@}"
-MKDIR_PROG="${MKDIR:-@MKDIR_PROG@}"
-RMDIR_PROG="${RMDIR:-@RMDIR@}"
-XARGS_PROG="${XARGS:-@XARGS_PROG@}"
+export CHMOD_PROG="${CHMOD:-@CHMOD_PROG@}"
+export MKDIR_PROG="${MKDIR:-@MKDIR_PROG@}"
+export RMDIR_PROG="${RMDIR:-@RMDIR@}"
+export SLEEP_PROG="${SLEEP:-@SLEEP_PROG@}"
+export XARGS_PROG="${XARGS:-@XARGS_PROG@}"
 
-MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
+export MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
 
-DIRNAME_PROG="${DIRNAME:-@DIRNAME_PROG@}"
+export DIRNAME_PROG="${DIRNAME:-@DIRNAME_PROG@}"
 
-BASENAME_PROG="${BASENAME:-@BASENAME_PROG@}"
-READLINK_PROG="${READLINK:-@READLINK_PROG@}"
+export BASENAME_PROG="${BASENAME:-@BASENAME_PROG@}"
+export READLINK_PROG="${READLINK:-@READLINK_PROG@}"
 
-SHA256SUM_PROG="${SHA256SUM:-@SHA256SUM_PROG@}"
+export SHA256SUM_PROG="${SHA256SUM:-@SHA256SUM_PROG@}"
 
 declare -a NEEDED_EXTERNAL_PROGS=(
     "${CP_PROG}"
@@ -528,7 +538,7 @@ trap 'f_cleanup' EXIT
 # will always be the same, and the cache directory hierarchy will be one level
 # deeper than strictly necessary for that particular use case (no big deal).
 #
-GITHUB_USERNAME=$("${PARSE_NETRC_PROG}" "${gl_const_github_api_hostname}")
+export GITHUB_USERNAME=$("${PARSE_NETRC_PROG}" "${gl_const_github_api_hostname}")
 t_estat=$?
 # The 'parse-netrc' program emits a "grep-like" exit status:
 #     0 - matching netrc record was found
@@ -564,7 +574,7 @@ else
 fi
 
 
-declare -r AGH_DOT_D_DIR="${HOME}/.ads-github-tools.d"
+declare -r -x AGH_DOT_D_DIR="${HOME}/.ads-github-tools.d"
 if test -d "${AGH_DOT_D_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_DOT_D_DIR}"
     if test $? -ne 0; then
@@ -574,7 +584,7 @@ if test -d "${AGH_DOT_D_DIR}"; then :; else
     fi
 fi
 
-declare -r AGH_CACHE_BASE_DIR="${AGH_DOT_D_DIR}/cache"
+declare -r -x AGH_CACHE_BASE_DIR="${AGH_DOT_D_DIR}/cache"
 if test -d "${AGH_CACHE_BASE_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_BASE_DIR}"
     if test $? -ne 0; then
@@ -584,7 +594,7 @@ if test -d "${AGH_CACHE_BASE_DIR}"; then :; else
     fi
 fi
 
-declare -r AGH_CACHE_GHUSER_DIR="${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
+declare -r -x AGH_CACHE_GHUSER_DIR="${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
 if test -d "${AGH_CACHE_GHUSER_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GHUSER_DIR}"
     if test $? -ne 0; then
@@ -595,7 +605,7 @@ if test -d "${AGH_CACHE_GHUSER_DIR}"; then :; else
 fi
 
 # Cache file layout/format/whatever: v1
-declare -r AGH_CACHE_V1_DIR="${AGH_CACHE_GHUSER_DIR}/c-v1"
+declare -r -x AGH_CACHE_V1_DIR="${AGH_CACHE_GHUSER_DIR}/c-v1"
 if test -d "${AGH_CACHE_V1_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_V1_DIR}"
     if test $? -ne 0; then
@@ -645,7 +655,7 @@ fi
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers
 #
-declare -r AGH_CACHE_GH_V3_DIR="${AGH_CACHE_V1_DIR}/gh-api-v3"
+declare -r -x AGH_CACHE_GH_V3_DIR="${AGH_CACHE_V1_DIR}/gh-api-v3"
 if test -d "${AGH_CACHE_GH_V3_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GH_V3_DIR}"
     if test $? -ne 0; then
@@ -657,13 +667,13 @@ fi
 
 # Supported path template path string mapped to a regex that can detect that
 # string.
-declare -A AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX=()
+declare -A -x AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_REGEX=()
 
 # Supported path template path string mapped to a boolean flag indicating
 # whether or not the path represents a "paged collection". All path templates
 # representing paged collections should also be included in our
 # ...UPDATE_TPATHS list below, but the reverse is not necessarily true.
-declare -A AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG=()
+declare -A -x AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG=()
 
 # An ordered list of the template paths that are "supported" (or "allowed"),
 # in the sense that we should be able to honor a caller's request that we
@@ -679,7 +689,7 @@ declare -A AGH_CACHE_GH_V3_SUPPORTED_TPATH_TO_CFLAG=()
 # than one real-value, so we try them in the order of most precise (or most
 # data required) to least.
 #
-declare -a AGH_CACHE_GH_V3_SUPPORTED_TPATHS=()
+declare -a -x AGH_CACHE_GH_V3_SUPPORTED_TPATHS=()
 
 # The set of "update-able template paths" for which our "update all" operation
 # will attempt to operate on.
@@ -700,13 +710,13 @@ declare -a AGH_CACHE_GH_V3_SUPPORTED_TPATHS=()
 # the authenticated user (which we can obtain via the 'ads-github-whoami'
 # program).
 #
-declare -a AGH_CACHE_GH_V3_UPDATE_TPATHS=()
+declare -a -x AGH_CACHE_GH_V3_UPDATE_TPATHS=()
 
 # We will populate this with "normalized" versions of all the "update tpaths",
 # if we need to. We avoid doing it by default because it can be a little slow
 # on code paths that do not require the values.
 #
-declare -a AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED=()
+declare -a -x AGH_CACHE_GH_V3_UPDATE_TPATHS_NORMALIZED=()
 
 
 # Read a capital 'P' in the following as "parameter".
@@ -794,9 +804,12 @@ EOF
 }
 
 
+# Variation 1:
+# ------------
 # Common global options for use in (nearly) every 'curl' invocation. Specific
 # invocations will require additional options, but such usages should not
-# modify the MY_CURL_DEFAULT_OPTS array.
+# modify the MY_CURL_DEFAULT_OPTS array or the MY_CURL_DEFAULT_OPTS_NO_OUTPUT
+# array.
 #
 # The MY_CURL_OPTS array is provided to be reused per invocation:
 #
@@ -816,23 +829,54 @@ EOF
 #          have to worry about the data you need getting overwritten by other
 #          sections of the code making API requests with curl(1) as configured
 #          here.
+#          OR...
+#          ...just use the $MY_CURL_DEFAULT_OPTS_NO_OUTPUT array as described
+#          below, and provide your own '--output FPATH' option to your curl
+#          invocation.
 #
-declare -a MY_CURL_DEFAULT_OPTS=()
-declare -a MY_CURL_OPTS=()
+#
+# Variation 2:
+# ------------
+# The above described invocation is simple enough to use, but such invocation
+# is not suitable for use in functions that may be run concurrently (that is,
+# in subshells in background processes) because it only allows for the use of
+# a single output file (that defined in $MY_TMP_CURL_OUT_FPATH). The various
+# processes attempting to write to that single file would interfere with one
+# another.
+#
+# As a slightly more cumbersome workaround to that, we provide the
+# MY_CURL_OPTS_NO_OUTPUT array for use in those situations in which you wish
+# to use all of our default curl opts except for '--ouput FPATH'. It works
+# similarly to how the MY_CURL_OPTS array is used above, but callers must
+# provide their own '--output FPATH' option. Unless you are doing something
+# out of the ordinary, the value provided for your FPATH should almost
+# certainly be a unique file name beneath the ${MY_TMP_DIR} directory; for
+# best results, use mktemp(1) with options to cause it to create a unique file
+# beneath that location.
+#
+# The MY_CURL_OPTS_NO_OUTPUT array is provided to be reused per invocation:
+#
+#     MY_CURL_OPTS=()  # (re)set
+#     MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+#     MY_CURL_OPTS+=( '--ouput' YOUR_FPATH )
+#     MY_CURL_OPTS+=( YOUR_OTHER_STUFF )
+#
+# HTTP response status code gets written to stderr.
+#
+# The HTTP response payload (if any) is written to the file path named in
+# whatever you provided in YOUR_FPATH.
 
-f_initialize_curl_default_opts () {
+declare -a -x MY_CURL_DEFAULT_OPTS_NO_OUTPUT=()
+declare -a -x MY_CURL_DEFAULT_OPTS=()
+declare -a -x MY_CURL_OPTS=()
+
+f_initialize_curl_default_opts_no_output () {
     : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
 
-    # sanity check
-    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
-        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
-        exit 1
-    fi
-
     # This disables output of curl's progress meter /and/ output of error messages...
-    MY_CURL_DEFAULT_OPTS+=( '--silent' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--silent' )
     # ...but this re-enables output of the error messages.
-    MY_CURL_DEFAULT_OPTS+=( '--show-error' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--show-error' )
 
 
     # Force use of TLS 1.2 (or later). Writing in 2020, all previous versions
@@ -841,13 +885,13 @@ f_initialize_curl_default_opts () {
     #
     # This is absolutely essential since we're using HTTP Basic Auth (see below).
     #
-    MY_CURL_DEFAULT_OPTS+=( '--tlsv1.2' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--tlsv1.2' )
 
     # Allow ONLY https, for both the initial request and for redirects
-    MY_CURL_DEFAULT_OPTS+=( '--proto')
-    MY_CURL_DEFAULT_OPTS+=( 'https')
-    MY_CURL_DEFAULT_OPTS+=( '--proto-redir')
-    MY_CURL_DEFAULT_OPTS+=( 'https')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--proto')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( 'https')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--proto-redir')
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( 'https')
 
 
     # Tell curl to use HTTP Basic Authentication. This is the curl default, but
@@ -856,20 +900,20 @@ f_initialize_curl_default_opts () {
     #
     # See also: RFC 7617 "The 'Basic' HTTP Authentication Scheme" (2015-09)
     #
-    MY_CURL_DEFAULT_OPTS+=( '--basic' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--basic' )
 
 
     # User's authentication credentials will be obtained from the user's ~/.netrc
     # file. See curl(1) and netrc(5)
     #
-    MY_CURL_DEFAULT_OPTS+=( '--netrc'  )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--netrc'  )
 
-    MY_CURL_DEFAULT_OPTS+=( '--user-agent' )
-    MY_CURL_DEFAULT_OPTS+=( "$PROG"        )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--user-agent' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( "$PROG"        )
 
 
     # Even when we're just making HEAD requests, have curl fail
-    # MY_CURL_DEFAULT_OPTS+=( '--fail' )
+    # MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--fail' )
 
 
     # Tell the GitHub service that we're trying to speak v3 of the API. Writing in
@@ -877,21 +921,72 @@ f_initialize_curl_default_opts () {
     # we do not use here. Some newer version may become the default in the future,
     # so we are explicit about which version we are using.
     #
-    MY_CURL_DEFAULT_OPTS+=( '--header' )
-    MY_CURL_DEFAULT_OPTS+=( "${gl_const_http_accept_github_version}" )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--header' )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( "${gl_const_http_accept_github_version}" )
 
+    # Callers are responsible for arranging for the (JSON) output to be
+    # written to a file (preferably beneath our ${MY_TMP_DIR} temporary
+    # directory) by providing their own '--ouput FPATH' option...
+    #
+    # ...and we write the HTTP response status to stdout. This allows for
+    # robust error handling. Also, we cannot really know how to interpret the
+    # output returned from the remote server until we have examined (at least)
+    # the HTTP response code.
+    #
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '--write-out'  )
+    MY_CURL_DEFAULT_OPTS_NO_OUTPUT+=( '%{http_code}' )
+
+    return 0
+}
+
+
+f_initialize_curl_default_opts_or_die () {
+    : $PROG \(trace: $LINENO\): entered fn ${FUNCNAME}
+
+    # sanity check
+    if test -z "$MY_TMP_CURL_OUT_FPATH"; then
+        printf "${PROG} (error): ${FUNCNAME}(): MY_TMP_CURL_OUT_FPATH is not set; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # Ensure MY_CURL_DEFAULT_OPTS_NO_OUTPUT has been initialized. If it has
+    # been, we expect that the number of elements in the array will always be
+    # non-zero -- otherwise there would not be any use of inheriting from it
+    # here as we do. However, we will first try to initialize it ourselves if
+    # we find that it has zero members. The intention here is to avoid relying
+    # on the caller to get too many setup details correct.
+    #
+    if test "${#MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" -eq 0; then
+        : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: MY_CURL_DEFAULT_OPTS_NO_OUTPUT is empty. Will initialize.
+        f_initialize_curl_default_opts_no_output
+
+        if test "${#MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" -eq 0; then
+            # The array is still empty after our attempt to initialize it, so
+            # something is wrong. Is the relevant code commented out?
+            printf "${PROG} (BUG): ${FUNCNAME}(): MY_CURL_DEFAULT_OPTS_NO_OUTPUT is empty after initialization; bailing out\n" 1>&2
+            exit 1
+        fi
+    fi
+
+    MY_CURL_DEFAULT_OPTS=()  # ensure we are starting from a clean slate (just being defensive)
+
+    # Inherit most of our default opts...
+    MY_CURL_DEFAULT_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+
+    # ...and add the '--ouptut FPATH' option for ease of use in non-concurrent
+    # paths.
+    #
     # We always write the (JSON) output to a file in our temporary directory...
     #
     MY_CURL_DEFAULT_OPTS+=( '--output' )
     MY_CURL_DEFAULT_OPTS+=( "${MY_TMP_CURL_OUT_FPATH}" )
 
-    # ...and write the HTTP response status to stdout. This allows for robust
+    # ...and write the HTTP response status to stdout (behavior provided by
+    # the '--write-out' option that we inherited from the
+    # MY_CURL_DEFAULT_OPTS_NO_OUTPUT array, q.v.). This allows for robust
     # error handling. Also, we cannot really know how to interpret the output
-    # returned from the remote server until we have examined (at least) the HTTP
-    # response code.
-    #
-    MY_CURL_DEFAULT_OPTS+=( '--write-out'  )
-    MY_CURL_DEFAULT_OPTS+=( '%{http_code}' )
+    # returned from the remote server until we have examined (at least) the
+    # HTTP response code.
 
     # Before we actually use the output file, lets create an empty version of
     # it with restricted perms
@@ -1915,8 +2010,36 @@ f_get_one_validated_or_die () {
     # object, then we will keep the curl output separate from our cache object
     # files until we are satisfied that everything is in order.
     #
-    local __t_obj_rsp_fpath_body_tmp="${MY_TMP_DIR}/rsp-body.json"
-    local __t_obj_rsp_fpath_hdrs_tmp="${MY_TMP_DIR}/rsp-headers"
+    # See notes elsewhere in this file regarding our use of $BASHPID rather than $$.
+#    local __t_obj_rsp_fpath_body_tmp="${MY_TMP_DIR}/rsp-body.json"
+#    local __t_obj_rsp_fpath_hdrs_tmp="${MY_TMP_DIR}/rsp-headers"
+    local __t_obj_rsp_fpath_body_tmp=$("${MKTEMP_PROG}" -t -p "${MY_TMP_DIR}" 'rsp-body.json.'"${BASHPID}"'-XXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error) was unable to create temporary file in directory \"%s\"; bailing out\n" "${MY_TMP_DIR}" 1>&2
+        exit 1
+    fi
+    #
+    # If this happens, then some other process probably removed the temporary
+    # directory out from underneath us. (Or we have a bug here with our invocation)
+    #
+    if test -z "${__t_obj_rsp_fpath_body_tmp}"; then
+        printf "${PROG} (error) temporary file path needed for rsp-body.json.%s... is empty; bailing out\n" "${BASHPID}" 1>&2
+        exit 1
+    fi
+
+    local __t_obj_rsp_fpath_hdrs_tmp=$("${MKTEMP_PROG}" -t -p "${MY_TMP_DIR}" 'rsp-headers.'"${BASHPID}"'-XXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error) was unable to create temporary file in directory \"%s\"; bailing out\n" "${MY_TMP_DIR}" 1>&2
+        exit 1
+    fi
+    #
+    # If this happens, then some other process probably removed the temporary
+    # directory out from underneath us. (Or we have a bug here with our invocation)
+    #
+    if test -z "${__t_obj_rsp_fpath_hdrs_tmp}"; then
+        printf "${PROG} (error) temporary file path needed for rsp-headers.%s... is empty; bailing out\n" "${BASHPID}" 1>&2
+        exit 1
+    fi
 
 
     # Sanity check
@@ -2036,8 +2159,26 @@ f_get_one_validated_or_die () {
         fi
     fi
 
+    # See notes elsewhere in this file regarding our use of $BASHPID rather than $$.
+    local __t_curl_output_fpath=$("${MKTEMP_PROG}" -t -p "${MY_TMP_DIR}" 'curl.out.'"${BASHPID}"'-XXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error) was unable to create temporary file in directory \"%s\"; bailing out\n" "${MY_TMP_DIR}" 1>&2
+        exit 1
+    fi
+    #
+    # If this happens, then some other process probably removed the temporary
+    # directory out from underneath us. (Or we have a bug here with our invocation)
+    #
+    if test -z "${__t_curl_output_fpath}"; then
+        printf "${PROG} (error) temporary file path needed for curl output is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+
     MY_CURL_OPTS=()  # (re)set
-    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+
+    MY_CURL_OPTS+=( '--output' )
+    MY_CURL_OPTS+=( "${__t_curl_output_fpath}" )
 
     MY_CURL_OPTS+=( '--dump-header' )
     MY_CURL_OPTS+=( "${__t_obj_rsp_fpath_hdrs_tmp}" )
@@ -2083,7 +2224,8 @@ f_get_one_validated_or_die () {
             # steps, since we do not know whether or not we are copying across
             # filesystem boundaries.
             #
-            "${CP_PROG}" "${MY_TMP_CURL_OUT_FPATH}" "${__t_obj_rsp_fpath_body}.staged"
+#            "${CP_PROG}" "${MY_TMP_CURL_OUT_FPATH}" "${__t_obj_rsp_fpath_body}.staged"
+            "${CP_PROG}" "${__t_curl_output_fpath}" "${__t_obj_rsp_fpath_body}.staged"
             if test $? -ne 0; then
                 printf "${PROG} (error): was unable to stage HTTP response body file for object \"%s\"; bailing out\n" \
                        "${__t_pqf}" 1>&2
@@ -2132,13 +2274,18 @@ f_get_one_validated_or_die () {
                 exit 1
             fi
             # We will remove the temporary HTTP headers file we created
-            # directly in MY_TMP_DIR, but we'll leave ${MY_TMP_CURL_OUT_FPATH}
-            # alone because it is technically being managed by code outside
-            # this function.
+            # directly in MY_TMP_DIR, as well as the temporary file we created
+            # for the curl output.
             #
             "${RM_PROG}" "${__t_obj_rsp_fpath_hdrs_tmp}"
             if test $? -ne 0; then
                 printf "${PROG} (error): was unable to remove temporary HTTP response headers file for object \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${RM_PROG}" "${__t_curl_output_fpath}"
+            if test $? -ne 0; then
+                printf "${PROG} (error): was unable to remove temporary curl output file of body content for object \"%s\"; bailing out\n" \
                        "${__t_pqf}" 1>&2
                 exit 1
             fi
@@ -2284,7 +2431,39 @@ f_get_one_validated_colmeta_or_die () {
     # separate from our cache file(s) until we are satisfied that everything
     # is in order.
     #
-    local __t_obj_rsp_fpath_colm_tmp="${MY_TMP_DIR}/HEAD-meta"
+    # Use mktemp(1) for the filename to ensure uniqueness when running this
+    # function concurrently in background subshells.
+#    local __t_obj_rsp_fpath_colm_tmp="${MY_TMP_DIR}/HEAD-meta"
+#
+# FIXME: (PORTABILITY): '-p DIR' (--tmpdir=DIR) is a GNUism
+#                       '-t PREFIX' would be a BSDism
+#                       We're using the GNUism only, at present. Circle back
+#                       on this to make it more portable.
+    #
+    # CONCURRENCY: Note that (unlike $$) the value of ${BASHPID} will be
+    #              different in a subshell process than the value of $$ in the
+    #              parent bash process.
+    #              [Note tha BASHPID was introduced in bash-4.0-alpha.]
+    #
+    local __t_obj_rsp_fpath_colm_tmp=$("${MKTEMP_PROG}" -t -p "${MY_TMP_DIR}" 'HEAD-meta.'"${BASHPID}"'-XXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error) was unable to create temporary file in directory \"%s\"; bailing out\n" "${MY_TMP_DIR}" 1>&2
+        exit 1
+    fi
+    #
+    # If this happens, then some other process probably removed the temporary
+    # directory out from underneath us. (Or we have a bug here with our invocation)
+    #
+    if test -z "${__t_obj_rsp_fpath_colm_tmp}"; then
+        printf "${PROG} (error) temporary file path is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    # Note that we will make a "best effort" attempt to remove this temporary
+    # file under normal operation, but will leave cleaning it up under other
+    # circumstances to the parent process (which removes the temporary
+    # directory (into which we wrote the file) and all of its contents,
+    # recursively) via signal traps.
+
 
     # Sanity check
     if test -z "${__t_obj_rsp_fpath_colm}"; then
@@ -2430,9 +2609,31 @@ f_get_one_validated_colmeta_or_die () {
     #
     local t_url_plus_paging="${__t_url}?page=1&per_page=${gl_const_per_page_size}"
 
+    # See notes elsewhere in this file regarding our use of $BASHPID rather than $$.
+    local __t_curl_output_fpath=$("${MKTEMP_PROG}" -t -p "${MY_TMP_DIR}" 'curl.out.'"${BASHPID}"'-XXXXXXXX')
+    if test $? -ne 0; then
+        printf "${PROG} (error) was unable to create temporary file in directory \"%s\"; bailing out\n" "${MY_TMP_DIR}" 1>&2
+        exit 1
+    fi
+    #
+    # If this happens, then some other process probably removed the temporary
+    # directory out from underneath us. (Or we have a bug here with our invocation)
+    #
+    if test -z "${__t_curl_output_fpath}"; then
+        printf "${PROG} (error) temporary file path needed for curl output is empty; bailing out\n" 1>&2
+        exit 1
+    fi
+    # Note that we will make a "best effort" attempt to remove this temporary
+    # file under normal operation, but will leave cleaning it up under other
+    # circumstances to the parent process (which removes the temporary
+    # directory (into which we wrote the file) and all of its contents,
+    # recursively) via signal traps.
 
     MY_CURL_OPTS=()  # (re)set
-    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS[@]}" )  # copy
+    MY_CURL_OPTS+=( "${MY_CURL_DEFAULT_OPTS_NO_OUTPUT[@]}" )  # copy
+
+    MY_CURL_OPTS+=( '--output' )
+    MY_CURL_OPTS+=( "${__t_curl_output_fpath}" )
 
     MY_CURL_OPTS+=( '--dump-header' )
     MY_CURL_OPTS+=( "${__t_obj_rsp_fpath_colm_tmp}" )
@@ -2506,13 +2707,23 @@ f_get_one_validated_colmeta_or_die () {
                 exit 1
             fi
             # We will remove the temporary HTTP headers file we created
-            # directly in MY_TMP_DIR, but we'll leave ${MY_TMP_CURL_OUT_FPATH}
-            # alone because it is technically being managed by code outside
-            # this function.
+            # directly in MY_TMP_DIR, as well as the temporary file we created
+            # for the curl output.
             #
             "${RM_PROG}" "${__t_obj_rsp_fpath_colm_tmp}"
             if test $? -ne 0; then
                 printf "${PROG} (error): was unable to remove temporary HTTP HEAD response file of \"paged collection\" metadata for \"%s\"; bailing out\n" \
+                       "${__t_pqf}" 1>&2
+                exit 1
+            fi
+            "${RM_PROG}" "${__t_curl_output_fpath}"
+            if test $? -ne 0; then
+                # We call it "ignored content" because we directed it to a
+                # specific file in order to avoid interfering with other curl
+                # processes we might be running concurrently on other
+                # subshells, but here we do not need whatever content was
+                # present in the file created.
+                printf "${PROG} (error): was unable to remove temporary curl output file of ignored content for \"%s\"; bailing out\n" \
                        "${__t_pqf}" 1>&2
                 exit 1
             fi
@@ -2740,6 +2951,8 @@ f_get_one_collection_or_die () {
     local t_url_plus_paging
     local this_page
 
+    local -A t_bg_procs=()
+
     this_page=0
     while test ${this_page} -lt ${t_last_page_number}; do
         (( ++this_page ))
@@ -2754,8 +2967,48 @@ f_get_one_collection_or_die () {
 
         t_url_plus_paging="${__t_url}?page=${this_page}&per_page=${gl_const_per_page_size}"
 
-        f_perform_do_get_one_or_die "${t_url_plus_paging}"
+        BE_VERBOSE=$BE_VERBOSE \
+        DEBUGGING=$DEBUGGING   \
+        TRACING=$TRACING       \
+          f_perform_do_get_one_or_die "${t_url_plus_paging}" &
+        t_bg_pid_to_pagenum[$!]="${this_page}"  # capture pid of background process so we can later 'wait' on it
     done
+
+    local t_was_err=false
+    while test ${#t_bg_pid_to_pagenum[@]} -gt 0; do
+        for one_pid in "${!t_bg_pid_to_pagenum[@]}"; do
+            # Suppress stderr to avoid messages such as:
+            #     kill: (17163) - No such process
+            if builtin kill -n 0 "${one_pid}" 2>/dev/null ; then
+                : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: subprocess with pid $one_pid is still running
+            else
+                wait ${one_pid}
+                t_rtn=$?
+                if test ${t_rtn} -ne 0; then
+                    t_was_err=true
+                    printf "${PROG} (error): \"paged collection\" %s: was error requesting page %s of %s (page size: %s)\n" \
+                           "${__t_pqf}"   \
+                           "${t_bg_pid_to_pagenum[${one_pid}]}" \
+                           "${t_last_page_number}" \
+                           "${gl_const_per_page_size}" 1>&2
+                    # keep going...
+                fi
+                unset t_bg_pid_to_pagenum[${one_pid}]
+            fi
+        done
+        if test ${#t_bg_pid_to_pagenum[@]} -gt 0; then
+            "${SLEEP_PROG}" '.5'
+        fi
+    done
+
+    if $t_was_err; then
+        # More specific error messages should have been printed above, so this
+        # more general message is sufficient here. The important thing is that
+        # we exit with an error status if something went wrong.
+        printf "${PROG} (error): was error while emitting one or more pages for \"paged collection\"\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
 
     if $DEBUGGING; then
         printf "${PROG} (debug): all pages for \"paged collection\" successfully emitted\n" \
@@ -3552,7 +3805,8 @@ while test $# -gt 0; do
     shift
 done
 
-MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
+# Exporting MY_TMP_DIR to allow visibility in concurrent subshells
+export MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
 if test $? -ne 0; then
     printf "${PROG} (error) was unable to create temporary directory; bailing out\n" 1>&2
     exit 1
@@ -3580,7 +3834,8 @@ F_CLEANUP_HOOK_NAMES+=( 'f_cleanup_rmfr_tmpdir' )
 
 declare -r MY_TMP_CURL_OUT_FPATH="${MY_TMP_DIR}/curl.out"
 
-f_initialize_curl_default_opts   # initializes the $MY_CURL_DEFAULT_OPTS array
+f_initialize_curl_default_opts_no_output   # initializes the $MY_CURL_DEFAULT_OPTS_NO_OUTPUT array
+f_initialize_curl_default_opts_or_die      # initializes the $MY_CURL_DEFAULT_OPTS array
 
 
 # Validate and normalize all user-provided URL_OR_PATH parameters.
