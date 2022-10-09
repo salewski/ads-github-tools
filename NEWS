@@ -92,6 +92,25 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
+*** issue #74: cache (new feature): update multiple pages for a resource path concurrently
+
+    https://github.com/salewski/ads-github-tools/issues/80
+
+    The 'ads-github-cache' program now updates (only if needed) the locally
+    cached data for each page of a "paged collection". This new behavior
+    creates the opportunity for all of the requests to make progress
+    concurrently, since much time involved in such operations is waiting for
+    the remote GitHub v3 API to respond.
+
+    Anecdotal testing shows a significant real-world improvement. For
+    example, the author's invocations of:
+
+    :   $ ads-github-cache --verbose --update
+
+    drop from more than two minutes (with the previous behavior) down to
+    between nine and eleven seconds.
+
+
 *** issue #79: housekeeping: GNU Automake used is now 1.16.3
 
     https://github.com/salewski/ads-github-tools/issues/79
