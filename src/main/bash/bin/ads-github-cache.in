@@ -369,6 +369,7 @@ export ZSTD_PROG="${ZSTD:-@ZSTD_PROG@}"
 export CHMOD_PROG="${CHMOD:-@CHMOD_PROG@}"
 export MKDIR_PROG="${MKDIR:-@MKDIR_PROG@}"
 export RMDIR_PROG="${RMDIR:-@RMDIR@}"
+export SLEEP_PROG="${SLEEP:-@SLEEP_PROG@}"
 export XARGS_PROG="${XARGS:-@XARGS_PROG@}"
 
 export MKTEMP_PROG="${MKTEMP:-@MKTEMP_PROG@}"
@@ -2950,6 +2951,8 @@ f_get_one_collection_or_die () {
     local t_url_plus_paging
     local this_page
 
+    local -A t_bg_procs=()
+
     this_page=0
     while test ${this_page} -lt ${t_last_page_number}; do
         (( ++this_page ))
@@ -2964,8 +2967,48 @@ f_get_one_collection_or_die () {
 
         t_url_plus_paging="${__t_url}?page=${this_page}&per_page=${gl_const_per_page_size}"
 
-        f_perform_do_get_one_or_die "${t_url_plus_paging}"
+        BE_VERBOSE=$BE_VERBOSE \
+        DEBUGGING=$DEBUGGING   \
+        TRACING=$TRACING       \
+          f_perform_do_get_one_or_die "${t_url_plus_paging}" &
+        t_bg_pid_to_pagenum[$!]="${this_page}"  # capture pid of background process so we can later 'wait' on it
     done
+
+    local t_was_err=false
+    while test ${#t_bg_pid_to_pagenum[@]} -gt 0; do
+        for one_pid in "${!t_bg_pid_to_pagenum[@]}"; do
+            # Suppress stderr to avoid messages such as:
+            #     kill: (17163) - No such process
+            if builtin kill -n 0 "${one_pid}" 2>/dev/null ; then
+                : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: subprocess with pid $one_pid is still running
+            else
+                wait ${one_pid}
+                t_rtn=$?
+                if test ${t_rtn} -ne 0; then
+                    t_was_err=true
+                    printf "${PROG} (error): \"paged collection\" %s: was error requesting page %s of %s (page size: %s)\n" \
+                           "${__t_pqf}"   \
+                           "${t_bg_pid_to_pagenum[${one_pid}]}" \
+                           "${t_last_page_number}" \
+                           "${gl_const_per_page_size}" 1>&2
+                    # keep going...
+                fi
+                unset t_bg_pid_to_pagenum[${one_pid}]
+            fi
+        done
+        if test ${#t_bg_pid_to_pagenum[@]} -gt 0; then
+            "${SLEEP_PROG}" '.5'
+        fi
+    done
+
+    if $t_was_err; then
+        # More specific error messages should have been printed above, so this
+        # more general message is sufficient here. The important thing is that
+        # we exit with an error status if something went wrong.
+        printf "${PROG} (error): was error while emitting one or more pages for \"paged collection\"\n" \
+               "${__t_pqf}" 1>&2
+        exit 1
+    fi
 
     if $DEBUGGING; then
         printf "${PROG} (debug): all pages for \"paged collection\" successfully emitted\n" \
