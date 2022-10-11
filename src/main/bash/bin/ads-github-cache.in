@@ -574,6 +574,11 @@ else
 fi
 
 
+# We may or may not write the cache directory beneath this location, depending
+# on whether or not the '--cache-dir=DIR' option is provided, or if the
+# ADS_GITHUB_TOOLS_CACHE_DIR environment variable is set. Nevertheless, we
+# ensure this location exists.
+#
 declare -r -x AGH_DOT_D_DIR="${HOME}/.ads-github-tools.d"
 if test -d "${AGH_DOT_D_DIR}"; then :; else
     "${MKDIR_PROG}" --mode '0700' "${AGH_DOT_D_DIR}"
@@ -584,36 +589,23 @@ if test -d "${AGH_DOT_D_DIR}"; then :; else
     fi
 fi
 
-declare -r -x AGH_CACHE_BASE_DIR="${AGH_DOT_D_DIR}/cache"
-if test -d "${AGH_CACHE_BASE_DIR}"; then :; else
-    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_BASE_DIR}"
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
-               "${AGH_CACHE_BASE_DIR}" 1>&2
-        exit 1
-    fi
-fi
 
-declare -r -x AGH_CACHE_GHUSER_DIR="${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
-if test -d "${AGH_CACHE_GHUSER_DIR}"; then :; else
-    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GHUSER_DIR}"
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
-               "${AGH_CACHE_GHUSER_DIR}" 1>&2
-        exit 1
-    fi
-fi
+USER_SPECIFIED_CACHE_DIR=              # set via --cache-dir=DIR opt
+HAVE_USER_SPECIFIED_CACHE_DIR=false
+
+# Named pieces of the cache directory tree. These variables will be declared
+# read-only as soon as we know their final values (which can change if the
+# user provided the '--cache-dir=DIR' option). All of them will also be
+# exported to allow access to our concurrent subshell instances).
+#
+# See f_maybe_initialize_cache_dirs_or_die() for where these get set, based on
+# whatever the final value of $AGH_CACHE_BASE_DIR is.
+#
+AGH_CACHE_BASE_DIR=     # "${AGH_DOT_D_DIR}/cache"
+AGH_CACHE_GHUSER_DIR=   # "${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
 
 # Cache file layout/format/whatever: v1
-declare -r -x AGH_CACHE_V1_DIR="${AGH_CACHE_GHUSER_DIR}/c-v1"
-if test -d "${AGH_CACHE_V1_DIR}"; then :; else
-    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_V1_DIR}"
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
-               "${AGH_CACHE_V1_DIR}" 1>&2
-        exit 1
-    fi
-fi
+AGH_CACHE_V1_DIR=       # "${AGH_CACHE_GHUSER_DIR}/c-v1"
 
 # Cache directory parent for objects from the GitHub v3 API
 #
@@ -655,15 +647,8 @@ fi
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-body.json
 #     ~/.ads-github-tools.d/cache/${GH_USERNAME}/c-v1/gh-api-v3/user/repos/01/ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b/rsp-headers
 #
-declare -r -x AGH_CACHE_GH_V3_DIR="${AGH_CACHE_V1_DIR}/gh-api-v3"
-if test -d "${AGH_CACHE_GH_V3_DIR}"; then :; else
-    "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GH_V3_DIR}"
-    if test $? -ne 0; then
-        printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
-               "${AGH_CACHE_GH_V3_DIR}" 1>&2
-        exit 1
-    fi
-fi
+AGH_CACHE_GH_V3_DIR=   # "${AGH_CACHE_V1_DIR}/gh-api-v3"
+
 
 # Supported path template path string mapped to a regex that can detect that
 # string.
@@ -773,18 +758,19 @@ Manage a user-specific cache of GitHub v3 API responses.
 
 Mandatory arguments to long options are mandatory for short options too.
 
-  -h, --help        Print this help message on stdout
-  -V, --version     Print the version of the program on stdout
-      --clear       Remove the specified URLs or paths from the cache
-      --clear-all   Remove all cached entries, for all cached URLs or paths
-      --get         Obtain content of specfied URL or path through the cache
-      --get-cached  Like '--get', but error out if item is not already present in cache.
-                      Avoids updating the cache to obtain the item. Think "offline".
-      --update      Update the cache entry for the specified URLs or paths, or all
-  -v, --verbose     Print program progress messages on stderr. Specify multiple
-                      times to increase verbosity: info, debug, and tracing (set -x)
-      --            Signals the end of options and disables further options processing.
-                      Any remaining argument(s) will be interpretted as a repo name
+  -h, --help           Print this help message on stdout
+  -V, --version        Print the version of the program on stdout
+      --cache-dir=DIR  Specify root of the cache directory  [~/.ads-github-tools.d/cache/]
+      --clear          Remove the specified URLs or paths from the cache
+      --clear-all      Remove all cached entries, for all cached URLs or paths
+      --get            Obtain content of specfied URL or path through the cache
+      --get-cached     Like '--get', but error out if item is not already present in cache.
+                         Avoids updating the cache to obtain the item. Think "offline".
+      --update         Update the cache entry for the specified URLs or paths, or all
+  -v, --verbose        Print program progress messages on stderr. Specify multiple
+                         times to increase verbosity: info, debug, and tracing (set -x)
+      --               Signals the end of options and disables further options processing.
+                         Any remaining argument(s) will be interpretted as a repo name
 
 Report bugs to $MAINTAINER.
 EOF
@@ -801,6 +787,149 @@ There is NO WARRANTY, to the extent permitted by law.
 
 Written by Alan D. Salewski.
 EOF
+}
+
+
+f_set_opt_user_specified_cache_dir_or_die () {
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local t_cache_dir=$1
+
+    if $HAVE_USER_SPECIFIED_CACHE_DIR; then
+        printf "${PROG} (error): only one --cache-dir=DIR option may be provided; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    if test -z "${t_cache_dir}"; then
+        printf "${PROG} (error): value provided for cache directory may not be empty; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if [[ "${t_cache_dir}" =~ $RE_BLANK ]]; then
+        printf "${PROG} (error): value provided for cache directory may not be blank; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    # No need to test whether or not the directory exists, etc., here. That
+    # sort of thing will be done later in f_maybe_initialize_cache_dirs_or_die(), q.v.
+
+    USER_SPECIFIED_CACHE_DIR=$t_cache_dir
+
+    HAVE_USER_SPECIFIED_CACHE_DIR=true
+
+    declare -g -r USER_SPECIFIED_CACHE_DIR
+    declare -g -r HAVE_USER_SPECIFIED_CACHE_DIR
+
+    return 0  # success
+}
+
+
+f_maybe_initialize_cache_dirs_or_die () {
+
+    # Sanity check. We'll use the value from $GITHUB_USERNAME in our cache
+    # directories below (if we need to create them), so fail-fast here if we
+    # do not already have the value.
+    if test -z "${GITHUB_USERNAME}"; then
+        printf "${PROG} (BUG): ${FUNCNAME}(): GITHUB_USERNAME is empty; should be set here; bailing out\n" 1>&2
+        exit 1
+    fi
+
+    # If the user specified the '--cache-dir=DIR' option on the command line,
+    # then we'll use that value ($HAVE_USER_SPECIFIED_CACHE_DIR will be true
+    # here already if that is the case).
+    #
+    # If the '--cache-dir=DIR' option was not specified on the command line,
+    # then we look for the 'ADS_GITHUB_TOOLS_CACHE_DIR' environment variable,
+    # and honor it if set.
+    #
+    # If neither of the above are true, then we use the built-in default value
+    # for the cache dir.
+    #
+    if $HAVE_USER_SPECIFIED_CACHE_DIR; then
+        : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: User-specified cache dir: \"${USER_SPECIFIED_CACHE_DIR}\"
+    else
+        if test -n "${ADS_GITHUB_TOOLS_CACHE_DIR}"; then
+            : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: ADS_GITHUB_TOOLS_CACHE_DIR env var is set. Considering it for usage.
+
+            # XXX: Technically a blank value would be a legit directory name,
+            #      but for our purposes we expect that it actually indicates
+            #      an error. Please file a bug report if this behavior breaks
+            #      your use case.
+            if [[ "${ADS_GITHUB_TOOLS_CACHE_DIR}" =~ $RE_BLANK ]]; then
+                printf "${PROG} (warning): env var ADS_GITHUB_TOOLS_CACHE_DIR contains a blank value; ignoring.\n" 1>&2
+            else
+                : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: using value from ADS_GITHUB_TOOLS_CACHE_DIR env var: \"${ADS_GITHUB_TOOLS_CACHE_DIR}\"
+                USER_SPECIFIED_CACHE_DIR=$ADS_GITHUB_TOOLS_CACHE_DIR
+
+                # This bookkeeping is just to be consistent with the behavior
+                # of f_set_opt_user_specified_cache_dir_or_die() above.
+                HAVE_USER_SPECIFIED_CACHE_DIR=true
+                declare -g -r USER_SPECIFIED_CACHE_DIR
+                declare -g -r HAVE_USER_SPECIFIED_CACHE_DIR
+            fi
+        fi
+    fi
+
+    AGH_CACHE_BASE_DIR="${AGH_DOT_D_DIR}/cache"
+
+    if $HAVE_USER_SPECIFIED_CACHE_DIR; then
+        if $BE_VERBOSE; then
+            printf "${PROG} (info): using user-specified cache dir base: \"%s\"\n" \
+                   "${USER_SPECIFIED_CACHE_DIR}" 1>&2
+        fi
+
+        AGH_CACHE_BASE_DIR=${USER_SPECIFIED_CACHE_DIR}  # overrides default value
+    fi
+    declare -g -r -x AGH_CACHE_BASE_DIR
+
+    if test -d "${AGH_CACHE_BASE_DIR}"; then :; else
+        "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_BASE_DIR}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+                   "${AGH_CACHE_BASE_DIR}" 1>&2
+            exit 1
+        fi
+    fi
+
+    declare -g -r -x AGH_CACHE_GHUSER_DIR="${AGH_CACHE_BASE_DIR}/gh-user-${GITHUB_USERNAME}"
+    if test -d "${AGH_CACHE_GHUSER_DIR}"; then :; else
+        "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GHUSER_DIR}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+                   "${AGH_CACHE_GHUSER_DIR}" 1>&2
+            exit 1
+        fi
+    fi
+
+    # Cache file layout/format/whatever: v1
+    declare -g -r -x AGH_CACHE_V1_DIR="${AGH_CACHE_GHUSER_DIR}/c-v1"
+    if test -d "${AGH_CACHE_V1_DIR}"; then :; else
+        "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_V1_DIR}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+                   "${AGH_CACHE_V1_DIR}" 1>&2
+            exit 1
+        fi
+    fi
+
+    declare -g -r -x AGH_CACHE_GH_V3_DIR="${AGH_CACHE_V1_DIR}/gh-api-v3"
+    if test -d "${AGH_CACHE_GH_V3_DIR}"; then :; else
+        "${MKDIR_PROG}" --mode '0700' "${AGH_CACHE_GH_V3_DIR}"
+        if test $? -ne 0; then
+            printf "${PROG} (error): was unable to create dir \"%s\"; bailing out\n" \
+                   "${AGH_CACHE_GH_V3_DIR}" 1>&2
+            exit 1
+        fi
+    fi
+
+    return 0
 }
 
 
@@ -3505,6 +3634,8 @@ declare -A longopt_spec=(
     ['help']=0      # -h
     ['version']=0   # -V
 
+    ['cache-dir']=1 # --cache-dir=DIR
+
     ['clear']=0
     ['clear-all']=0
 
@@ -3701,6 +3832,10 @@ if test $# -gt 0; then
                 exit 0
                 ;;
 
+            'cache-dir')  # --cache-dir=DIR
+                f_set_opt_user_specified_cache_dir_or_die "${OPTARG}"  # OPTARG should be a directory; will error-out otherwise
+                ;;
+
             'clear')
                 f_set_cmd_mode_clear_or_die '--clear'
                 WANT_CLEAR_SOME=true
@@ -3804,6 +3939,19 @@ while test $# -gt 0; do
     INPUT_URLS_OR_PATHS+=("$1")
     shift
 done
+
+
+# Ensure the base cache directory exists and has the expected subdirectory
+# structure. Recall that the user can specify the '--cache-dir=DIR' option, so
+# the location of the cache directory can change from run to run. This ability
+# is mainly intended for development and experimenting.
+#
+# See also:
+#     * issue #82: "cache (new feature): allow use of cache directory outside of ${HOME}"
+#       https://github.com/salewski/ads-github-tools/issues/82
+#
+f_maybe_initialize_cache_dirs_or_die
+
 
 # Exporting MY_TMP_DIR to allow visibility in concurrent subshells
 export MY_TMP_DIR=$("${MKTEMP_PROG}" -t --directory "${PROG}.XXXXXXXX")
@@ -4082,10 +4230,10 @@ exit 0
 
   ads-github-cache (-h | --help)
   ads-github-cache (-V | --version)
-  ads-github-cache [(-v | --verbose)] --update [--] [URL_OR_PATH...]
-  ads-github-cache [(-v | --verbose)] (--get | --get-cached) [--] URL_OR_PATH
-  ads-github-cache [(-v | --verbose)] --clear  [--] [URL_OR_PATH...]
-  ads-github-cache [(-v | --verbose)] --clear-all
+  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --update [--] [URL_OR_PATH...]
+  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] (--get | --get-cached) [--] URL_OR_PATH
+  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --clear  [--] [URL_OR_PATH...]
+  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --clear-all
 
 
 =head1 DESCRIPTION
@@ -4110,6 +4258,32 @@ The options are as follows:
 =item -h, --help
 
 Print help usage message
+
+
+=item --cache-dir=DIR
+
+Specify root of the cache directory. The cache directory is the location into
+which the C<ads-github-cache> program reads and/or writes cached data.
+
+The cache directory to use may also be specified in the
+C<ADS_GITHUB_TOOLS_CACHE_DIR> environment variable. The command line option,
+if provided, takes precedence over the environment variable.
+
+Using the environment variable has the advantage that the C<ads-github-cache>
+program will honor it even when invoked indirectly by some of the other
+C<ads-github-tools> programs. If relying on this behavior, make sure the
+environment variable is "exported" in your shell environment.
+
+If not specified, the default location for the cache directory will be used:
+
+    ${HOME}/.ads-github-tools.d/cache/
+
+The specified directory (but not its parent directories) will be created if it
+does not exist.
+
+The ability to specify the cache directory is provided mainly for purposes of
+developing and testing the C<ads-github-tools> themselves. It is also useful
+for experimenting and benchmarking.
 
 
 =item --clear
@@ -4459,13 +4633,48 @@ less than one-tenth of a second; from the command line, that feels like it is
 =back
 
 
+=head1 ENVIRONMENT
+
+=over 4
+
+=item ADS_GITHUB_TOOLS_CACHE_DIR
+
+Specify root of the cache directory. The cache directory is the location into
+which the C<ads-github-cache> program reads and/or writes cached data.
+
+The cache directory to use may also be specified in the C<--cache-dir=DIR>
+command line option. The command line option, if provided, takes precedence
+over the environment variable.
+
+Using the environment variable has the advantage that the C<ads-github-cache>
+program will honor it even when invoked indirectly by some of the other
+C<ads-github-tools> programs. If relying on this behavior, make sure the
+environment variable is "exported" in your shell environment.
+
+If not specified, the default location for the cache directory will be used:
+
+    ${HOME}/.ads-github-tools.d/cache/
+
+The specified directory (but not its parent directories) will be created if it
+does not exist.
+
+The ability to specify the cache directory is provided mainly for purposes of
+developing and testing the C<ads-github-tools> themselves. It is also useful
+for experimenting and benchmarking.
+
+
+=back
+
+
 =head1 FILES
 
 =over 4
 
-=item C<~/.ads-github-tools.d/cache/>
+=item C<${HOME}/.ads-github-tools.d/cache/>
 
-All cached objects are stored in subdirectory trees beneath this location.
+By default, all cached objects are stored in subdirectory trees beneath this
+location. The C<--cache-dir=DIR> option or the C<ADS_GITHUB_TOOLS_CACHE_DIR>
+environment variable may be used to override the default location.
 
 The cached objects for a particular GitHub user are stored in a subdirectory
 named in the form:

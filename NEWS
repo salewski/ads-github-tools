@@ -127,6 +127,39 @@ which they were fixed will be noted here, as well.
     case. Thanks.
 
 
+*** issue #82: "cache (new feature): allow use of cache directory outside of ${HOME}"
+
+    https://github.com/salewski/ads-github-tools/issues/82
+
+    The 'ads-github-cache' program now accepts a '--cache-dir=DIR' command
+    line option to specify root of the cache directory. The cache directory is
+    the location into which the 'ads-github-cache' program reads and/or writes
+    cached data.
+
+    If not specified, the default location for the cache directory will be used:
+
+    :   ${HOME}/.ads-github-tools.d/cache/
+
+    Prior to this change, the above location was always used unconditionally.
+
+    The cache directory to use may also be specified in the
+    'ADS_GITHUB_TOOLS_CACHE_DIR' environment variable. The command line
+    option, if provided, takes precedence over the environment variable.
+
+    Using the environment variable has the advantage that the
+    'ads-github-cache' program will honor it even when invoked indirectly by
+    some of the other 'ads-github-tools' programs. If relying on this
+    behavior, make sure the environment variable is "exported" in your shell
+    environment.
+
+    The specified directory (but not its parent directories) will be created if it
+    does not exist.
+
+    The ability to specify the cache directory is provided mainly for purposes
+    of developing and testing the 'ads-github-tools' themselves. It is also
+    useful for experimenting and benchmarking.
+
+
 *** doc: ads-github-cache(1)
 
 **** minor typo fixes (and similar)
