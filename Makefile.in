@@ -85,6 +85,8 @@ POST_INSTALL = :
 NORMAL_UNINSTALL = :
 PRE_UNINSTALL = :
 POST_UNINSTALL = :
+build_triplet = @build@
+host_triplet = @host@
 subdir = .
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
@@ -161,12 +163,15 @@ CSCOPE = cscope
 DIST_SUBDIRS = $(SUBDIRS)
 am__DIST_COMMON = $(srcdir)/Makefile.in \
 	$(top_srcdir)/.cargo/config.toml.in \
+	$(top_srcdir)/build-aux/config.guess \
+	$(top_srcdir)/build-aux/config.sub \
 	$(top_srcdir)/build-aux/install-sh \
 	$(top_srcdir)/build-aux/missing \
 	$(top_srcdir)/src/main/rust/bin/parse-netrc/.cargo/config.toml.in \
 	$(top_srcdir)/src/main/rust/bin/parse-netrc/src/bin/main.rs \
 	$(top_srcdir)/src/main/rust/bin/parse-netrc/src/lib.rs AUTHORS \
-	COPYING INSTALL NEWS build-aux/install-sh build-aux/missing
+	COPYING INSTALL NEWS build-aux/config.guess \
+	build-aux/config.sub build-aux/install-sh build-aux/missing
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 distdir = $(PACKAGE)-$(VERSION)
 top_distdir = $(distdir)
@@ -238,11 +243,17 @@ ECHO_C = @ECHO_C@
 ECHO_N = @ECHO_N@
 ECHO_PROG = @ECHO_PROG@
 ECHO_T = @ECHO_T@
+EGREP = @EGREP@
 EXPR_PROG = @EXPR_PROG@
 FIND = @FIND@
+GETCONF_PROG = @GETCONF_PROG@
 GIT_HUB_PROG = @GIT_HUB_PROG@
 GIT_PROG = @GIT_PROG@
 GREP = @GREP@
+HAVE_GETCONF_PROG = @HAVE_GETCONF_PROG@
+HAVE_LSCPU_PROG = @HAVE_LSCPU_PROG@
+HAVE_NPROC_PROG = @HAVE_NPROC_PROG@
+HAVE_SYSCTL_PROG = @HAVE_SYSCTL_PROG@
 HEAD_PROG = @HEAD_PROG@
 ID_PROG = @ID_PROG@
 INSTALL = @INSTALL@
@@ -254,12 +265,14 @@ JQ_PROG = @JQ_PROG@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LN_S = @LN_S@
+LSCPU_PROG = @LSCPU_PROG@
 LTLIBOBJS = @LTLIBOBJS@
 MAKEINFO = @MAKEINFO@
 MKDIR_P = @MKDIR_P@
 MKDIR_PROG = @MKDIR_PROG@
 MKTEMP_PROG = @MKTEMP_PROG@
 MV_PROG = @MV_PROG@
+NPROC_PROG = @NPROC_PROG@
 PACKAGE = @PACKAGE@
 PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
@@ -281,6 +294,7 @@ SHA3SUM_PROG = @SHA3SUM_PROG@
 SHELL = @SHELL@
 SLEEP_PROG = @SLEEP_PROG@
 STRIP = @STRIP@
+SYSCTL_PROG = @SYSCTL_PROG@
 TAIL_PROG = @TAIL_PROG@
 TR_PROG = @TR_PROG@
 VERSION = @VERSION@
@@ -298,7 +312,11 @@ am__leading_dot = @am__leading_dot@
 am__tar = @am__tar@
 am__untar = @am__untar@
 bindir = @bindir@
+build = @build@
 build_alias = @build_alias@
+build_cpu = @build_cpu@
+build_os = @build_os@
+build_vendor = @build_vendor@
 builddir = @builddir@
 cargo_vendored_root = @cargo_vendored_root@
 datadir = @datadir@
@@ -307,7 +325,11 @@ do_subst_command = @do_subst_command@
 docdir = @docdir@
 dvidir = @dvidir@
 exec_prefix = @exec_prefix@
+host = @host@
 host_alias = @host_alias@
+host_cpu = @host_cpu@
+host_os = @host_os@
+host_vendor = @host_vendor@
 htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
