@@ -605,6 +605,8 @@ XARGS_PROG
 WC_PROG
 TR_PROG
 TAIL_PROG
+HAVE_SYSCTL_PROG
+SYSCTL_PROG
 SLEEP_PROG
 SHA3SUM_PROG
 SHA256SUM_PROG
@@ -612,15 +614,20 @@ RUSTC_PROG
 RMDIR
 RM
 READLINK_PROG
+HAVE_NPROC_PROG
+NPROC_PROG
 MV_PROG
 MKTEMP_PROG
 MKDIR_PROG
+HAVE_LSCPU_PROG
+LSCPU_PROG
 JQ_PROG
 ID_PROG
 HEAD_PROG
-GREP
 GIT_HUB_PROG
 GIT_PROG
+HAVE_GETCONF_PROG
+GETCONF_PROG
 FIND
 EXPR_PROG
 ECHO_PROG
@@ -640,6 +647,16 @@ BASH_SH
 BASENAME_PROG
 AWK_PROG
 LN_S
+EGREP
+GREP
+host_os
+host_vendor
+host_cpu
+host
+build_os
+build_vendor
+build_cpu
+build
 AM_BACKSLASH
 AM_DEFAULT_VERBOSITY
 AM_DEFAULT_V
@@ -1328,6 +1345,10 @@ Program names:
   --program-prefix=PREFIX            prepend PREFIX to installed program names
   --program-suffix=SUFFIX            append SUFFIX to installed program names
   --program-transform-name=PROGRAM   run sed PROGRAM on installed program names
+
+System types:
+  --build=BUILD     configure for building on BUILD [guessed]
+  --host=HOST       cross-compile to build programs to run on HOST [BUILD]
 _ACEOF
 fi
 
@@ -2546,6 +2567,209 @@ fi
 AM_BACKSLASH='\'
 
 
+# Make sure we can run config.sub.
+$SHELL "$ac_aux_dir/config.sub" sun4 >/dev/null 2>&1 ||
+  as_fn_error $? "cannot run $SHELL $ac_aux_dir/config.sub" "$LINENO" 5
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking build system type" >&5
+$as_echo_n "checking build system type... " >&6; }
+if ${ac_cv_build+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_build_alias=$build_alias
+test "x$ac_build_alias" = x &&
+  ac_build_alias=`$SHELL "$ac_aux_dir/config.guess"`
+test "x$ac_build_alias" = x &&
+  as_fn_error $? "cannot guess build type; you must specify one" "$LINENO" 5
+ac_cv_build=`$SHELL "$ac_aux_dir/config.sub" $ac_build_alias` ||
+  as_fn_error $? "$SHELL $ac_aux_dir/config.sub $ac_build_alias failed" "$LINENO" 5
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_build" >&5
+$as_echo "$ac_cv_build" >&6; }
+case $ac_cv_build in
+*-*-*) ;;
+*) as_fn_error $? "invalid value of canonical build" "$LINENO" 5;;
+esac
+build=$ac_cv_build
+ac_save_IFS=$IFS; IFS='-'
+set x $ac_cv_build
+shift
+build_cpu=$1
+build_vendor=$2
+shift; shift
+# Remember, the first character of IFS is used to create $*,
+# except with old shells:
+build_os=$*
+IFS=$ac_save_IFS
+case $build_os in *\ *) build_os=`echo "$build_os" | sed 's/ /-/g'`;; esac
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking host system type" >&5
+$as_echo_n "checking host system type... " >&6; }
+if ${ac_cv_host+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if test "x$host_alias" = x; then
+  ac_cv_host=$ac_cv_build
+else
+  ac_cv_host=`$SHELL "$ac_aux_dir/config.sub" $host_alias` ||
+    as_fn_error $? "$SHELL $ac_aux_dir/config.sub $host_alias failed" "$LINENO" 5
+fi
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_host" >&5
+$as_echo "$ac_cv_host" >&6; }
+case $ac_cv_host in
+*-*-*) ;;
+*) as_fn_error $? "invalid value of canonical host" "$LINENO" 5;;
+esac
+host=$ac_cv_host
+ac_save_IFS=$IFS; IFS='-'
+set x $ac_cv_host
+shift
+host_cpu=$1
+host_vendor=$2
+shift; shift
+# Remember, the first character of IFS is used to create $*,
+# except with old shells:
+host_os=$*
+IFS=$ac_save_IFS
+case $host_os in *\ *) host_os=`echo "$host_os" | sed 's/ /-/g'`;; esac
+
+
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for grep that handles long lines and -e" >&5
+$as_echo_n "checking for grep that handles long lines and -e... " >&6; }
+if ${ac_cv_path_GREP+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if test -z "$GREP"; then
+  ac_path_GREP_found=false
+  # Loop through the user's path and test for each of PROGNAME-LIST
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH$PATH_SEPARATOR/usr/xpg4/bin
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_prog in grep ggrep; do
+    for ac_exec_ext in '' $ac_executable_extensions; do
+      ac_path_GREP="$as_dir/$ac_prog$ac_exec_ext"
+      as_fn_executable_p "$ac_path_GREP" || continue
+# Check for GNU ac_path_GREP and select it if it is found.
+  # Check for GNU $ac_path_GREP
+case `"$ac_path_GREP" --version 2>&1` in
+*GNU*)
+  ac_cv_path_GREP="$ac_path_GREP" ac_path_GREP_found=:;;
+*)
+  ac_count=0
+  $as_echo_n 0123456789 >"conftest.in"
+  while :
+  do
+    cat "conftest.in" "conftest.in" >"conftest.tmp"
+    mv "conftest.tmp" "conftest.in"
+    cp "conftest.in" "conftest.nl"
+    $as_echo 'GREP' >> "conftest.nl"
+    "$ac_path_GREP" -e 'GREP$' -e '-(cannot match)-' < "conftest.nl" >"conftest.out" 2>/dev/null || break
+    diff "conftest.out" "conftest.nl" >/dev/null 2>&1 || break
+    as_fn_arith $ac_count + 1 && ac_count=$as_val
+    if test $ac_count -gt ${ac_path_GREP_max-0}; then
+      # Best one so far, save it but keep looking for a better one
+      ac_cv_path_GREP="$ac_path_GREP"
+      ac_path_GREP_max=$ac_count
+    fi
+    # 10*(2^10) chars as input seems more than enough
+    test $ac_count -gt 10 && break
+  done
+  rm -f conftest.in conftest.tmp conftest.nl conftest.out;;
+esac
+
+      $ac_path_GREP_found && break 3
+    done
+  done
+  done
+IFS=$as_save_IFS
+  if test -z "$ac_cv_path_GREP"; then
+    as_fn_error $? "no acceptable grep could be found in $PATH$PATH_SEPARATOR/usr/xpg4/bin" "$LINENO" 5
+  fi
+else
+  ac_cv_path_GREP=$GREP
+fi
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_path_GREP" >&5
+$as_echo "$ac_cv_path_GREP" >&6; }
+ GREP="$ac_cv_path_GREP"
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for egrep" >&5
+$as_echo_n "checking for egrep... " >&6; }
+if ${ac_cv_path_EGREP+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  if echo a | $GREP -E '(a|b)' >/dev/null 2>&1
+   then ac_cv_path_EGREP="$GREP -E"
+   else
+     if test -z "$EGREP"; then
+  ac_path_EGREP_found=false
+  # Loop through the user's path and test for each of PROGNAME-LIST
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH$PATH_SEPARATOR/usr/xpg4/bin
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_prog in egrep; do
+    for ac_exec_ext in '' $ac_executable_extensions; do
+      ac_path_EGREP="$as_dir/$ac_prog$ac_exec_ext"
+      as_fn_executable_p "$ac_path_EGREP" || continue
+# Check for GNU ac_path_EGREP and select it if it is found.
+  # Check for GNU $ac_path_EGREP
+case `"$ac_path_EGREP" --version 2>&1` in
+*GNU*)
+  ac_cv_path_EGREP="$ac_path_EGREP" ac_path_EGREP_found=:;;
+*)
+  ac_count=0
+  $as_echo_n 0123456789 >"conftest.in"
+  while :
+  do
+    cat "conftest.in" "conftest.in" >"conftest.tmp"
+    mv "conftest.tmp" "conftest.in"
+    cp "conftest.in" "conftest.nl"
+    $as_echo 'EGREP' >> "conftest.nl"
+    "$ac_path_EGREP" 'EGREP$' < "conftest.nl" >"conftest.out" 2>/dev/null || break
+    diff "conftest.out" "conftest.nl" >/dev/null 2>&1 || break
+    as_fn_arith $ac_count + 1 && ac_count=$as_val
+    if test $ac_count -gt ${ac_path_EGREP_max-0}; then
+      # Best one so far, save it but keep looking for a better one
+      ac_cv_path_EGREP="$ac_path_EGREP"
+      ac_path_EGREP_max=$ac_count
+    fi
+    # 10*(2^10) chars as input seems more than enough
+    test $ac_count -gt 10 && break
+  done
+  rm -f conftest.in conftest.tmp conftest.nl conftest.out;;
+esac
+
+      $ac_path_EGREP_found && break 3
+    done
+  done
+  done
+IFS=$as_save_IFS
+  if test -z "$ac_cv_path_EGREP"; then
+    as_fn_error $? "no acceptable egrep could be found in $PATH$PATH_SEPARATOR/usr/xpg4/bin" "$LINENO" 5
+  fi
+else
+  ac_cv_path_EGREP=$EGREP
+fi
+
+   fi
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_path_EGREP" >&5
+$as_echo "$ac_cv_path_EGREP" >&6; }
+ EGREP="$ac_cv_path_EGREP"
+
 
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether ln -s works" >&5
@@ -3631,6 +3855,54 @@ fi
 if test -z "$FIND"; then
     as_fn_error $? "find not found" "$LINENO" 5;fi
 
+# OPTIONAL tool: getconf
+HAVE_GETCONF_PROG=false
+# Extract the first word of "getconf", so it can be a program name with args.
+set dummy getconf; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_GETCONF_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $GETCONF_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_GETCONF_PROG="$GETCONF_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_GETCONF_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+GETCONF_PROG=$ac_cv_path_GETCONF_PROG
+if test -n "$GETCONF_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $GETCONF_PROG" >&5
+$as_echo "$GETCONF_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -n "$GETCONF_PROG"; then
+    HAVE_GETCONF_PROG=true
+fi
+
+
+
 # git version control system
 #
 # See: https://git-scm.com/
@@ -3909,6 +4181,59 @@ if test -z "$JQ_PROG"; then
     as_fn_error $? "jq program not found" "$LINENO" 5
 fi
 
+# OPTIONAL tool: lscpu
+# Note that 'lscpu' program comes from the 'util-linux' package.
+#
+# https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/
+# https://git.kernel.org/pub/scm/utils/util-linux/util-linux.git
+# https://github.com/util-linux/util-linux
+#
+HAVE_LSCPU_PROG=false
+# Extract the first word of "lscpu", so it can be a program name with args.
+set dummy lscpu; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_LSCPU_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $LSCPU_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_LSCPU_PROG="$LSCPU_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_LSCPU_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+LSCPU_PROG=$ac_cv_path_LSCPU_PROG
+if test -n "$LSCPU_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $LSCPU_PROG" >&5
+$as_echo "$LSCPU_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -n "LSCPU_PROG"; then
+    HAVE_LSCPU_PROG=true
+fi
+
+
 # Extract the first word of "mkdir", so it can be a program name with args.
 set dummy mkdir; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
@@ -4040,6 +4365,55 @@ fi
 if test -z "$MV_PROG"; then
     as_fn_error $? "mv program not found" "$LINENO" 5
 fi
+
+# OPTIONAL tool: nproc
+# NOTE that nproc(1) is part of the GNU 'coreutils' package.
+# https://www.gnu.org/software/coreutils/nproc
+HAVE_NPROC_PROG=false
+# Extract the first word of "nproc", so it can be a program name with args.
+set dummy nproc; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_NPROC_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $NPROC_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_NPROC_PROG="$NPROC_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_NPROC_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+NPROC_PROG=$ac_cv_path_NPROC_PROG
+if test -n "$NPROC_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $NPROC_PROG" >&5
+$as_echo "$NPROC_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -n "$NPROC_PROG"; then
+    HAVE_NPROC_PROG=true
+fi
+
 
 # Extract the first word of "sed", so it can be a program name with args.
 set dummy sed; ac_word=$2
@@ -4412,6 +4786,53 @@ fi
 if test -z "$SLEEP_PROG"; then
     as_fn_error $? "sleep not found" "$LINENO" 5  # I know the feeling!
 fi
+
+# OPTIONAL tool: sysctl
+HAVE_SYSCTL_PROG=false
+# Extract the first word of "sysctl", so it can be a program name with args.
+set dummy sysctl; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_SYSCTL_PROG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $SYSCTL_PROG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_SYSCTL_PROG="$SYSCTL_PROG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_SYSCTL_PROG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+SYSCTL_PROG=$ac_cv_path_SYSCTL_PROG
+if test -n "$SYSCTL_PROG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $SYSCTL_PROG" >&5
+$as_echo "$SYSCTL_PROG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+if test -n "$SYSCTL_PROG"; then
+    HAVE_SYSCTL_PROG=true
+fi
+
 
 # Extract the first word of "tail", so it can be a program name with args.
 set dummy tail; ac_word=$2
@@ -5333,6 +5754,10 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]configure_input[@],Generated from $@.in; do not edit by hand.,g'"'"' \
   -e "s,[@]BUILD_DATE[@],$$(date '"'"'+%Y-%m-%d %H:%M:%S'"'"'),g" \
   \
+  -e '"'"'s,[@]host_cpu[@],$(host_cpu),g'"'"' \
+  -e '"'"'s,[@]host_vendor[@],$(host_vendor),g'"'"' \
+  -e '"'"'s,[@]host_os[@],$(host_os),g'"'"' \
+  \
   -e '"'"'s,[@]bindir[@],$(bindir),g'"'"' \
   -e '"'"'s,[@]datadir[@],$(datadir),g'"'"' \
   -e '"'"'s,[@]exec_prefix[@],$(exec_prefix),g'"'"' \
@@ -5354,6 +5779,8 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]srcdir[@],$(srcdir),g'"'"' \
   -e '"'"'s,[@]top_builddir[@],$(top_builddir),g'"'"' \
   -e '"'"'s,[@]top_srcdir[@],$(top_srcdir),g'"'"' \
+  \
+  -e '"'"'s,[@]EGREP[@],$(EGREP),g'"'"' \
   \
   -e '"'"'s,[@]PERL[@],$(PERL),g'"'"' \
   -e '"'"'s,[@]POD2MAN[@],$(POD2MAN),g'"'"' \
@@ -5379,15 +5806,27 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
   -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_GETCONF_PROG[@],$(HAVE_GETCONF_PROG),g'"'"' \
+  -e '"'"'s,[@]GETCONF_PROG[@],$(GETCONF_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
   -e '"'"'s,[@]GIT_HUB_PROG[@],$(GIT_HUB_PROG),g'"'"' \
   -e '"'"'s,[@]GREP[@],$(GREP),g'"'"' \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_LSCPU_PROG[@],$(HAVE_LSCPU_PROG),g'"'"' \
+  -e '"'"'s,[@]LSCPU_PROG[@],$(LSCPU_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]MKDIR_PROG[@],$(MKDIR_PROG),g'"'"' \
   -e '"'"'s,[@]MKTEMP_PROG[@],$(MKTEMP_PROG),g'"'"' \
   -e '"'"'s,[@]MV_PROG[@],$(MV_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_NPROC_PROG[@],$(HAVE_NPROC_PROG),g'"'"' \
+  -e '"'"'s,[@]NPROC_PROG[@],$(NPROC_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
   -e '"'"'s,[@]READLINK_PROG[@],$(READLINK_PROG),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
@@ -5396,6 +5835,10 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]SHA256SUM_PROG[@],$(SHA256SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SLEEP_PROG[@],$(SLEEP_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_SYSCTL_PROG[@],$(HAVE_SYSCTL_PROG),g'"'"' \
+  -e '"'"'s,[@]SYSCTL_PROG[@],$(SYSCTL_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
@@ -6745,6 +7188,10 @@ __poor_mans_expand_file_name () {
 
 printf "\n"
 printf "${PACKAGE} has been configured with the following options:\n"
+printf "                      host_cpu: %s\n" "`__poor_mans_expand_file_name host_cpu`"
+printf "                   host_vendor: %s\n" "`__poor_mans_expand_file_name host_vendor`"
+printf "                       host_os: %s\n" "`__poor_mans_expand_file_name host_os`"
+printf "\n"
 printf "                        Prefix: %s\n" "`__poor_mans_expand_file_name prefix`"
 printf "                 User binaries: %s\n" "`__poor_mans_expand_file_name bindir`"
 printf "               System binaries: %s\n" "`__poor_mans_expand_file_name sbindir`"

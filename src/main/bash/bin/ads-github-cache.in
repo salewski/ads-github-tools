@@ -148,6 +148,20 @@ BE_VERBOSE=false   # enable with one '-v' (--verbose) opt
 DEBUGGING=false    # enable with two '-v' (--verbose) opts
 TRACING=false      # enable with three or more '-v' (--verbose) opts
 
+# Limits the number of background processes that will be created at one time
+# in order to obtain, concurrently, data to cache.
+#
+# Yes, this is arbitrary, but we do not want to hammer on the remote GitHub v3
+# API endpoints. On a large machine with, say 128 CPU cores, we would not want
+# to create 128 API requests at the same time.
+#
+# We may lower this number based on the number of CPUs we see on the machine,
+# but we will never raise it above this default value.
+#
+# See also: $USER_SPECIFIED_MAX_BG_PROCS
+declare MAX_BG_PROCS=20
+
+
 # Folks using GitHub Enterprise might access their API at a different
 # location, so we parameterize the base URL for the GitHub API. MAKE SURE THIS
 # URL INDICATES HTTPS (not just HTTP -- you do not want your HTTP Basic Auth
@@ -434,6 +448,8 @@ t_p2=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")") || exit 1
 t_p3=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")") || exit 1
 t_p4=$("${BASENAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "$("${DIRNAME_PROG}" "${t_rp}")")")") || exit 1
 
+AGH_NPROC_PROG="${t_script_dir}/ads-github-nproc"
+
 # The non-bash-based tools (e.g., those that are Perl- or Rust-based) may or
 # may not be in the same directory, depending on whether or not we are running
 # in-tree.
@@ -461,6 +477,7 @@ fi
 
 declare -a NEEDED_INTERNAL_PROGS=(
     "${AGH_NORMALIZE_URL_PROG}"
+    "${AGH_NPROC_PROG}"
     "${PARSE_NETRC_PROG}"
 )
 for int_tool in "${NEEDED_INTERNAL_PROGS[@]}"; do
@@ -523,6 +540,48 @@ trap 'printf "$PROG (warn): TERM signal caught; bailing out\n" 1>&2; f_cleanup_a
 trap 'f_cleanup' EXIT
 
 
+MY_CPU_COUNT=$("${AGH_NPROC_PROG}")
+if test $? -ne 0 \
+|| test -z "${MY_CPU_COUNT}" \
+|| ! [[ "${MY_CPU_COUNT}" =~ $RE_ALL_DIGITS ]] \
+|| test "${MY_CPU_COUNT}" -lt 1; then
+    printf "${PROG} (warning): was unable to determine the number of CPUs; assuming 1\n" 1>&2
+    MY_CPU_COUNT=1
+    # Keep going...
+fi
+declare -r -i MY_CPU_COUNT
+
+# Maybe adjust downward $MAX_BG_PROCS
+#
+# CAREFUL: We're adjusting (possibly) the built-in default limits here, based
+#          on the number of CPUs found to be present at runtime. However, the
+#          user can override the behavior configured here using the '-j NUM'
+#          (--jobs=NUM) command line option, which will be honored "as is" by
+#          this program; the user-specified limit is not subject to the
+#          built-in limit that we are adjusting here. (This is *nix; we will
+#          not second-guess the user.)
+#
+if test $MY_CPU_COUNT -gt $MAX_BG_PROCS; then
+    # Machine has large number of CPUs -- more than we would want to use for
+    # processes simultaneously hitting the remote GitHub v3 endpoint. Just
+    # stick with our arbitrary (but reasonable) max.
+    #
+    : $PROG \(trace: $LINENO\): Found $MY_CPU_COUNT CPUs. Will cap max bg procs at the default max: $MAX_BG_PROCS
+else
+    # We'll limit the max number of background processes spawned to retrieve
+    # cache data to two times the number of found CPUs (as long as that number
+    # is still below our default value for $MAX_BG_PROCS). Even a single-core
+    # CPU can usefully have multiple requests outstanding (since there will be
+    # a fair amount of just waiting for the response).
+    t_two_times=$(( 2 * MY_CPU_COUNT ))
+    if test $t_two_times -lt $MAX_BG_PROCS; then
+        : $PROG \(trace: $LINENO\): Found $MY_CPU_COUNT CPUs. Will cap max bg procs at: $t_two_times
+        MAX_BG_PROCS=$t_two_times
+    fi
+    unset t_two_times
+fi
+
+
 # It is possible that the local Unix user has more than one GitHub account
 # (e.g., separate personal and work accounts). We will keep separate caches
 # for each GitHub user (more correctly, we create a unique per-GitHub-user
@@ -572,6 +631,12 @@ else
     printf "${PROG} (error): was unable to obtain user's GitHub username from netrc; bailing out\n" 1>&2
     exit 1
 fi
+
+
+# If user does not specify the max number of background processes, then
+# $MAX_BG_PROCS will be used (q.v.)
+USER_SPECIFIED_MAX_BG_PROCS=             # set via '-j NUM' ('--jobs=NUM')
+HAVE_USER_SPECIFIED_MAX_BG_PROCS=false
 
 
 # We may or may not write the cache directory beneath this location, depending
@@ -766,6 +831,8 @@ Mandatory arguments to long options are mandatory for short options too.
       --get            Obtain content of specfied URL or path through the cache
       --get-cached     Like '--get', but error out if item is not already present in cache.
                          Avoids updating the cache to obtain the item. Think "offline".
+  -j, --jobs=NUM       Specify the number of concurrent requests against the GitHub API.
+                         Default is 2 * cpu_count, or 20; whichever is lower.
       --update         Update the cache entry for the specified URLs or paths, or all
   -v, --verbose        Print program progress messages on stderr. Specify multiple
                          times to increase verbosity: info, debug, and tracing (set -x)
@@ -787,6 +854,55 @@ There is NO WARRANTY, to the extent permitted by law.
 
 Written by Alan D. Salewski.
 EOF
+}
+
+
+f_set_opt_user_specified_max_bg_procs_or_die() {
+    local __required_count=1
+    if test $# -ne ${__required_count}; then
+        printf "${PROG} (BUG): ${FUNCNAME}() invoked with %d args; exactly %d required; bailing out\n" \
+            $# ${__required_count} 1>&2
+        exit 1
+    fi
+
+    local t_max=$1
+
+    if $HAVE_USER_SPECIFIED_MAX_BG_PROCS; then
+        printf "${PROG} (error): only one '-j NUM' (--jobs=NUM) option may be provided; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    if test -z "${t_max}"; then
+        printf "${PROG} (error): value provided for max jobs count may not be empty; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if [[ "${t_max}" =~ $RE_BLANK ]]; then
+        printf "${PROG} (error): value provided for max jobs count may not be blank; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+    if [[ "${t_max}" =~ $RE_ALL_DIGITS ]] \
+    && test "${t_max}" -gt 0; then :; else
+        printf "${PROG} (error): value provided for max jobs count must be an integer greater than zero; bailing out\n" 1>&2
+        f_print_help 1>&2
+        exit 1
+    fi
+
+    USER_SPECIFIED_MAX_BG_PROCS=$t_max
+
+    HAVE_USER_SPECIFIED_MAX_BG_PROCS=true
+
+    declare -g -r USER_SPECIFIED_MAX_BG_PROCS
+    declare -g -r HAVE_USER_SPECIFIED_MAX_BG_PROCS
+
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): will honor user-specified max jobs count: %d\n" \
+               "${USER_SPECIFIED_MAX_BG_PROCS}" 1>&2
+    fi
+
+    return 0  # success
 }
 
 
@@ -2777,6 +2893,10 @@ f_get_one_validated_colmeta_or_die () {
 
     local t_http_code
     local t_estat
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): making HEAD request for \"%s\"\n" \
+               "${__t_pqf}" 1>&2
+    fi
     t_http_code=$( "${CURL_PROG}" "${MY_CURL_OPTS[@]}" "${t_url_plus_paging}")
     t_estat=$?
     if test ${t_estat} -ne 0; then
@@ -3082,8 +3202,25 @@ f_get_one_collection_or_die () {
 
     local -A t_bg_procs=()
 
-    this_page=0
-    while test ${this_page} -lt ${t_last_page_number}; do
+    # Retrieve pages of data in concurrent background processes. Note that we
+    # enforce limits to the number of background processes that we will make
+    # at any one time. We do not just want to use all available CPUs (if the
+    # number of available CPUs is high), since we are hitting an external
+    # site's API.
+
+    # By default we'll used the baked-in default, but will unquestioningly use
+    # a user-supplied valid, if such a thing was provided.
+    local t_max_bg_procs=$MAX_BG_PROCS
+    if $HAVE_USER_SPECIFIED_MAX_BG_PROCS; then
+        t_max_bg_procs=$USER_SPECIFIED_MAX_BG_PROCS
+    fi
+
+    local t_was_bg_err=false
+    local this_page=0
+    local t_rtn_from_bg
+    while test ${this_page} -lt ${t_last_page_number} \
+       && ! $t_was_bg_err; do
+
         (( ++this_page ))
 
         if $BE_VERBOSE; then
@@ -3101,9 +3238,52 @@ f_get_one_collection_or_die () {
         TRACING=$TRACING       \
           f_perform_do_get_one_or_die "${t_url_plus_paging}" &
         t_bg_pid_to_pagenum[$!]="${this_page}"  # capture pid of background process so we can later 'wait' on it
+
+        while test ${#t_bg_pid_to_pagenum[@]} -eq $t_max_bg_procs; do
+            # We have hit our limit for the maximum number of background
+            # processes that we want to have concurrently retrieving pages of
+            # data from the GitHub v3 endpoint. We'll loop waiting for one or
+            # more of them to complete before launching any additional
+            # requests.
+
+            for one_pid in "${!t_bg_pid_to_pagenum[@]}"; do
+                # Suppress stderr to avoid messages such as:
+                #     kill: (17163) - No such process
+                if builtin kill -n 0 "${one_pid}" 2>/dev/null ; then
+                    : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: subprocess with pid $one_pid is still running
+                else
+                    wait ${one_pid}
+                    t_rtn_from_bg=$?
+                    if test ${t_rtn_from_bg} -ne 0; then
+                        t_was_bg_err=true
+                        printf "${PROG} (error): \"paged collection\" %s: was error requesting page %s of %s (page size: %s)\n" \
+                               "${__t_pqf}"   \
+                               "${t_bg_pid_to_pagenum[${one_pid}]}" \
+                               "${t_last_page_number}" \
+                               "${gl_const_per_page_size}" 1>&2
+                        # keep going...
+
+                        # XXX: We could tear-down (kill) the rest of the
+                        #      background processes at this point, too, since
+                        #      a single failure causes us to discard the work
+                        #      from all of them, anyway. For now, we simply
+                        #      avoid spawing additional background processes
+                        #      to fetch additional pages when we detect that
+                        #      one has failed, but we we still just wait for
+                        #      the rest to run their course.
+                    fi
+                    unset t_bg_pid_to_pagenum[${one_pid}]
+                fi
+            done
+            if test ${#t_bg_pid_to_pagenum[@]} -eq $t_max_bg_procs; then
+                # None of the outstanding requests has yet completed. We sleep
+                # for a short period of time and then check on them again.
+                "${SLEEP_PROG}" '.5'
+            fi
+        done
     done
 
-    local t_was_err=false
+
     while test ${#t_bg_pid_to_pagenum[@]} -gt 0; do
         for one_pid in "${!t_bg_pid_to_pagenum[@]}"; do
             # Suppress stderr to avoid messages such as:
@@ -3112,9 +3292,9 @@ f_get_one_collection_or_die () {
                 : $PROG \(trace: $LINENO\): fn ${FUNCNAME}: subprocess with pid $one_pid is still running
             else
                 wait ${one_pid}
-                t_rtn=$?
-                if test ${t_rtn} -ne 0; then
-                    t_was_err=true
+                t_rtn_from_bg=$?
+                if test ${t_rtn_from_bg} -ne 0; then
+                    t_was_bg_err=true
                     printf "${PROG} (error): \"paged collection\" %s: was error requesting page %s of %s (page size: %s)\n" \
                            "${__t_pqf}"   \
                            "${t_bg_pid_to_pagenum[${one_pid}]}" \
@@ -3130,17 +3310,17 @@ f_get_one_collection_or_die () {
         fi
     done
 
-    if $t_was_err; then
+    if $t_was_bg_err; then
         # More specific error messages should have been printed above, so this
         # more general message is sufficient here. The important thing is that
         # we exit with an error status if something went wrong.
-        printf "${PROG} (error): was error while emitting one or more pages for \"paged collection\"\n" \
+        printf "${PROG} (error): was error while emitting one or more pages for \"paged collection\" %s\n" \
                "${__t_pqf}" 1>&2
         exit 1
     fi
 
-    if $DEBUGGING; then
-        printf "${PROG} (debug): all pages for \"paged collection\" successfully emitted\n" \
+    if $BE_VERBOSE; then
+        printf "${PROG} (info): all pages for \"paged collection\" %s successfully emitted\n" \
                "${__t_pqf}" 1>&2
     fi
     return 0
@@ -3642,6 +3822,8 @@ declare -A longopt_spec=(
     ['get']=0
     ['get-cached']=0
 
+    ['jobs']=1      # -j NUM (--jobs=NUM)
+
     ['update']=0
 
     ['verbose']=0   # -v
@@ -3667,7 +3849,7 @@ if test $# -gt 0; then
     # '--', but we still need to deal with the pathological form --=BLAH (no option name,
     # just a value using the equals-sign syntax).
     #
-    while getopts ':-:hVv' opt
+    while getopts ':-:hj:Vv' opt
     do
         : $PROG \(trace: $LINENO\): opt is: $opt
 
@@ -3852,6 +4034,10 @@ if test $# -gt 0; then
 
             'get-cached')
                 f_set_cmd_mode_get_cached_one_or_die '--get-cached'
+                ;;
+
+            'jobs' | 'j')  # -j NUM (--jobs=NUM)
+                f_set_opt_user_specified_max_bg_procs_or_die "${OPTARG}"  # OPTARG should be an integer; will error-out otherwise
                 ;;
 
             'update')
@@ -4230,10 +4416,10 @@ exit 0
 
   ads-github-cache (-h | --help)
   ads-github-cache (-V | --version)
-  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --update [--] [URL_OR_PATH...]
-  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] (--get | --get-cached) [--] URL_OR_PATH
-  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --clear  [--] [URL_OR_PATH...]
-  ads-github-cache [(-v | --verbose)...] [--cache-dir=DIR] --clear-all
+  ads-github-cache [OPTION...] --update [--] [URL_OR_PATH...]
+  ads-github-cache [OPTION...] (--get | --get-cached) [--] URL_OR_PATH
+  ads-github-cache [OPTION...] --clear  [--] [URL_OR_PATH...]
+  ads-github-cache [OPTION...] --clear-all
 
 
 =head1 DESCRIPTION
@@ -4321,6 +4507,26 @@ not already present in the cache.
 Avoids updating the cache to obtain the item. The data served may be stale.
 
 No network access is performed.
+
+
+=item -j, --jobs=NUM
+
+Specifies the maximum number of requests to the GitHub API that can be created
+simultaneously.
+
+By default, the number is twice the number of CPUs found to be available at
+runtime, but with a hard cap of 20 (to avoid making an excessive number of
+requests on machines that happen to have a larger number of CPUs).
+
+If provided, the user-specified number will be used unconditionally, without
+any cap (assuming the machine has enough resources available). Please use this
+feature responsibly.
+
+Note that values of NUM must be an integer greater than zero (the program will
+reject other values and exit with an error status).
+
+If the value 1 is provided for NUM, the effect will be to eliminate concurrent
+requests.
 
 
 =item --update
@@ -4820,6 +5026,11 @@ difficult to do accidentally.
 =over 4
 
 =item * L<ads-github-tools(7)>
+
+
+=item * L<ads-github-nproc(1)>
+
+Used to determine the number of CPUs available to the process at runtime.
 
 
 =item * L<ads-github-normalize-url(1)>

@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script. -*-Autoconf-*-
 
 dnl SPDX-FileCopyrightText: <text>
-dnl     © 2016, 2017, 2020, 2021 Alan D. Salewski <ads@salewski.email>
+dnl     © 2016, 2017, 2020, 2021, 2022 Alan D. Salewski <ads@salewski.email>
 dnl </text>
 dnl SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -69,10 +69,28 @@ dnl makes the build less easy to follow because of the sheer volume of it.
 dnl
 AM_SILENT_RULES([yes])
 
+dnl Use the 'config.guess' script to compute the canonical host-system type
+dnl variable, 'host', and its three individual parts 'host_cpu',
+dnl 'host_vendor', and 'host_os'.
+dnl
+dnl See section "Specifying target triplets" in the Autoconf manual.
+dnl
+dnl Note: The 'ads-github-tools' build will filter the value found for
+dnl       'host_os' into the 'ads-github-nproc' program, where it may be used
+dnl       at runtime by that program.
+AC_CANONICAL_HOST
+
 
 dnl +------------------------+
 dnl |  Checks for programs.  |
 dnl +------------------------+
+
+dnl Check whether '$GREP -E' works, or else look for the best available
+dnl 'egrep' or 'gegrep' that accepts the longest input lines possible.  Set
+dnl the output variable 'EGREP' to whatever is chosen. The result can be
+dnl overridden by setting the 'EGREP' variable and is cached in the
+dnl 'ac_cv_path_EGREP' variable.
+AC_PROG_EGREP
 
 dnl makes $(LN_S) available in our Makefile.am files
 AC_PROG_LN_S
@@ -203,6 +221,15 @@ if test -z "$FIND"; then
     AC_MSG_ERROR([find not found]);dnl Ha!
 fi
 
+# OPTIONAL tool: getconf
+HAVE_GETCONF_PROG=false
+AC_PATH_PROG([GETCONF_PROG], [getconf])
+if test -n "$GETCONF_PROG"; then
+    HAVE_GETCONF_PROG=true
+fi
+AC_SUBST([HAVE_GETCONF_PROG])
+
+
 # git version control system
 #
 # See: https://git-scm.com/
@@ -247,6 +274,20 @@ if test -z "$JQ_PROG"; then
     AC_MSG_ERROR([jq program not found])
 fi
 
+# OPTIONAL tool: lscpu
+# Note that 'lscpu' program comes from the 'util-linux' package.
+#
+# https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/
+# https://git.kernel.org/pub/scm/utils/util-linux/util-linux.git
+# https://github.com/util-linux/util-linux
+#
+HAVE_LSCPU_PROG=false
+AC_PATH_PROG([LSCPU_PROG], [lscpu])
+if test -n "LSCPU_PROG"; then
+    HAVE_LSCPU_PROG=true
+fi
+AC_SUBST([HAVE_LSCPU_PROG])
+
 AC_PATH_PROG([MKDIR_PROG], [mkdir])
 if test -z "$MKDIR_PROG"; then
     AC_MSG_ERROR([mkdir program not found])
@@ -261,6 +302,16 @@ AC_PATH_PROG([MV_PROG], [mv])
 if test -z "$MV_PROG"; then
     AC_MSG_ERROR([mv program not found])
 fi
+
+# OPTIONAL tool: nproc
+# NOTE that nproc(1) is part of the GNU 'coreutils' package.
+# https://www.gnu.org/software/coreutils/nproc
+HAVE_NPROC_PROG=false
+AC_PATH_PROG([NPROC_PROG], [nproc])
+if test -n "$NPROC_PROG"; then
+    HAVE_NPROC_PROG=true
+fi
+AC_SUBST([HAVE_NPROC_PROG])
 
 AC_PATH_PROG([SED], [sed])
 if test -z "$SED"; then
@@ -324,6 +375,14 @@ AC_PATH_PROG([SLEEP_PROG], [sleep])
 if test -z "$SLEEP_PROG"; then
     AC_MSG_ERROR([sleep not found])  # I know the feeling!
 fi
+
+# OPTIONAL tool: sysctl
+HAVE_SYSCTL_PROG=false
+AC_PATH_PROG([SYSCTL_PROG], [sysctl])
+if test -n "$SYSCTL_PROG"; then
+    HAVE_SYSCTL_PROG=true
+fi
+AC_SUBST([HAVE_SYSCTL_PROG])
 
 AC_PATH_PROG([TAIL_PROG], [tail])
 if test -z "$TAIL_PROG"; then
@@ -470,6 +529,10 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]configure_input[@],Generated from $@.in; do not edit by hand.,g'"'"' \
   -e "s,[@]BUILD_DATE[@],$$(date '"'"'+%Y-%m-%d %H:%M:%S'"'"'),g" \
   \
+  -e '"'"'s,[@]host_cpu[@],$(host_cpu),g'"'"' \
+  -e '"'"'s,[@]host_vendor[@],$(host_vendor),g'"'"' \
+  -e '"'"'s,[@]host_os[@],$(host_os),g'"'"' \
+  \
   -e '"'"'s,[@]bindir[@],$(bindir),g'"'"' \
   -e '"'"'s,[@]datadir[@],$(datadir),g'"'"' \
   -e '"'"'s,[@]exec_prefix[@],$(exec_prefix),g'"'"' \
@@ -491,6 +554,8 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]srcdir[@],$(srcdir),g'"'"' \
   -e '"'"'s,[@]top_builddir[@],$(top_builddir),g'"'"' \
   -e '"'"'s,[@]top_srcdir[@],$(top_srcdir),g'"'"' \
+  \
+  -e '"'"'s,[@]EGREP[@],$(EGREP),g'"'"' \
   \
   -e '"'"'s,[@]PERL[@],$(PERL),g'"'"' \
   -e '"'"'s,[@]POD2MAN[@],$(POD2MAN),g'"'"' \
@@ -516,15 +581,27 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]ECHO_PROG[@],$(ECHO_PROG),g'"'"' \
   -e '"'"'s,[@]EXPR_PROG[@],$(EXPR_PROG),g'"'"' \
   -e '"'"'s,[@]FIND[@],$(FIND),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_GETCONF_PROG[@],$(HAVE_GETCONF_PROG),g'"'"' \
+  -e '"'"'s,[@]GETCONF_PROG[@],$(GETCONF_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]GIT_PROG[@],$(GIT_PROG),g'"'"' \
   -e '"'"'s,[@]GIT_HUB_PROG[@],$(GIT_HUB_PROG),g'"'"' \
   -e '"'"'s,[@]GREP[@],$(GREP),g'"'"' \
   -e '"'"'s,[@]HEAD_PROG[@],$(HEAD_PROG),g'"'"' \
   -e '"'"'s,[@]ID_PROG[@],$(ID_PROG),g'"'"' \
   -e '"'"'s,[@]JQ_PROG[@],$(JQ_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_LSCPU_PROG[@],$(HAVE_LSCPU_PROG),g'"'"' \
+  -e '"'"'s,[@]LSCPU_PROG[@],$(LSCPU_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]MKDIR_PROG[@],$(MKDIR_PROG),g'"'"' \
   -e '"'"'s,[@]MKTEMP_PROG[@],$(MKTEMP_PROG),g'"'"' \
   -e '"'"'s,[@]MV_PROG[@],$(MV_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_NPROC_PROG[@],$(HAVE_NPROC_PROG),g'"'"' \
+  -e '"'"'s,[@]NPROC_PROG[@],$(NPROC_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]SED[@],$(SED),g'"'"' \
   -e '"'"'s,[@]READLINK_PROG[@],$(READLINK_PROG),g'"'"' \
   -e '"'"'s,[@]RM[@],$(RM),g'"'"' \
@@ -533,6 +610,10 @@ do_subst_command='do_subst = sed \
   -e '"'"'s,[@]SHA256SUM_PROG[@],$(SHA256SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SHA3SUM_PROG[@],$(SHA3SUM_PROG),g'"'"' \
   -e '"'"'s,[@]SLEEP_PROG[@],$(SLEEP_PROG),g'"'"' \
+  \
+  -e '"'"'s,[@]HAVE_SYSCTL_PROG[@],$(HAVE_SYSCTL_PROG),g'"'"' \
+  -e '"'"'s,[@]SYSCTL_PROG[@],$(SYSCTL_PROG),g'"'"' \
+  \
   -e '"'"'s,[@]TAIL_PROG[@],$(TAIL_PROG),g'"'"' \
   -e '"'"'s,[@]TR_PROG[@],$(TR_PROG),g'"'"' \
   -e '"'"'s,[@]WC_PROG[@],$(WC_PROG),g'"'"' \
@@ -715,6 +796,10 @@ __poor_mans_expand_file_name () {
 dnl show user a summary of the configured options
 printf "\n"
 printf "${PACKAGE} has been configured with the following options:\n"
+printf "                      host_cpu: %s\n" "`__poor_mans_expand_file_name host_cpu`"
+printf "                   host_vendor: %s\n" "`__poor_mans_expand_file_name host_vendor`"
+printf "                       host_os: %s\n" "`__poor_mans_expand_file_name host_os`"
+printf "\n"
 printf "                        Prefix: %s\n" "`__poor_mans_expand_file_name prefix`"
 printf "                 User binaries: %s\n" "`__poor_mans_expand_file_name bindir`"
 printf "               System binaries: %s\n" "`__poor_mans_expand_file_name sbindir`"
