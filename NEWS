@@ -110,6 +110,9 @@ which they were fixed will be noted here, as well.
     drop from more than two minutes (with the previous behavior) down to
     between nine and eleven seconds.
 
+    See also the entry for issue #81, which describes how the concurrency
+    works by default, and how the user may control its behavior.
+
 
 *** issue #79: housekeeping: GNU Automake used is now 1.16.3
 
@@ -130,6 +133,25 @@ which they were fixed will be noted here, as well.
 *** issue #81: "cache (new feature): add '-j' (--jobs=NUM) to control concurrency"
 
     https://github.com/salewski/ads-github-tools/issues/81
+
+    The 'ads-github-cache' program now accepts a new '-j NUM' (--jobs=NUM)
+    command line option to control the number of outstanding requests that
+    will be made to the GitHub v3 API endpoints when obtaining data for
+    objects represented as "paged collections".
+
+    By default, the number is twice the number of CPUs found to be available
+    at runtime, but with a hard cap of 20 (to avoid making an excessive number
+    of requests on machines that happen to have a larger number of CPUs).
+
+    If provided, the user-specified number will be used unconditionally,
+    without any cap (assuming the machine has enough resources
+    available). Please use this feature responsibly.
+
+    Note that values of NUM must be an integer greater than zero (the program
+    will reject other values and exit with an error status).
+
+    If the value 1 is provided for NUM, the effect will be to eliminate
+    concurrent requests.
 
     This change introduces a new minor utility to the ads-github-tools
     project: 'ads-github-nproc'. This new program simply prints on stdout the
