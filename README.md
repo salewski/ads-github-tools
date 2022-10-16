@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.3.3` (released 2021-03-27), and can
+The latest version of the project is `0.3.4` (released 2022-10-16), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.3.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
@@ -84,13 +84,13 @@ forked GitHub repos:
 ```
 That invocation clones all of a user's GitHub repos for which there is no
 working directory beneath the current directory. It can be thought of as
-creating clones of "all the new stuff (and /just/ the new stuff)"; it operates
+creating clones of "all the new stuff (and *just* the new stuff)"; it operates
 much more quickly than invocations that operate on all of a user's GitHub
 repos (assuming only a minority of them are "missing", which is the common
 case). Note that the `'-m'` (`--missing-only`) option was introduced in the
 version of `ads-github-fetch-all-upstreams` released with `ads-github-tools-0.2.0`.
 
-At the moment (2021-03-27) there are nine tools:
+At the moment (2022-10-16) there are ten tools:
 
 * `ads-github-cache` - Manipulate the `ads-github-tools` cache. Mainly used to
   keep relevant GitHub data at-the-ready for use by the other utilities, but
@@ -116,14 +116,14 @@ At the moment (2021-03-27) there are nine tools:
 * `ads-github-normalize-url` - produces a "normalized" view of a given URL,
   suitable for use in generating an ID. Currently is a quick 'n dirty
   implementation optimized for this sole purpose, so there's no guarantee that
-  the normalized variation of the URL will actually work
+  the normalized variation of the URL will actually work.
 
 * `ads-github-hash-url` - similar in spirit to `git-hash-object(1)`, this tool
   takes a (presumably normalized) URL and emits a checksum for it. Currently
   uses the SHA-3 256-bit algorithm variant.
   
-* `ads-github-show-rate-limits` - Show user's GitHub API rate limits ("core"
-  and "search").
+* `ads-github-show-rate-limits` - Show user's GitHub API rate limits ("core",
+  "search", "graphql", others).
 
 * `ads-github-fetch-all-upstreams` - Operates on the working directories of a
   collection of GitHub-hosted git repositories. The user can specify one or
@@ -142,8 +142,8 @@ At the moment (2021-03-27) there are nine tools:
     
   * `ads-github-tools-0.2.0` added the `--missing-only` option (which implies
     `--clone-if-missing`). The `--missing-only` option limits the program's
-    activity to operating on /only/ the user's "missing" GitHub repos. It can
-    be thought of as creating clones of "all the new stuff (and /just/ the
+    activity to operating on *only* the user's "missing" GitHub repos. It can
+    be thought of as creating clones of "all the new stuff (and *just* the
     new stuff)"; it operates much more quickly than invocations that operate
     on all of a user's GitHub repos (assuming only a minority of them are
     "missing", which is the common case).
@@ -176,8 +176,21 @@ At the moment (2021-03-27) there are nine tools:
   attributes (description, default branch, etc.). Newly created repo is empty
   by default (suitable for importing existing Git repos into GitHub), but can
   optionally be auto-initialized (more suitable for projects being started
-  from scratch). The `ads-github-repo-create` command was added in
-  `ads-github-tools-0.3.1`.
+  from scratch). By default, the newly created repo is created in the GitHub
+  account of the authenticated GitHub user, but the user may specify that the
+  repo should instead be created directly within a GitHub Organization to
+  which the user has access (and sufficient privileges). The
+  `ads-github-repo-create` command was added in `ads-github-tools-0.3.1`.
+
+* `ads-github-nproc` - Prints on stdout the number of CPUs available to the
+  current process. It provides a common interface to the rest of the
+  `ads-github-tools` programs that may need that data. To accomplish its task,
+  however, the program will attempt to use a number of platform specific
+  techniques. The code for this program is adapted from the `AX_COUNT_CPUS`
+  macro from the GNU Autoconf Archive. See `ads-github-nproc(1)` and the
+  comments in the code for original authorship of the macro, as well a
+  licensing that is inherited from the original m4 macro source file (though
+  still GPL compatible).
 
 * `parse-netrc` - Parses the user's `~/.netrc` file to obtain the first
   matching record by host machine name (and optionally by user login
@@ -223,7 +236,7 @@ based systems:
 
 Many of the programs provided by `'ads-github-tools'` are implemented in Bash
 (a Bourne shell derivative). The 'ads-github-tools' project was developed and
-tested using Bash version 5.0.3(1)-release, as shipped by Debian. It uses
+tested using Bash version 5.1.4(1)-release, as shipped by Debian. It uses
 associative arrays which were added in Bash 4.0, so you'll need a 4.x version
 or newer; the `'configure'` script will check for this and exit with an error
 message if a new enough version of Bash is not found. The author would
@@ -346,7 +359,7 @@ GPL version 2, or (at your option) any later version.
 
 See the [COPYING] file for the full license.
 
-Copyright (C) 2016, 2017, 2019, 2020, 2021 Alan D. Salewski <ads@salewski.email>
+Copyright (C) 2016, 2017, 2019, 2020, 2021, 2022 Alan D. Salewski <ads@salewski.email>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
