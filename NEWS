@@ -104,7 +104,7 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-*** issue #74: cache (new feature): update multiple pages for a resource path concurrently
+*** issue #80: cache (new feature): update multiple pages for a resource path concurrently
 
     https://github.com/salewski/ads-github-tools/issues/80
 
