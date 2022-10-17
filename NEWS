@@ -29,7 +29,26 @@ which they were fixed will be noted here, as well.
 
 ** improvements
 
-   (None)
+*** issue #84: "doc: HACKING: update to reflect use of newer versions of the GNU Autotools"
+
+    https://github.com/salewski/ads-github-tools/issues/84
+
+    The 'HACKING' file has been updated to reflect the versions of the GNU
+    Autotools currently being used for the 'ads-github-tools' project. All
+    developers working on the project need to be using the same versions of
+    the Autotools programs in the toolchain. Currently (as of 2022-10), those
+    versions are:
+
+        automake 1.16.3
+        autoconf 2.69
+
+    The build process itself was updated back in issue #79 (part of the
+    'ads-github-tools-0.3.4' release), but those earlier changes neglected to
+    update the documentation in the 'HACKING' file.
+
+    The docs have also been improved by noting where source tarballs may be
+    obtained, which is helpful for side-stepping the need to even have the GNU
+    Autotools installed.
 
 
 * ads-github-tools 0.3.4 (2022-10-16)

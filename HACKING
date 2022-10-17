@@ -15,22 +15,71 @@ If you simply want to build the 'ads-github-tools' project (as opposed to
 hacking on the codebase), the easiest thing to do is obtain a source
 distribution tarball of the version of the project you wish to build.
 
-FIXME: document where to get a source distribution tarball
+Source tarballs are available from the project's website:
 
-This relieves you of having access to specific versions of the GNU Autotools,
-etc.
+    http://salewski.email/ads-github-tools/
+
+specifically on the Downloads Archive page:
+
+    http://salewski.email/ads-github-tools/downloads/
+
+[Writing in 2022-10, the source tarballs are also available in the project's
+Git repository on the 'gh-pages' branch, in the 'downloads/' directory. We
+currently follow this practice because the number of release tarballs is
+small, and doing so makes hosting the project's website via GitHub Pages
+easy. However, that practice may not continue indefinitely, since it
+artificially bloats the size of the Git repo. Since ads-github-tools-0.3.2,
+some of the project's dependencies have been "vendored" (included with the
+project in-tree under the 'src/third-party/' directory), which makes each
+distribution tarball a little over 7M (as opposed to about 250K without those
+vendored sources).]
+
+Using a source tarball relieves you of having access to specific versions of
+the GNU Autotools, etc.
+
+Note that the curl(1) command line in the following example is using POSIX
+shell expansion to request not only the source tarball, but also the various
+checksums files that are made available for it. (Curl needs one '-O' option
+for each such expansion in order to save the content of the files locally,
+hence the '-OOOOOOOOO' option.)
 
     $ cd /usr/local/src
-    .../src$ wget -nd http://some.host.example.com/some/path/ads-github-tools-0.1.0.tar.gz
+    .../src$ curl -OOOOOOOOO -R http://salewski.email/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz{,.SHA-{1,256,384,512},.SHA3-{224,256,384,512}}
     .../src$ ls | grep ads-github
-    ads-github-tools-0.1.0.tar.gz
+    ads-github-tools-0.3.4.tar.gz
+    ads-github-tools-0.3.4.tar.gz.SHA-1
+    ads-github-tools-0.3.4.tar.gz.SHA-256
+    ads-github-tools-0.3.4.tar.gz.SHA-384
+    ads-github-tools-0.3.4.tar.gz.SHA-512
+    ads-github-tools-0.3.4.tar.gz.SHA3-224
+    ads-github-tools-0.3.4.tar.gz.SHA3-256
+    ads-github-tools-0.3.4.tar.gz.SHA3-384
+    ads-github-tools-0.3.4.tar.gz.SHA3-512
     .../src$
-    .../src$ gzip -dc ads-github-tools-0.1.0.gz | tar xf -
-    .../src$ cd ads-github-tools-0.1.0
-    .../src/ads-github-tools-0.1.0$ ./configure --prefix=/path/to/whatever
-    .../src/ads-github-tools-0.1.0$ make
-    .../src/ads-github-tools-0.1.0$ make check
-    .../src/ads-github-tools-0.1.0$ make install
+    .../src$ $ sha512sum --check ads-github-tools-0.3.4.tar.gz.SHA-512
+    ./ads-github-tools-0.3.4.tar.gz: OK
+    .../src$
+    .../src$ gzip -dc ads-github-tools-0.3.4.gz | tar xf -
+    .../src$ cd ads-github-tools-0.3.4
+    .../src/ads-github-tools-0.3.4$ ./configure --prefix=/path/to/whatever
+    .../src/ads-github-tools-0.3.4$ make
+    .../src/ads-github-tools-0.3.4$ make check
+    .../src/ads-github-tools-0.3.4$ make install
+
+Note that the build also supports a "VPATH build", which allows building
+out-of-tree, keeping the source code tree read-only and pristine. This is how
+the author does it:
+
+    ...
+    .../src$ gzip -dc ads-github-tools-0.3.4.gz | tar xf -
+    .../src$ chmod -R a-w ads-github-tools-0.3.4
+    .../src$
+    .../src$ mkdir ads-github-tools-0.3.4-BUILD
+    .../src$ cd ads-github-tools-0.3.4-BUILD
+    .../src/ads-github-tools-0.3.4-BUILD$ ../ads-github-tools-0.3.4/configure --prefix=/path/to/whatever
+    .../src/ads-github-tools-0.3.4-BUILD$ make
+    .../src/ads-github-tools-0.3.4-BUILD$ make check
+    .../src/ads-github-tools-0.3.4-BUILD$ make install
 
 
 
@@ -39,17 +88,17 @@ Building from Git
 
 All developers working on the 'ads-github-tools' project need to be using the
 same versions of the Autotools programs in the toolchain. Currently (as of
-2020-04), those versions are:
+2022-10), those versions are:
 
-    automake 1.16.1
+    automake 1.16.3
     autoconf 2.69
 
 You can determine the versions in your PATH by invoking the respective tools
 with the '--version' option:
 
     $ automake --version
-    automake (GNU automake) 1.16.1
-    Copyright (C) 2018 Free Software Foundation, Inc.
+    automake (GNU automake) 1.16.3
+    Copyright (C) 2020 Free Software Foundation, Inc.
     License GPLv2+: GNU GPL version 2 or later <https://gnu.org/licenses/gpl-2.0.html>
     This is free software: you are free to change and redistribute it.
     There is NO WARRANTY, to the extent permitted by law.
@@ -109,7 +158,7 @@ using that:
 
     $ make distcheck
     $ ls | grep ads-github-tools
-    ads-github-tools-0.1.0.tar.gz
+    ads-github-tools-0.3.5-snapshot.tar.gz
 
 Note: It is not acceptable to simply invoke:
 
@@ -119,31 +168,31 @@ for a release of the 'ads-github-tools'. If the build does not pass the
 'distcheck' verifications, the package is considered broken.
 
 For new releases, the version of the project must be changed in the
-'configure.ac' file, and the 'bootstrap' script re-run to regenerate the GNU
-Autotools generated files (such as the 'configure' program and all
-'Makefile.in' files).
+'configure.ac' file (to remove the '-snapshot' token, etc.), and the
+'bootstrap' script re-run to regenerate the GNU Autotools generated files
+(such as the 'configure' program and all 'Makefile.in' files).
 
 After a release is made, the version number should be incremented with the
 constant '-snapshot' appended to it. Again, the 'boostrap' script should be
 re-run to regenerate the GNU Autotools generated files.
 
 For example, during the development of the code that will be released as
-version 0.1.2, the version number specified in 'configure.ac' should be:
+version 0.3.5, the version number specified in 'configure.ac' should be:
 
-    0.1.2-snapshot
+    0.3.5-snapshot
 
-This eliminates the possibility of producing artifacts labeled just '0.1.2'
+This eliminates the possibility of producing artifacts labeled just '0.3.5'
 which are not the final release.
 
 When it comes time to do the release, the version number in 'configure.ac'
 should be changed to remove the '-snapshot' suffix, and the 'bootstrap' script
 rerun.
 
-    0.1.2
+    0.3.5
 
 The GNU Autotools generated files should be checked into git, and the release
 should be tagged. After the final release is tagged, the version number in
 'configure.ac' should be bumped up for the next development cycle, and the
 'bootstrap' script re-run.
 
-    0.1.3-snapshot
+    0.3.6-snapshot
