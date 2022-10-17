@@ -21,7 +21,7 @@
         <p class="view"><a href="https://github.com/salewski/ads-github-tools">View the Project on GitHub <small>salewski/ads-github-tools</small></a></p>
 
         <ul>
-          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2023-03-27</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.3.tar.gz"><code>ads-github-tools-0.3.3.tar.gz</code></a></li>
+          <li class="li-tarball-link"><span id="lbl-latest-tarball"><strong>Latest (released <code>2022-10-16</code>):</strong></span><br><a href="downloads/ads-github-tools-0.3.4.tar.gz"><code>ads-github-tools-0.3.4.tar.gz</code></a></li>
         </ul>
 
         <ul>
@@ -146,7 +146,7 @@ Installation should be as simple as:
 
 <h2>Progams provided by <tt>ads-github-tools</tt></h2>
 <p>
-At the time of writing (<tt>2021-03-27</tt>) there are nine tools:
+At the time of writing (<tt>2022-10-16</tt>) there are ten tools:
 <ul>
 
   <li><p><strong><tt>ads-github-cache</tt></strong> - Manipulate
@@ -186,7 +186,7 @@ At the time of writing (<tt>2021-03-27</tt>) there are nine tools:
   </li>
   
   <li><p><strong><tt>ads-github-show-rate-limits</tt></strong> - Show user's
-      GitHub API rate limits ("core" and "search").</p>
+      GitHub API rate limits ("core", "search", "graphql", others).</p>
   </li>
 
   <li><p><strong><tt>ads-github-fetch-all-upstreams</tt></strong> - Operates
@@ -268,6 +268,17 @@ At the time of writing (<tt>2021-03-27</tt>) there are nine tools:
       scratch). The <strong><tt>ads-github-repo-create</tt></strong> command
       was added in
       <strong><tt>ads-github-tools-0.3.1</tt></strong>.</p>
+  </li>
+  <li><p><strong><tt>`ads-github-nproc</tt></strong>` - Prints on stdout the
+      number of CPUs available to the current process. It provides a common
+      interface to the rest of the <tt>`ads-github-tools</tt>` programs that may
+      need that data. To accomplish its task, however, the program will
+      attempt to use a number of platform specific techniques. The code for
+      this program is adapted from the <tt>`AX_COUNT_CPUS</tt>` macro from the
+      GNU Autoconf Archive. See <strong><tt>`ads-github-nproc(1)</tt></strong>`
+      and the comments in the code for original authorship of the macro, as
+      well a licensing that is inherited from the original m4 macro source
+      file (though still GPL compatible).</p>
   </li>
   <li><p><strong><tt>parse-netrc</tt></strong> - Parses the user's <tt>'~/.netrc'</tt> file to obtain the first
       matching record by host machine name (and optionally by user login
@@ -375,7 +386,7 @@ See the <a href="https://github.com/salewski/ads-github-tools/blob/master/COPYIN
 
 <p>
 <pre>
-Copyright (C) 2016, 2017, 2019, 2020, 2021 Alan D. Salewski &lt;ads@salewski.email&gt;
+Copyright (C) 2016, 2017, 2019, 2020, 2021, 2022 Alan D. Salewski &lt;ads@salewski.email&gt;
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
