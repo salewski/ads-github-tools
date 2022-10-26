@@ -2320,6 +2320,10 @@ f_get_one_validated_or_die () {
                 printf "${PROG} (debug): found (compressed) object in the cache: %s\n" "${__t_pqf}" 1>&2
             fi
             "${ZSTD_PROG}" --quiet -dcf -- "${__t_obj_rsp_fpath_body_zst}"
+            if test $? -ne 0; then
+                printf "${PROG} (error) was unable to emit compressed object from cache: %s; bailing out\n" "${__t_pqf}" 1>&2
+                exit 1
+            fi
             return 0
         fi
 
@@ -2328,6 +2332,10 @@ f_get_one_validated_or_die () {
                 printf "${PROG} (debug): found object in the cache: %s\n" "${__t_pqf}" 1>&2
             fi
             "${CAT_PROG}" "${__t_obj_rsp_fpath_body}"
+            if test $? -ne 0; then
+                printf "${PROG} (error) was unable to emit non-compressed object from cache: %s; bailing out\n" "${__t_pqf}" 1>&2
+                exit 1
+            fi
             return 0
         fi
 
@@ -2551,6 +2559,10 @@ f_get_one_validated_or_die () {
             printf "${PROG} (debug): emitting (compressed) cached object: %s\n" "${__t_pqf}" 1>&2
         fi
         "${ZSTD_PROG}" --quiet -dcf "${__t_obj_rsp_fpath_body_zst}"
+        if test $? -ne 0; then
+            printf "${PROG} (error) was unable to emit (compressed) cached object: %s; bailing out\n" "${__t_pqf}" 1>&2
+            exit 1
+        fi
         return 0
     fi
 
@@ -2559,6 +2571,10 @@ f_get_one_validated_or_die () {
             printf "${PROG} (debug): emitting cached object: %s\n" "${__t_pqf}" 1>&2
         fi
         "${CAT_PROG}" "${__t_obj_rsp_fpath_body}"
+        if test $? -ne 0; then
+            printf "${PROG} (error) was unable to emit (non-compressed) cached object: %s; bailing out\n" "${__t_pqf}" 1>&2
+            exit 1
+        fi
         return 0
     fi
 
@@ -3185,10 +3201,26 @@ f_get_one_collection_or_die () {
 
 
     # Now we know how many pages of content are available. Note that the
-    # per-page size is controlled by ${gl_const_per_page_size}. We will just
-    # rip through all of them, emitting the content. Because we are making the
-    # requests "through the cache", this will have the side effect of saving
-    # or updating the values in the cache.
+    # per-page size is controlled by ${gl_const_per_page_size}. We now need to
+    # ensure the objects are in the cache (fetch them if they are not), and
+    # emit the object contents on stdout. We do this in two passes:
+    #
+    # First pass:
+    #     In the first pass, we suppress any output to stdout. Because we are
+    #     making the requests "through the cache", this will have the side
+    #     effect of saving or updating the values in the cache. We also may
+    #     spawn multiple subshell processes to allow this work to be done
+    #     cocnurrently.
+    #
+    # Second pass:
+    #     During the second pass, we know that all required objects are
+    #     present in the cache (else our first pass would not have succeeded),
+    #     so we just rip through them sequentially, emitting the content to
+    #     stdout. Note that this pass must not be done concurrently in order
+    #     to avoid having the output from multiple subshells scrambled on
+    #     stdout. See also:
+    #         * issue #85: "cache: serialize data emit"
+    #           https://github.com/salewski/ads-github-tools/issues/85
     #
     # If somebody (probably a developer, while testing) changed the value of
     # ${gl_const_per_page_size}, you may see apparently crazy behavior here.
@@ -3233,10 +3265,13 @@ f_get_one_collection_or_die () {
 
         t_url_plus_paging="${__t_url}?page=${this_page}&per_page=${gl_const_per_page_size}"
 
+        # This invocation is perform for the side effect of priming the cache,
+        # hence the redirect of stdout to /dev/null.
+        #
         BE_VERBOSE=$BE_VERBOSE \
         DEBUGGING=$DEBUGGING   \
         TRACING=$TRACING       \
-          f_perform_do_get_one_or_die "${t_url_plus_paging}" &
+          f_perform_do_get_one_or_die "${t_url_plus_paging}" > /dev/null &
         t_bg_pid_to_pagenum[$!]="${this_page}"  # capture pid of background process so we can later 'wait' on it
 
         while test ${#t_bg_pid_to_pagenum[@]} -eq $t_max_bg_procs; do
@@ -3319,9 +3354,36 @@ f_get_one_collection_or_die () {
         exit 1
     fi
 
+    # Second pass over pages: emit object content to stdout
+    #
+    # This pass is deliberately done sequentially (not concurrently); see
+    # notes above.
+    #
+    this_page=0  # reset
+    local FETCH_ONLY_FROM_CACHE_hold=$FETCH_ONLY_FROM_CACHE
+    FETCH_ONLY_FROM_CACHE=true
+    while test ${this_page} -lt ${t_last_page_number}; do
+        (( ++this_page ))
+
+        t_url_plus_paging="${__t_url}?page=${this_page}&per_page=${gl_const_per_page_size}"
+
+        # f_perform_do_get_one_or_die() keys off of $FETCH_ONLY_FROM_CACHE;
+        # since we primed the cache with our objects above, it is safe to
+        # request the objects be emitted only from the cache.
+
+        f_perform_do_get_one_or_die "${t_url_plus_paging}"
+    done
+    FETCH_ONLY_FROM_CACHE=$FETCH_ONLY_FROM_CACHE_hold  # restore
+
+    local t_action='emitted'
+    if $DO_UPDATE; then
+        t_action='updated'
+    fi
+
     if $BE_VERBOSE; then
-        printf "${PROG} (info): all pages for \"paged collection\" %s successfully emitted\n" \
-               "${__t_pqf}" 1>&2
+        printf "${PROG} (info): all pages for \"paged collection\" %s successfully %s\n" \
+               "${__t_pqf}" \
+               "${t_action}" 1>&2
     fi
     return 0
 }

@@ -24,7 +24,21 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (None)
+*** issue #85: "cache: serialize data emit"
+
+    https://github.com/salewski/ads-github-tools/issues/85
+
+    The concurrency features added to the 'ads-github-cache' tool in the
+    ads-github-tools-0.3.4 release (see issues #80 and #81) inadvertently
+    broke some operations that emitted cached data. Data was not only
+    concurrently fetched for updating the cache, but was sometimes emitted
+    concurrently, as well, causing the output to be garbled (mainly in the
+    form of JSON that was no longer well-formed due to being intermixed from
+    multiple emitting background processes). This has been fixed. The data is
+    still fetched concurrently (from the upstream GitHub v3 API endpoints),
+    but emitting the data from cached objects now happens sequentially as one
+    would expect. This is mainly relevant for paths that represent "paged
+    collections", where multiple pages of data are available.
 
 
 ** improvements
