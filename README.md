@@ -24,13 +24,13 @@ The 'ads-github-tools' project web site is:
 
    * https://salewski.github.io/ads-github-tools/
 
-The latest version of the project is `0.3.4` (released 2022-10-16), and can
+The latest version of the project is `0.3.5` (released 2022-10-26), and can
 be downloaded from:
 
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA-1
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA-256
-   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.4.tar.gz.SHA3-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.5.tar.gz
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.5.tar.gz.SHA-1
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.5.tar.gz.SHA-256
+   * https://salewski.github.io/ads-github-tools/downloads/ads-github-tools-0.3.5.tar.gz.SHA3-256
 
 See the [NEWS] file for changes for this release.
     
