@@ -1,7 +1,9 @@
 #! @BASH_SH@ -
 # @configure_input@
 
-# SPDX-FileCopyrightText: <text> © 2020, 2022 Alan D. Salewski <ads@salewski.email> </text>
+# SPDX-FileCopyrightText: <text>
+#     © 2020, 2022, 2024 Alan D. Salewski <ads@salewski.email>
+# </text>
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 #     This program is free software; you can redistribute it and/or modify
@@ -42,7 +44,7 @@ declare -r PROG='ads-github-repo-create'
 
 set -o pipefail
 
-declare -r COPYRIGHT_DATES='2020, 2022'
+declare -r COPYRIGHT_DATES='2020, 2022, 2024'
 
 # declare -r MAINTAINER='@DFLT_MAINTAINER_FULL@'
 declare -r MAINTAINER='@PACKAGE_BUGREPORT@'  # value filtered-in at build time
@@ -1944,7 +1946,7 @@ fi
 # Sanity check: We just created the repo directly, so it should not look like
 # a GitHub fork.
 if test "${is_fork}" = 'false'; then :; else
-    printf "${PROG} (error): 'is_fork' attribute on newly create repo expected to be 'true', but is: %s; bailing out\n" \
+    printf "${PROG} (error): 'is_fork' attribute on newly created repo expected to be 'true', but is: %s; bailing out\n" \
            "${is_fork}" 1>&2
     exit 1
 fi
@@ -1953,13 +1955,13 @@ fi
 # requested it to be.
 if ${FLG_NEW_REPO_IS_PUBLIC}; then
     if test "${is_private}" = 'false'; then :; else
-        printf "${PROG} (error): 'is_private' attribute on newly create repo expected to be 'false', but is: %s; bailing out\n" \
+        printf "${PROG} (error): 'is_private' attribute on newly created repo expected to be 'false', but is: %s; bailing out\n" \
                "${is_private}" 1>&2
         exit 1
     fi
 else
     if test "${is_private}" = 'true'; then :; else
-        printf "${PROG} (error): 'is_private' attribute on newly create repo expected to be 'true', but is: %s; bailing out\n" \
+        printf "${PROG} (error): 'is_private' attribute on newly created repo expected to be 'true', but is: %s; bailing out\n" \
                "${is_private}" 1>&2
         exit 1
     fi
@@ -3538,7 +3540,7 @@ them as described in the C<BUGS> file.
 
 =head1 COPYRIGHT
 
-Copyright 2020, 2022 Alan D. Salewski
+Copyright 2020, 2022, 2024 Alan D. Salewski
 
 =cut
 
