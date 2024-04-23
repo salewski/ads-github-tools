@@ -38,6 +38,20 @@ which they were fixed will be noted here, as well.
     :   ads-github-repo-create (error): newly created repo verification:...
 
 
+*** issue #92: 'repo-create: fix error messages "...on newly create repo..."'
+
+    https://github.com/salewski/ads-github-tools/issues/92
+
+    Corrected a bunch of typos in error messages of the
+    'ads-github-repo-create' program. They formerly read:
+
+    :   ads-github-repo-create (error): 'foo' attribute on newly create repo...
+
+    and have now been corrected to read:
+
+    :   ads-github-repo-create (error): 'foo' attribute on newly created repo...
+
+
 ** improvements
 
    (None)
