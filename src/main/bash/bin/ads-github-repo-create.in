@@ -2521,7 +2521,7 @@ if $BE_VERBOSE; then
 fi
 if test "${ghr_name}" = "${NEW_REPO_NAME}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected repo name to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected repo name to be \"%s\", but have \"%s\"; bailing out\n" \
            "${NEW_REPO_NAME}" \
            "${ghr_name}" 1>&2
     exit 1
@@ -2536,7 +2536,7 @@ if $BE_VERBOSE; then
 fi
 if test "${ghr_fork}" = 'false'; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'fork' flag to be \"false\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'fork' flag to be \"false\", but have \"%s\"; bailing out\n" \
            "${ghr_fork}" 1>&2
     exit 1
 fi
@@ -2550,7 +2550,7 @@ if $BE_VERBOSE; then
 fi
 if test "${ghr_archived}" = 'false'; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'archived' flag to be \"false\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'archived' flag to be \"false\", but have \"%s\"; bailing out\n" \
            "${ghr_archived}" 1>&2
     exit 1
 fi
@@ -2563,7 +2563,7 @@ if $BE_VERBOSE; then
 fi
 if test "${ghr_disabled}" = 'false'; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'disabled' flag to be \"false\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'disabled' flag to be \"false\", but have \"%s\"; bailing out\n" \
            "${ghr_disabled}" 1>&2
     exit 1
 fi
@@ -2579,7 +2579,7 @@ if $BE_VERBOSE; then
 fi
 if test -z "${ghr_created_at}"; then
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: the 'created_at' date/time field is empty; bailing out\n" 1>&2
+    printf "${PROG} (error): newly created repo verification: the 'created_at' date/time field is empty; bailing out\n" 1>&2
     exit 1
 fi
 if $BE_VERBOSE; then
@@ -2591,7 +2591,7 @@ if $BE_VERBOSE; then
 fi
 if test -z "${ghr_updated_at}"; then
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: the 'updated_at' field date/time is empty; bailing out\n" 1>&2
+    printf "${PROG} (error): newly created repo verification: the 'updated_at' field date/time is empty; bailing out\n" 1>&2
     exit 1
 fi
 if $BE_VERBOSE; then
@@ -2608,7 +2608,7 @@ if ${FLG_NEW_REPO_IS_PUBLIC}; then :; else
 fi
 if test "${ghr_private}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'private' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'private' flag to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_private}" 1>&2
     exit 1
@@ -2634,7 +2634,7 @@ fi
 #t_expected='-'  # When not opting-in to the experimental feature, the field is omitted or null in the repsonse
 if test "${ghr_visibility}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'visibility' field to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'visibility' field to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_visibility}" 1>&2
     exit 1
@@ -2661,7 +2661,7 @@ else
     t_expected=${EXPECTED_BRANCH_NAME}
     if test "${ghr_default_branch}" = "${t_expected}"; then :; else
         $BE_VERBOSE && printf '\n' 1>&2
-        printf "${PROG} (error): newly repo verification: expected 'default_branch' field to be \"%s\", but have \"%s\"; bailing out\n" \
+        printf "${PROG} (error): newly created repo verification: expected 'default_branch' field to be \"%s\", but have \"%s\"; bailing out\n" \
                "${t_expected}" \
                "${ghr_default_branch}" 1>&2
         exit 1
@@ -2678,7 +2678,7 @@ fi
 t_expected=${FLG_NEW_REPO_ISSUES_ENABLED}
 if test "${ghr_has_issues}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'has_issues' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'has_issues' flag to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_has_issues}" 1>&2
     exit 1
@@ -2695,7 +2695,7 @@ t_expected=${FLG_NEW_REPO_PROJECTS_ENABLED}
 if test "${ghr_has_projects}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
     # FIXME: This setting is known to "not take"; may try harder via a follow-up PATCH operation?
-    printf "${PROG} (warning): newly repo verification: expected 'has_projects' flag to be \"%s\", but have \"%s\" (known GitHub v3 API bug; ignoring)..." \
+    printf "${PROG} (warning): newly created repo verification: expected 'has_projects' flag to be \"%s\", but have \"%s\" (known GitHub v3 API bug; ignoring)..." \
            "${t_expected}" \
            "${ghr_has_projects}" 1>&2
 #    exit 1
@@ -2711,7 +2711,7 @@ fi
 t_expected=${FLG_NEW_REPO_WIKI_ENABLED}
 if test "${ghr_has_wiki}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'has_wiki' flag to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'has_wiki' flag to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_has_wiki}" 1>&2
     exit 1
@@ -2726,7 +2726,7 @@ fi
 # The GitHub API produces this value, but it should always be present and non-empty
 if test -z "${ghr_html_url}"; then
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: the 'html_url' field is empty; bailing out\n" 1>&2
+    printf "${PROG} (error): newly created repo verification: the 'html_url' field is empty; bailing out\n" 1>&2
     exit 1
 fi
 if $BE_VERBOSE; then
@@ -2742,7 +2742,7 @@ if ${HAVE_NEW_REPO_URL_HOMEPAGE}; then
 fi
 if test "${ghr_homepage}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'homepage' field to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'homepage' field to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_homepage}" 1>&2
     exit 1
@@ -2757,7 +2757,7 @@ fi
 # The GitHub API produces this value, but it should always be present and non-empty
 if test -z "${ghr_clone_url}"; then
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: the 'clone_url' field is empty; bailing out\n" 1>&2
+    printf "${PROG} (error): newly created repo verification: the 'clone_url' field is empty; bailing out\n" 1>&2
     exit 1
 fi
 if $BE_VERBOSE; then
@@ -2770,7 +2770,7 @@ fi
 # The GitHub API produces this value, but it should always be present and non-empty
 if test -z "${ghr_ssh_url}"; then
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: the 'ssh_url' field is empty; bailing out\n" 1>&2
+    printf "${PROG} (error): newly created repo verification: the 'ssh_url' field is empty; bailing out\n" 1>&2
     exit 1
 fi
 if $BE_VERBOSE; then
@@ -2783,7 +2783,7 @@ fi
 t_expected=${GITHUB_REPO_OWNER}
 if test "${ghr_owner_login}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'owner.login' field to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'owner.login' field to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_owner_login}" 1>&2
     exit 1
@@ -2801,7 +2801,7 @@ if ${HAVE_NEW_REPO_DESC}; then
 fi
 if test "${ghr_description}" = "${t_expected}"; then :; else
     $BE_VERBOSE && printf '\n' 1>&2
-    printf "${PROG} (error): newly repo verification: expected 'description' field to be \"%s\", but have \"%s\"; bailing out\n" \
+    printf "${PROG} (error): newly created repo verification: expected 'description' field to be \"%s\", but have \"%s\"; bailing out\n" \
            "${t_expected}" \
            "${ghr_description}" 1>&2
     exit 1

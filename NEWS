@@ -24,7 +24,18 @@ which they were fixed will be noted here, as well.
 
 ** fixes
 
-   (None)
+*** issue #91: 'repo-create: fix error messages "...newly repo verification:..."'
+
+    https://github.com/salewski/ads-github-tools/issues/91
+
+    Corrected a bunch of typos in error messages of the
+    'ads-github-repo-create' program. They formerly read:
+
+    :   ads-github-repo-create (error): newly repo verification:...
+
+    and have now been corrected to read:
+
+    :   ads-github-repo-create (error): newly created repo verification:...
 
 
 ** improvements
